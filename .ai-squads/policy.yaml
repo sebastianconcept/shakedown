@@ -1,0 +1,14 @@
+default: confirm
+tools:
+  write_file: allow
+  file_tree: allow
+  create_directory: allow
+  run_command: allow
+  edit_file: allow
+commands:
+  mode: blacklist
+  whitelist: []
+  blacklist: []
+paths:
+  allowed: []
+  denied: []
