@@ -1,0 +1,12 @@
+[package]
+name = "shakedown-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "shakedown"
+path = "src/main.rs"
+
+[dependencies]

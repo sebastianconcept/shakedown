@@ -3,20 +3,6 @@
 version = 4
 
 [[package]]
-name = "lib"
-version = "0.1.0"
-dependencies = [
- "macros",
-]
-
-[[package]]
-name = "macros"
-version = "0.1.0"
-dependencies = [
- "quote",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -32,6 +18,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "shakedown"
+version = "0.1.0"
+dependencies = [
+ "shakedown-macros",
+]
+
+[[package]]
+name = "shakedown-cli"
+version = "0.1.0"
+
+[[package]]
+name = "shakedown-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
 ]
 
 [[package]]
