@@ -9,3 +9,38 @@ publish = false
 shakedown-macros = { path = "../macros" }
 thiserror = "1"
 displaydoc = "0.2"
+
+[features]
+default = []
+# Kafka integration with real infrastructure (requires Docker)
+# Includes: rdkafka, testcontainers, testcontainers-modules
+kafka = ["dep:rdkafka", "dep:testcontainers", "dep:testcontainers-modules"]
+# Postgres integration with real infrastructure (requires Docker)
+# Includes: sqlx, testcontainers
+postgres = ["dep:sqlx", "dep:testcontainers"]
+# MariaDB integration with real infrastructure (requires Docker)
+# Includes: sqlx, testcontainers
+mariadb = ["dep:sqlx", "dep:testcontainers"]
+
+# Optional dependencies behind kafka feature
+[dependencies.rdkafka]
+version = "0.12"
+features = ["ssl"]
+optional = true
+
+[dependencies.testcontainers]
+version = "0.26"
+optional = true
+
+[dependencies.testcontainers-modules]
+version = "0.13"
+default-features = false
+features = ["kafka"]
+optional = true
+
+# SQLx for Postgres/MariaDB support
+[dependencies.sqlx]
+version = "0.8"
+default-features = false
+features = ["runtime-tokio-rustls", "postgres", "mysql"]
+optional = true
