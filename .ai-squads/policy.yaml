@@ -1,12 +1,13 @@
 default: confirm
 tools:
-  run_command: allow
-  edit_file: allow
-  write_file: allow
-  create_directory: allow
   file_tree: allow
-  task_complete: allow
   run_quality_command: allow
+  run_command: allow
+  create_directory: allow
+  task_complete: allow
+  read_note: allow
+  write_file: allow
+  edit_file: allow
 commands:
   mode: blacklist
   whitelist: []
