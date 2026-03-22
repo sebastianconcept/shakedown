@@ -33,15 +33,48 @@ pub enum LifecycleState {
     Failed(Phase, Box<dyn std::error::Error + Send + Sync>),
 }
 
+/// The environment backend abstraction.
+///
+/// This trait abstracts the underlying infrastructure where scenarios run,
+/// allowing for different backends (Docker, local processes, cloud environments, etc.)
+pub trait EnvironmentBackend: Send + Sync {
+    /// Provision a single resource and return its binding.
+    fn provision_resource(&self, resource: &mut dyn Resource) -> Result<()>;
+
+    /// Check readiness of all resources.
+    fn check_readiness(&self) -> Result<()>;
+
+    /// Teardown all resources.
+    fn teardown(&self) -> Result<()>;
+}
+
+/// A default stub environment backend that does nothing.
+#[derive(Debug, Default)]
+pub struct NoopEnvironmentBackend;
+
+impl EnvironmentBackend for NoopEnvironmentBackend {
+    fn provision_resource(&self, _resource: &mut dyn Resource) -> Result<()> {
+        Ok(())
+    }
+
+    fn check_readiness(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn teardown(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// Represents the context for a scenario run.
 #[derive(Default)]
-pub struct TestContext {
+pub struct Context {
     /// Registered resources
     resources: Vec<Box<dyn Resource>>,
 }
 
-impl TestContext {
-    /// Create a new empty test context.
+impl Context {
+    /// Create a new empty context.
     pub fn new() -> Self {
         Self {
             resources: Vec::new(),
@@ -63,9 +96,9 @@ impl TestContext {
 ///
 /// Returns `Ok(())` if the scenario completed successfully.
 /// Returns an error with appropriate classification based on which phase failed.
-pub fn run_scenario<F, Fut>(_ctx: &mut TestContext, _scenario_fn: F) -> Result<()>
+pub fn run_scenario<F, Fut>(_ctx: &mut Context, _scenario_fn: F) -> Result<()>
 where
-    F: Fn(&mut TestContext) -> Fut,
+    F: Fn(&mut Context) -> Fut,
     Fut: std::future::Future,
 {
     // Provision phase
@@ -116,27 +149,15 @@ mod tests {
     }
 
     #[test]
-    fn test_test_context_new() {
-        let ctx = TestContext::new();
+    fn test_context_new() {
+        let ctx = Context::new();
         assert!(ctx.resources().is_empty());
     }
 
     #[test]
-    fn test_test_context_register_resource() {
-        struct FakeResource;
-
-        impl crate::resources::Resource for FakeResource {
-            fn apply_default_seed(&self) {}
-
-            fn check_ready(&self) -> bool {
-                true
-            }
-
-            fn teardown(self) {}
-        }
-
-        let mut ctx = TestContext::new();
-        ctx.register_resource(FakeResource {});
+    fn test_context_register_resource() {
+        let mut ctx = Context::new();
+        ctx.register_resource(crate::resources::FakeResource {});
         assert_eq!(ctx.resources().len(), 1);
     }
 
@@ -144,5 +165,11 @@ mod tests {
     fn test_lifecycle_state() {
         // Just check that we can construct the enum variants
         let _not_started = LifecycleState::NotStarted;
+    }
+
+    #[test]
+    fn test_noop_environment_backend() {
+        let backend = NoopEnvironmentBackend {};
+        assert!(backend.check_readiness().is_ok());
     }
 }

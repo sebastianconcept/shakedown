@@ -2,22 +2,25 @@
 
 Procedural macros for Shakedown testing framework.
 
-## Status: Stub
+## Status: Foundation - register_resource! implemented
 
-This crate provides procedural macros (`#[system_test]`, `#[faulty_test]`, etc.) that expand to calls into the **`shakedown`** library API.
+This crate provides procedural macros for the Shakedown testing framework.
 
 ### Current status
 
 - **Milestone**: `mvp-foundation`
-- **Status**: Stub
-- **Purpose**: Workspace layout and linkage smoke test
+- **Status**: Implemented
+- **Purpose**: Core procedural macros for resource registration
 
 ### What's implemented
 
-This crate currently contains only the basic structure:
-- Package name: `shakedown-macros`
-- Proc-macro library setup
-- Dependencies (_quote_, etc.)
+This crate currently implements:
+
+- **`register_resource!`** - Declarative resource registration macro
+  - Attribute macro for marking custom resources
+  - Generates boilerplate for Shakedown resource trait implementation
+
+- **`default_greeting!`** - Compile-time greeting string macro (for tests)
 
 ### What's next
 

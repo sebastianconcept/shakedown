@@ -66,6 +66,12 @@ pub mod resources;
 
 #[doc(inline)]
 pub use crate::error::{InfrastructureError, InternalError, Result, ScenarioError, ShakedownError};
+pub use crate::lifecycle::{
+    run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, Phase,
+};
+pub use crate::resources::{
+    CloneResource, FakeResource, Resource, ResourceBinding, ResourceConfig,
+};
 
 /// Returns the compile-time default greeting emitted by the `macros` crate.
 pub fn greeting() -> &'static str {
@@ -94,5 +100,30 @@ mod tests {
             source: Box::new(std::io::Error::other("test")),
         };
         let _internal: InternalError = InternalError::Bug("test".to_string());
+    }
+
+    #[test]
+    fn test_context_and_types() {
+        // Verify Context and other core types are accessible
+        let _ctx = Context::new();
+        let _backend = NoopEnvironmentBackend {};
+
+        // Verify Resource trait is accessible
+        struct TestResource;
+        impl Resource for TestResource {
+            fn provision(_ctx: &mut Context) -> Self {
+                TestResource
+            }
+
+            fn apply_default_seed(&self) {}
+
+            fn check_ready(&self) -> bool {
+                true
+            }
+
+            fn teardown(self) {}
+        }
+
+        let _resource = TestResource::provision(&mut Context::new());
     }
 }
