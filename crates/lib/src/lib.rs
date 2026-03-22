@@ -61,11 +61,13 @@
 //! ```
 
 pub mod error;
+pub mod event;
 pub mod lifecycle;
 pub mod resources;
 
 #[doc(inline)]
 pub use crate::error::{InfrastructureError, InternalError, Result, ScenarioError, ShakedownError};
+pub use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
 pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, Phase,
 };
@@ -105,7 +107,7 @@ mod tests {
     #[test]
     fn test_context_and_types() {
         // Verify Context and other core types are accessible
-        let _ctx = Context::new();
+        let mut ctx = Context::new();
         let _backend = NoopEnvironmentBackend {};
 
         // Verify Resource trait is accessible
@@ -124,6 +126,11 @@ mod tests {
             fn teardown(self) {}
         }
 
-        let _resource = TestResource::provision(&mut Context::new());
+        let _resource = TestResource::provision(&mut ctx);
+
+        // Verify EventLog is accessible
+        let mut event_log = crate::EventLog::new();
+        event_log.append_raw(EventLevel::Info, "test", "test message");
+        assert_eq!(event_log.len(), 1);
     }
 }
