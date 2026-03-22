@@ -12,7 +12,35 @@
 //! If any phase fails, the lifecycle will attempt to run teardown for resources that were
 //! successfully provisioned. The error classification distinguishes between scenario errors
 //! (user logic/assertions) and infrastructure errors (provision/readiness failures).
+//!
+//! ## Event logging
+//!
+//! The lifecycle emits structured events during each phase. These events are collected in an
+//! [`EventLog`] that can be retrieved for debugging or failure analysis.
+//!
+//! # Example
+//!
+//! ```ignore
+//! use shakedown::{run_scenario, Context, EventLog};
+//!
+//! async fn my_scenario(_ctx: &mut Context) {
+//!     // Scenario implementation
+//! }
+//!
+//! #[tokio::test]
+//! async fn test_scenario_with_events() {
+//!     let mut ctx = Context::new();
+//!     let mut event_log = EventLog::new();
+//!
+//!     run_scenario(&mut ctx, my_scenario, &mut event_log).await.unwrap();
+//!
+//!     // Retrieve events after scenario completion
+//!     let events = event_log.events();
+//!     assert!(events.iter().any(|e| e.source == "scenario" && e.level == EventLevel::Info));
+//! }
+//! ```
 
+use crate::event::{EventLevel, EventLog};
 use crate::resources::{FakeResource, Resource};
 use crate::{InfrastructureError, Result};
 
@@ -153,10 +181,15 @@ impl Default for Context {
 /// The return value from the scenario function and assertion results are not currently
 /// captured as errors (this may be added in future milestones).
 ///
+/// # Event logging
+///
+/// Events emitted during the scenario run are appended to the provided [`EventLog`].
+/// After completion, callers can retrieve all events for debugging or analysis.
+///
 /// # Example
 ///
 /// ```ignore
-/// use shakedown::{Context, run_scenario};
+/// use shakedown::{Context, run_scenario, EventLog};
 ///
 /// async fn my_scenario(_ctx: &mut Context) {
 ///     // Scenario implementation
@@ -165,16 +198,25 @@ impl Default for Context {
 /// #[tokio::test]
 /// async fn test_scenario() {
 ///     let mut ctx = Context::new();
-///     // Register your resources here
-///     run_scenario(&mut ctx, my_scenario).await.unwrap();
+///     let mut event_log = EventLog::new();
+///
+///     run_scenario(&mut ctx, my_scenario, &mut event_log).await.unwrap();
+///
+///     // Retrieve events after scenario completion
+///     let events = event_log.events();
 /// }
 /// ```
-pub async fn run_scenario<F, Fut>(ctx: &mut Context, scenario_fn: F) -> Result<()>
+pub async fn run_scenario<F, Fut>(
+    ctx: &mut Context,
+    scenario_fn: F,
+    event_log: &mut EventLog,
+) -> Result<()>
 where
-    F: Fn(&mut Context) -> Fut,
+    F: Fn(&mut Context, &mut EventLog) -> Fut,
     Fut: std::future::Future,
 {
     // Provision phase
+    event_log.append_raw(EventLevel::Info, "lifecycle", "Starting provision phase");
     let num_resources = ctx.resources.len();
     for i in 0..num_resources {
         // Remove each resource, provision it, then put it back
@@ -182,6 +224,12 @@ where
         match ctx.environment_backend_mut().provision_resource(resource) {
             Ok(()) => {}
             Err(e) => {
+                // Log the provision failure
+                event_log.append_raw(
+                    EventLevel::Error,
+                    "lifecycle",
+                    format!("Provision failed: {}", e),
+                );
                 // On provision failure, tear down what we can
                 let _ = ctx.environment_backend().teardown();
                 return Err(InfrastructureError::Provision {
@@ -194,7 +242,13 @@ where
     }
 
     // Readiness phase
+    event_log.append_raw(EventLevel::Info, "lifecycle", "Starting readiness phase");
     if let Err(e) = ctx.environment_backend().check_readiness() {
+        event_log.append_raw(
+            EventLevel::Error,
+            "lifecycle",
+            format!("Readiness failed: {}", e),
+        );
         // On readiness failure, tear down what we can
         let _ = ctx.environment_backend().teardown();
         return Err(InfrastructureError::Readiness {
@@ -205,18 +259,22 @@ where
     }
 
     // Seed phase
+    event_log.append_raw(EventLevel::Info, "lifecycle", "Starting seed phase");
     for resource in &ctx.resources {
         resource.apply_default_seed();
     }
 
     // Run phase
+    event_log.append_raw(EventLevel::Info, "lifecycle", "Starting run phase");
     // Note: The scenario function returns (), so we can't catch errors from it directly.
     // In a real implementation, the scenario function might return a Result that we could handle.
-    let _ = scenario_fn(ctx).await;
+    let _ = scenario_fn(ctx, event_log).await;
 
     // Assert phase (in a real implementation, this would run assertions)
+    event_log.append_raw(EventLevel::Info, "lifecycle", "Starting assert phase");
 
     // Teardown phase - always runs, even if previous phases failed
+    event_log.append_raw(EventLevel::Info, "lifecycle", "Starting teardown phase");
     let _ = ctx.environment_backend().teardown();
 
     Ok(())
@@ -225,6 +283,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::Event;
+    use crate::event::EventSnapshot;
 
     #[test]
     fn test_phase_display() {
@@ -265,5 +325,32 @@ mod tests {
     fn test_noop_environment_backend() {
         let backend = NoopEnvironmentBackend {};
         assert!(backend.check_readiness().is_ok());
+    }
+
+    #[test]
+    fn test_event_log_append_and_retrieval() {
+        // Test the core event log functionality: append and retrieval
+        let mut log = EventLog::new();
+
+        // Append events
+        log.append(Event::info("scenario", "test event 1"));
+        log.append(Event::debug("resource:fake", "test event 2"));
+
+        // Verify append worked
+        assert_eq!(log.len(), 2);
+
+        // Retrieve events
+        let events = log.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].message, "test event 1");
+        assert_eq!(events[1].source, "resource:fake");
+
+        // Test snapshot
+        let _snapshot: EventSnapshot = log.clone().into();
+        assert_eq!(log.len(), 2);
+
+        // Test clear
+        log.clear();
+        assert!(log.is_empty());
     }
 }
