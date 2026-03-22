@@ -35,9 +35,7 @@ shakedown/
 
 ## See also
 
-- [Product PRD](https://github.com/your-org/shakedown/blob/main/docs/feature/mvp-foundation/PRD.md)
-- [Technical SPECS](https://github.com/your-org/shakedown/blob/main/docs/feature/mvp-foundation/SPECS.md)
-- [TECH-STACK.md](https://github.com/your-org/shakedown/blob/main/docs/TECH-STACK.md)
+Product docs (PRD, SPECS, TECH-STACK, adoption guides) live in the **adopted documentation root**, not in this repo — see the workspace [`docs/README.md`](../../docs/README.md).
 
 ## Example
 
