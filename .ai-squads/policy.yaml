@@ -1,9 +1,10 @@
 default: confirm
 tools:
-  write_file: allow
-  file_tree: allow
-  create_directory: allow
   run_command: allow
+  write_file: allow
+  create_directory: allow
+  run_quality_command: allow
+  file_tree: allow
   edit_file: allow
 commands:
   mode: blacklist

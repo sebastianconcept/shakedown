@@ -7,3 +7,5 @@ publish = false
 
 [dependencies]
 shakedown-macros = { path = "../macros" }
+thiserror = "1"
+displaydoc = "0.2"

@@ -60,6 +60,13 @@
 //! }
 //! ```
 
+pub mod error;
+pub mod lifecycle;
+pub mod resources;
+
+#[doc(inline)]
+pub use crate::error::{InfrastructureError, InternalError, Result, ScenarioError, ShakedownError};
+
 /// Returns the compile-time default greeting emitted by the `macros` crate.
 pub fn greeting() -> &'static str {
     shakedown_macros::default_greeting!()
@@ -76,5 +83,16 @@ mod tests {
         let message = greeting();
         // Then it is the expected phrase
         assert_eq!(message, "Hello, shakedown!");
+    }
+
+    #[test]
+    fn error_hierarchy_compiles() {
+        // Verify all error types are accessible
+        let _scenario: ScenarioError = ScenarioError::Assertion("test".to_string());
+        let _infra: InfrastructureError = InfrastructureError::Provision {
+            resource: "test".to_string(),
+            source: Box::new(std::io::Error::other("test")),
+        };
+        let _internal: InternalError = InternalError::Bug("test".to_string());
     }
 }
