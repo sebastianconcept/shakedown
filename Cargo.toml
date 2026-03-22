@@ -4,5 +4,5 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-# Minimum supported Rust version: stable-only, tested against this floor in CI if desired.
-rust-version = "1.74"
+# Minimum supported Rust version: aligned with testcontainers-rs v0.27.1 requirement (D-5)
+rust-version = "1.88"
