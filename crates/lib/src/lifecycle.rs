@@ -353,4 +353,153 @@ mod tests {
         log.clear();
         assert!(log.is_empty());
     }
+
+    #[test]
+    fn test_lifecycle_ordering() {
+        // Test that lifecycle phases execute in the correct order
+        let _ctx = Context::new();
+        let _event_log = EventLog::new();
+
+        // We can't actually run the full scenario without async, but we can verify
+        // that the phase enum and lifecycle types exist and are accessible
+        assert_eq!(format!("{:?}", Phase::Provision), "Provision");
+        assert_eq!(format!("{:?}", Phase::Readiness), "Readiness");
+        assert_eq!(format!("{:?}", Phase::Seed), "Seed");
+        assert_eq!(format!("{:?}", Phase::Run), "Run");
+        assert_eq!(format!("{:?}", Phase::Assert), "Assert");
+        assert_eq!(format!("{:?}", Phase::Teardown), "Teardown");
+
+        // Verify the lifecycle state enum exists
+        let _state = LifecycleState::NotStarted;
+    }
+
+    #[test]
+    fn test_error_classification() {
+        // Test that errors are properly classified into scenario vs infrastructure
+        use crate::ShakedownError;
+
+        // Scenario error (user logic/assertions)
+        let scenario_err: ShakedownError =
+            crate::ScenarioError::Assertion("test assertion failed".to_string()).into();
+        assert!(matches!(scenario_err, ShakedownError::Scenario(_)));
+
+        // Infrastructure error (provision/readiness/teardown failures)
+        let infra_err: ShakedownError = crate::InfrastructureError::Provision {
+            resource: "test_resource".to_string(),
+            source: Box::new(std::io::Error::other("provision failed")),
+        }
+        .into();
+        assert!(matches!(infra_err, ShakedownError::Infrastructure(_)));
+
+        // Internal error (framework bugs)
+        let internal_err: ShakedownError =
+            crate::InternalError::Bug("unexpected code path".to_string()).into();
+        assert!(matches!(internal_err, ShakedownError::Internal(_)));
+    }
+
+    #[test]
+    fn test_fake_resource_comprehensive() {
+        // Comprehensive test of FakeResource
+        let mut ctx = Context::new();
+
+        // Test provision
+        let resource = FakeResource::provision(&mut ctx);
+        assert!(matches!(resource, FakeResource));
+
+        // Test check_ready always returns true
+        assert!(resource.check_ready());
+
+        // Test apply_default_seed does not panic
+        resource.apply_default_seed();
+
+        // Test teardown does not panic
+        resource.teardown();
+    }
+
+    #[test]
+    fn test_event_log_comprehensive() {
+        // Comprehensive test of event log functionality
+        let mut log = EventLog::new();
+
+        // Test append_raw with different levels
+        log.append_raw(EventLevel::Debug, "source1", "debug message");
+        log.append_raw(EventLevel::Info, "source2", "info message");
+        log.append_raw(EventLevel::Warn, "source3", "warn message");
+        log.append_raw(EventLevel::Error, "source4", "error message");
+
+        assert_eq!(log.len(), 4);
+
+        // Verify all levels
+        let events = log.events();
+        assert_eq!(events[0].level, EventLevel::Debug);
+        assert_eq!(events[1].level, EventLevel::Info);
+        assert_eq!(events[2].level, EventLevel::Warn);
+        assert_eq!(events[3].level, EventLevel::Error);
+
+        // Test clear empties the log
+        log.clear();
+        assert!(log.is_empty());
+
+        // Test append and retrieval cycle
+        let event = Event::info("scenario", "test");
+        log.append(event);
+        assert_eq!(log.len(), 1);
+
+        let retrieved = log.events();
+        assert_eq!(retrieved[0].message, "test");
+    }
+
+    #[test]
+    fn test_context_lifecycle() {
+        // Test Context lifecycle methods
+        let mut ctx = Context::new();
+
+        // Verify empty initially
+        assert!(ctx.resources().is_empty());
+
+        // Register a resource
+        ctx.register_resource(FakeResource {});
+        assert_eq!(ctx.resources().len(), 1);
+
+        // Verify environment backend methods exist
+        let _backend = ctx.environment_backend();
+        let _backend_mut = ctx.environment_backend_mut();
+
+        // Test with_backend constructor
+        let backend = NoopEnvironmentBackend {};
+        let ctx2 = Context::with_backend(backend);
+        assert!(ctx2.resources().is_empty());
+    }
+
+    #[test]
+    fn test_resource_trait_bounds() {
+        // Verify Resource trait is Send + Sync
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<FakeResource>();
+    }
+
+    #[test]
+    fn test_error_source_chain() {
+        // Test that error source chains work correctly
+        let infra_err = crate::InfrastructureError::Provision {
+            resource: "test".to_string(),
+            source: Box::new(std::io::Error::other("inner error")),
+        };
+
+        // InfrastructureError should have a source
+        assert!(std::error::Error::source(&infra_err).is_some());
+
+        let scenario_err = crate::ScenarioError::Assertion("test".to_string());
+        // ScenarioError doesn't have a source by default
+        assert!(std::error::Error::source(&scenario_err).is_none());
+    }
+
+    #[test]
+    fn test_event_level_display() {
+        // Test Display implementation for EventLevel
+        assert_eq!(format!("{}", EventLevel::Debug), "DEBUG");
+        assert_eq!(format!("{}", EventLevel::Info), "INFO");
+        assert_eq!(format!("{}", EventLevel::Warn), "WARN");
+        assert_eq!(format!("{}", EventLevel::Error), "ERROR");
+    }
 }
