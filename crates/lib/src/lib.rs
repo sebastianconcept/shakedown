@@ -12,6 +12,23 @@
 //! - **Error classification** — structured errors distinguishing scenario vs infrastructure failures
 //! - **Event logging hooks** — structured event collection for failure timelines
 //!
+//! ## Async Resource Trait (D-6)
+//!
+//! The [`Resource`] trait is now **async and scenario-aware**:
+//!
+//! ```rust,ignore
+//! #[async_trait]
+//! pub trait Resource: Send + Sync {
+//!     async fn provision(&mut self, scenario_id: &ScenarioId) -> Result<Vec<ResourceHandle>, InfrastructureError>;
+//!     async fn check_ready(&self) -> Result<(), InfrastructureError>;
+//!     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError>;
+//!     async fn teardown(&mut self) -> Result<(), InfrastructureError>;
+//! }
+//! ```
+//!
+//! This enables real infrastructure (Kafka, Postgres, etc.) to be integrated while maintaining
+//! a clean extension point for custom resources.
+//!
 //! ## Workspace layout
 //!
 //! ```text
@@ -24,14 +41,14 @@
 //!
 //! ## Extension points
 //!
-//! - **ResourceProvider** trait — implement for new infrastructure integrations (Kafka, Postgres, etc.)
-//! - **EnvironmentBackend** trait — implement for alternative execution environments
-//! - **register_resource!** macro — register resources declaratively
+//! - **[`Resource`] trait** — implement for new infrastructure integrations (Kafka, Postgres, etc.)
+//! - **[`EnvironmentBackend`] trait** — implement for alternative execution environments
+//! - **`Context::register_builtin()` / `Context::register_extension()`** — declarative registration
 //!
 //! ## Milestone status
 //!
-//! - **Current**: `mvp-foundation` — orchestration skeleton, error types, extension seams
-//! - **Next**: `mvp-kafka-vertical` — real resources (Kafka, Postgres), full API
+//! - **Current**: `mvp-kafka-vertical` — async Resource trait, BuiltinResource enum, Kafka bindings
+//! - **Next**: `mvp-macros-system-test` — procedural macros for test discovery
 //!
 //! ## See also
 //!
@@ -43,19 +60,35 @@
 //! ```ignore
 //! use shakedown::Context;
 //!
-//! # #[shakedown_macros::register_resource]
-//! # struct FakeResource;
-//! #
-//! # impl shakedown::Resource for FakeResource {
-//! #     fn provision(_ctx: &mut Context) -> Self { FakeResource }
-//! #     fn apply_default_seed(&self) {}
-//! #     fn check_ready(&self) -> bool { true }
-//! #     fn teardown(self) {}
-//! # }
+//! #[async_trait]
+//! impl Resource for MyResource {
+//!     async fn provision(&mut self, scenario_id: &ScenarioId) -> Result<Vec<ResourceHandle>, InfrastructureError> {
+//!         // Provision my resource with scenario isolation
+//!         Ok(vec![ResourceHandle { ... }])
+//!     }
 //!
-//! #[shakedown_macros::system_test]
-//! async fn my_scenario(_ctx: Context) {
-//!     // Scenario implementation
+//!     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+//!         // Apply migrations, seed data, etc.
+//!         Ok(())
+//!     }
+//!
+//!     async fn check_ready(&self) -> Result<(), InfrastructureError> {
+//!         // Verify deep readiness beyond TCP
+//!         Ok(())
+//!     }
+//!
+//!     async fn teardown(&mut self) -> Result<(), InfrastructureError> {
+//!         // Clean up
+//!         Ok(())
+//!     }
+//! }
+//!
+//! #[tokio::test]
+//! async fn test_my_scenario() {
+//!     let mut ctx = Context::new();
+//!     ctx.register_extension(MyResource);
+//!
+//!     run_scenario(&mut ctx, "my-scenario", my_scenario_logic, &mut event_log).await.unwrap();
 //! }
 //! ```
 
@@ -65,16 +98,24 @@ pub mod lifecycle;
 pub mod resources;
 
 #[doc(inline)]
-pub use crate::error::{InfrastructureError, InternalError, Result, ScenarioError, ShakedownError};
+pub use crate::error::{
+    InfrastructureError, InternalError, ResourceHandle, Result, ScenarioError, ScenarioId,
+    ShakedownError,
+};
 pub use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
 pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, Phase,
 };
 pub use crate::resources::{
-    CloneResource, FakeResource, Resource, ResourceBinding, ResourceConfig,
+    BuiltinResource, CloneResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
+    ResourceBinding, ResourceConfig,
 };
 
+#[cfg(feature = "kafka")]
+pub use crate::resources::KafkaResource;
+
 /// Returns the compile-time default greeting emitted by the `macros` crate.
+#[allow(unused_variables)] // Silence warning until macros crate is wired
 pub fn greeting() -> &'static str {
     shakedown_macros::default_greeting!()
 }
@@ -106,30 +147,121 @@ mod tests {
     #[test]
     fn test_context_and_types() {
         // Verify Context and other core types are accessible
-        let mut ctx = Context::new();
+        let _ctx = Context::new();
         let _backend = NoopEnvironmentBackend {};
 
         // Verify Resource trait is accessible
-        struct TestResource;
-        impl Resource for TestResource {
-            fn provision(_ctx: &mut Context) -> Self {
-                TestResource
-            }
-
-            fn apply_default_seed(&self) {}
-
-            fn check_ready(&self) -> bool {
-                true
-            }
-
-            fn teardown(self) {}
-        }
-
-        let _resource = TestResource::provision(&mut ctx);
-
         // Verify EventLog is accessible
         let mut event_log = crate::EventLog::new();
         event_log.append_raw(EventLevel::Info, "test", "test message");
         assert_eq!(event_log.len(), 1);
+
+        let bindings = KafkaBindings::new("localhost:9092", "prefix_");
+        assert_eq!(bindings.bootstrap_servers, "localhost:9092");
+
+        let scenario_id = ScenarioId::new("test");
+        assert_eq!(scenario_id.to_string(), "test");
+
+        let builtin = RegisteredResource::Builtin(BuiltinResource::Fake(FakeResource::default()));
+        let extension = RegisteredResource::Extension(Box::new(FakeResource::default()));
+
+        assert!(matches!(builtin, RegisteredResource::Builtin(_)));
+        assert!(matches!(extension, RegisteredResource::Extension(_)));
+
+        // Verify PartialEq works
+        assert_eq!(builtin, builtin);
+        assert_ne!(builtin, extension);
+    }
+
+    #[test]
+    fn test_error_types_are_send_sync() {
+        // Verify all error types implement Send + Sync (important for async runtime)
+        fn check_send_sync<T: Send + Sync>(_: T) {}
+
+        let _scenario_err = ScenarioError::Assertion("test".to_string());
+        let _infra_err = InfrastructureError::Provision {
+            resource: "test".to_string(),
+            source: Box::new(std::io::Error::other("test")),
+        };
+        let _internal_err = InternalError::Bug("test".to_string());
+
+        check_send_sync(_scenario_err);
+        check_send_sync(_infra_err);
+        check_send_sync(_internal_err);
+    }
+
+    #[test]
+    fn test_resource_trait_is_send_sync() {
+        use crate::resources::Resource;
+        use async_trait::async_trait;
+
+        struct TestResource;
+
+        #[async_trait]
+        impl Resource for TestResource {
+            async fn provision(
+                &mut self,
+                _scenario_id: &ScenarioId,
+            ) -> std::result::Result<Vec<ResourceHandle>, InfrastructureError> {
+                Ok(vec![ResourceHandle {
+                    id: "test".to_string(),
+                    connection_string: "://test".to_string(),
+                    metadata: None,
+                }])
+            }
+
+            async fn check_ready(&self) -> std::result::Result<(), InfrastructureError> {
+                Ok(())
+            }
+
+            async fn apply_default_seed(&mut self) -> std::result::Result<(), InfrastructureError> {
+                Ok(())
+            }
+
+            async fn teardown(&mut self) -> std::result::Result<(), InfrastructureError> {
+                Ok(())
+            }
+        }
+
+        let _boxed: Box<dyn Resource> = Box::new(TestResource);
+        drop(_boxed);
+    }
+
+    #[test]
+    fn test_lifecycle_awaits_async_methods() {
+        use async_trait::async_trait;
+
+        struct AsyncTestResource;
+
+        #[async_trait]
+        impl Resource for AsyncTestResource {
+            async fn provision(
+                &mut self,
+                _scenario_id: &ScenarioId,
+            ) -> std::result::Result<Vec<ResourceHandle>, InfrastructureError> {
+                tokio::task::yield_now().await; // Simulate async work
+                Ok(vec![ResourceHandle {
+                    id: "async_test".to_string(),
+                    connection_string: "://async_test".to_string(),
+                    metadata: None,
+                }])
+            }
+
+            async fn check_ready(&self) -> std::result::Result<(), InfrastructureError> {
+                tokio::task::yield_now().await; // Simulate async work
+                Ok(())
+            }
+
+            async fn apply_default_seed(&mut self) -> std::result::Result<(), InfrastructureError> {
+                Ok(())
+            }
+
+            async fn teardown(&mut self) -> std::result::Result<(), InfrastructureError> {
+                Ok(())
+            }
+        }
+
+        fn assert_resource<T: Resource>() {}
+        assert_resource::<AsyncTestResource>();
     }
 }
