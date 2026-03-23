@@ -32,9 +32,9 @@ Implement the first **real** infrastructure resource (**Kafka**) using testconta
 
 ### AC-003: Docker-backed environment and Kafka container
 
-- ⏳ Kafka runs via testcontainers-modules using a Kraft-mode image; no ZooKeeper container in the default path
-- ⏳ Config allows an image override for production-parity testing
-- ⏳ Suite-level lifecycle documented; no requirement to restart broker per test
+- ✅ Kafka runs via testcontainers-modules `kafka::apache` (KRaft); no ZooKeeper in the default path
+- ✅ Image override: `KafkaResource::with_image_tag` / `with_jvm_image` / env `SHAKEDOWN_KAFKA_IMAGE_TAG` + `with_image_tag_from_env`
+- ✅ Suite-level broker: `OnceLock` + `Mutex` + ref-count; last teardown runs `rm`; documented in [`SPECS.md`](SPECS.md) and [`VERIFY.md`](VERIFY.md)
 
 ### AC-004: Kafka bindings and isolation on Context
 
@@ -61,26 +61,28 @@ Implement the first **real** infrastructure resource (**Kafka**) using testconta
 | BuiltinResource enum (Fake, Kafka) | ✅ Done | Enum dispatch for first-party resources |
 | RegisteredResource enum (Builtin, Extension) | ✅ Done | Hybrid dispatch model |
 | FakeResource lifecycle impl | ✅ Done | All async methods implemented |
-| KafkaResource struct + impl | ⏳ In Progress | Needs provision/readiness/seed/teardown with testcontainers |
-| Context with scenario_id + KafkaBindings | ⏳ In Progress | Set bindings after container starts |
+| KafkaResource struct + impl | ✅ Done | Suite-shared KRaft broker, seed/readiness/teardown |
+| Context with scenario_id + KafkaBindings | ✅ Done | Set from provision metadata in `run_scenario` |
 | run_scenario awaits async phases | ✅ Done | Lifecycle properly awaits all async methods |
-| Integration test scaffolding | ⏳ Not Started | Proof test for produce → consume |
+| Integration test scaffolding | 🔄 In Progress | `tests/kafka_docker.rs` (US-003); produce/consume proof is US-005 |
 
 ## Files touched (repo)
 
 - `crates/lib/Cargo.toml` - MSRV 1.88, kafka feature gate
-- `crates/lib/src/resources.rs` - Async Resource trait, Fake/Kafka impls
+- `crates/lib/src/resources.rs` - Async Resource trait, Fake/Kafka impls, suite broker
 - `crates/lib/src/lifecycle.rs` - run_scenario awaits async phases
 - `crates/lib/src/lib.rs` - Public API exports
+- `crates/lib/tests/kafka_docker.rs` - Docker integration (ignored by default)
 - `feature/mvp-kafka-vertical/PROGRESS.md` - This file
+- `feature/mvp-kafka-vertical/SPECS.md` - Implementation SPECS (suite broker decision)
+- `feature/mvp-kafka-vertical/VERIFY.md` - How to run Docker tests
+- `feature/mvp-kafka-vertical/NOTES.md` - Execution log
 
 ## Next steps
 
-1. Complete KafkaResource implementation with testcontainers integration
-2. Add integration test in `tests/kafka_vertical.rs` (gated)
-3. Document image override capability in DECISIONS.md if added
-4. Update README milestone line to point to next feature
+1. US-005: produce → consume proof scenario using `Context` bindings
+2. Wire CI job with Docker for `-- --ignored` on `kafka_docker` (optional until CI ready)
 
 ## Open questions
 
-- None for this story - focus is on async Resource contract and scaffolding
+- Panic-in-`run` path does not run teardown yet (see `SPECS.md`)

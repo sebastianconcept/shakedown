@@ -33,7 +33,19 @@ shakedown/
 - **Current**: `mvp-kafka-vertical` — async scenario-aware `Resource`, `BuiltinResource` / `RegisteredResource`, Kafka via `testcontainers-modules` (KRaft) behind `--features kafka`
 - **Next**: `mvp-macros-system-test` — procedural macros for test discovery
 
-Default `cargo test -p shakedown` does not require Docker. Integration tests that start Kafka use `cargo test -p shakedown --features kafka` (and Docker) when present under `tests/`.
+Default `cargo test -p shakedown` does not require Docker.
+
+**Kafka (KRaft, `testcontainers-modules::kafka::apache`):**
+
+- [`KafkaResource`](src/resources.rs) uses a **suite-level** broker: the first provision in a process starts one container; further `KafkaResource` instances share it until the last `Resource::teardown` removes the container (see `feature/mvp-kafka-vertical/SPECS.md`).
+- **Image tag:** [`KafkaResource::with_image_tag`](src/resources.rs), or set `SHAKEDOWN_KAFKA_IMAGE_TAG` and use [`KafkaResource::with_image_tag_from_env`](src/resources.rs).
+- **JVM image:** [`KafkaResource::with_jvm_image`](src/resources.rs) (`apache/kafka` instead of `apache/kafka-native`).
+
+Integration tests that start Kafka are `#[ignore]` unless Docker is available:
+
+`cargo test -p shakedown --features kafka --test kafka_docker -- --ignored`
+
+See `feature/mvp-kafka-vertical/VERIFY.md`.
 
 ## See also
 

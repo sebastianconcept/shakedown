@@ -150,17 +150,51 @@ mod kafka_impl {
     use rdkafka::config::ClientConfig;
     use rdkafka::consumer::{Consumer, DefaultConsumerContext};
     use rdkafka::types::RDKafkaErrorCode;
+    use std::sync::OnceLock;
     use std::time::Duration;
+    use testcontainers::core::Image;
     use testcontainers::runners::AsyncRunner;
     use testcontainers_modules::kafka::apache::{self, KAFKA_PORT};
+    use tokio::sync::Mutex;
+
+    /// Suite-wide broker: one Docker container per test process, shared by all [`KafkaResource`]
+    /// instances until the last holder tears down (D-3).
+    #[allow(clippy::large_enum_variant)] // Running holds ContainerAsync; boxing would complicate rm() handoff.
+    enum SuiteBrokerState {
+        Idle,
+        Running {
+            bootstrap: String,
+            container: testcontainers::ContainerAsync<apache::Kafka>,
+            refs: usize,
+            /// Effective `image:tag` for mismatch detection across concurrent scenarios.
+            image_key: String,
+        },
+    }
+
+    static SUITE_BROKER: OnceLock<Mutex<SuiteBrokerState>> = OnceLock::new();
+
+    fn suite_broker_mutex() -> &'static Mutex<SuiteBrokerState> {
+        SUITE_BROKER.get_or_init(|| Mutex::new(SuiteBrokerState::Idle))
+    }
+
+    fn image_fingerprint(image: &apache::Kafka, tag_override: &Option<String>) -> String {
+        let tag = tag_override.as_deref().unwrap_or_else(|| image.tag());
+        format!("{}:{}", image.name(), tag)
+    }
 
     /// Docker-backed Kafka using testcontainers-modules KRaft image (`apache/kafka-native` by default).
+    ///
+    /// **Suite lifecycle (D-3):** the first provision in the process starts a single KRaft broker;
+    /// further [`KafkaResource`] instances reuse it. The last successful [`Resource::teardown`]
+    /// removes the container. All instances in one process must use the same image name and tag
+    /// (first configuration wins).
     #[derive(Debug)]
     pub struct KafkaResource {
         image: apache::Kafka,
         /// Optional image tag override (image name stays from [`apache::Kafka`]).
         image_tag: Option<String>,
-        container: Option<testcontainers::ContainerAsync<apache::Kafka>>,
+        /// `true` after this instance acquired a reference to the suite broker.
+        holds_suite_ref: bool,
         bootstrap_servers: Option<String>,
         topic_prefix: String,
     }
@@ -176,7 +210,7 @@ mod kafka_impl {
             Self {
                 image: apache::Kafka::default(),
                 image_tag: None,
-                container: None,
+                holds_suite_ref: false,
                 bootstrap_servers: None,
                 topic_prefix: String::new(),
             }
@@ -194,6 +228,17 @@ mod kafka_impl {
             self
         }
 
+        /// Apply tag override from `SHAKEDOWN_KAFKA_IMAGE_TAG` when set (suite-level parity with CI/prod pins).
+        pub fn with_image_tag_from_env(mut self) -> Self {
+            if let Ok(tag) = std::env::var("SHAKEDOWN_KAFKA_IMAGE_TAG") {
+                let tag = tag.trim();
+                if !tag.is_empty() {
+                    self.image_tag = Some(tag.to_string());
+                }
+            }
+            self
+        }
+
         fn map_tc_err(e: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
             InfrastructureError::Backend(Box::new(std::io::Error::other(e.to_string())))
         }
@@ -205,31 +250,63 @@ mod kafka_impl {
             &mut self,
             scenario_id: &ScenarioId,
         ) -> Result<Vec<ResourceHandle>, InfrastructureError> {
-            if self.container.is_some() {
+            if self.holds_suite_ref {
                 return Err(InfrastructureError::AlreadyProvisioned("kafka".into()));
             }
 
             self.topic_prefix = sanitize_kafka_topic_prefix(scenario_id.as_str());
+            let want_key = image_fingerprint(&self.image, &self.image_tag);
 
-            let image = self.image.clone();
-            let node = if let Some(ref tag) = self.image_tag {
-                use testcontainers::core::ImageExt;
-                image
-                    .with_tag(tag.clone())
-                    .start()
-                    .await
-                    .map_err(Self::map_tc_err)?
-            } else {
-                image.start().await.map_err(Self::map_tc_err)?
+            let mut guard = suite_broker_mutex().lock().await;
+            let bootstrap = match &mut *guard {
+                SuiteBrokerState::Idle => {
+                    use testcontainers::core::ImageExt;
+                    let image = self.image.clone();
+                    let node = if let Some(ref tag) = self.image_tag {
+                        image
+                            .with_tag(tag.clone())
+                            .start()
+                            .await
+                            .map_err(Self::map_tc_err)?
+                    } else {
+                        image.start().await.map_err(Self::map_tc_err)?
+                    };
+
+                    let port = node
+                        .get_host_port_ipv4(KAFKA_PORT)
+                        .await
+                        .map_err(Self::map_tc_err)?;
+                    let bootstrap = format!("127.0.0.1:{port}");
+                    *guard = SuiteBrokerState::Running {
+                        bootstrap: bootstrap.clone(),
+                        container: node,
+                        refs: 1,
+                        image_key: want_key.clone(),
+                    };
+                    bootstrap
+                }
+                SuiteBrokerState::Running {
+                    bootstrap,
+                    refs,
+                    image_key,
+                    ..
+                } => {
+                    if *image_key != want_key {
+                        return Err(InfrastructureError::Backend(Box::new(
+                            std::io::Error::other(format!(
+                                "Kafka suite broker already running as {image_key}; \
+                                 cannot start or join as {want_key}. Use one image:tag per process."
+                            )),
+                        )));
+                    }
+                    *refs += 1;
+                    bootstrap.clone()
+                }
             };
+            drop(guard);
 
-            let port = node
-                .get_host_port_ipv4(KAFKA_PORT)
-                .await
-                .map_err(Self::map_tc_err)?;
-            let bootstrap = format!("127.0.0.1:{port}");
             self.bootstrap_servers = Some(bootstrap.clone());
-            self.container = Some(node);
+            self.holds_suite_ref = true;
 
             Ok(vec![ResourceHandle {
                 id: format!("kafka_{}", scenario_id),
@@ -321,9 +398,32 @@ mod kafka_impl {
         }
 
         async fn teardown(&mut self) -> Result<(), InfrastructureError> {
-            if let Some(node) = self.container.take() {
-                node.rm().await.map_err(Self::map_tc_err)?;
+            if !self.holds_suite_ref {
+                self.bootstrap_servers = None;
+                return Ok(());
             }
+
+            let mut guard = suite_broker_mutex().lock().await;
+            let mut container_to_rm: Option<testcontainers::ContainerAsync<apache::Kafka>> = None;
+            match &mut *guard {
+                SuiteBrokerState::Idle => {}
+                SuiteBrokerState::Running { refs, .. } => {
+                    *refs = refs.saturating_sub(1);
+                    if *refs == 0 {
+                        let taken = std::mem::replace(&mut *guard, SuiteBrokerState::Idle);
+                        if let SuiteBrokerState::Running { container, .. } = taken {
+                            container_to_rm = Some(container);
+                        }
+                    }
+                }
+            }
+            drop(guard);
+
+            if let Some(c) = container_to_rm {
+                c.rm().await.map_err(Self::map_tc_err)?;
+            }
+
+            self.holds_suite_ref = false;
             self.bootstrap_servers = None;
             Ok(())
         }
