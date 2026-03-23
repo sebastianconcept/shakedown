@@ -2,7 +2,7 @@
 
 **Slug**: `mvp-kafka-vertical`  
 **Milestone**: MVP row 2 (MVP.md)  
-**Status**: In Progress
+**Status**: ✅ Completed (US-004 — Kafka bindings, seed topics, readiness probes)
 
 ## Overview
 
@@ -50,8 +50,8 @@ Implement the first **real** infrastructure resource (**Kafka**) using testconta
 
 ### AC-006: Documentation and handoff
 
-- ⏳ README and progress docs updated; points to next milestone
-- ⏳ PROGRESS.md links this feature folder (this file)
+- ✅ README and progress docs updated; points to next milestone
+- ✅ PROGRESS.md links this feature folder (this file)
 
 ## Implementation status
 
@@ -62,7 +62,7 @@ Implement the first **real** infrastructure resource (**Kafka**) using testconta
 | RegisteredResource enum (Builtin, Extension) | ✅ Done | Hybrid dispatch model |
 | FakeResource lifecycle impl | ✅ Done | All async methods implemented |
 | KafkaResource struct + impl | ✅ Done | Suite-shared KRaft broker, seed/readiness/teardown |
-| Context with scenario_id + KafkaBindings | ✅ Done | Set from provision metadata in `run_scenario` |
+| Context with scenario_id + KafkaBindings | ✅ Done | Bootstrap + topic prefix exposed on `Context`; D-4 semantics documented |
 | run_scenario awaits async phases | ✅ Done | Lifecycle properly awaits all async methods |
 | Integration test scaffolding | 🔄 In Progress | `tests/kafka_docker.rs` (US-003); produce/consume proof is US-005 |
 
