@@ -30,7 +30,7 @@ shakedown/
 
 ## Milestone status
 
-- **Current**: `mvp-kafka-vertical` — async scenario-aware `Resource`, `BuiltinResource` / `RegisteredResource`, Kafka via `testcontainers-modules` (KRaft) behind `--features kafka`
+- **Current**: `mvp-kafka-vertical` — complete. Async scenario-aware `Resource` trait, `BuiltinResource`/`RegisteredResource` enums, Kafka via `testcontainers-modules` (KRaft), `KafkaBindings` on `Context`, proof integration tests (`crates/lib/tests/kafka_vertical.rs`).
 - **Next**: `mvp-macros-system-test` — procedural macros for test discovery
 
 Default `cargo test -p shakedown` does not require Docker.
@@ -40,6 +40,33 @@ Default `cargo test -p shakedown` does not require Docker.
 - [`KafkaResource`](src/resources.rs) uses a **suite-level** broker: the first provision in a process starts one container; further `KafkaResource` instances share it until the last `Resource::teardown` removes the container (see `feature/mvp-kafka-vertical/SPECS.md`).
 - **Image tag:** [`KafkaResource::with_image_tag`](src/resources.rs), or set `SHAKEDOWN_KAFKA_IMAGE_TAG` and use [`KafkaResource::with_image_tag_from_env`](src/resources.rs).
 - **JVM image:** [`KafkaResource::with_jvm_image`](src/resources.rs) (`apache/kafka` instead of `apache/kafka-native`).
+
+### KafkaBindings (US-004)
+
+[`KafkaBindings`](src/resources.rs) exposes structured bindings on [`Context`]:
+
+```rust
+#[cfg(feature = "kafka")]
+{
+    let mut ctx = Context::new();
+    ctx.register_builtin(BuiltinResource::Kafka(KafkaResource::new()));
+    
+    // After provision in run_scenario(), KafkaBindings are set automatically:
+    if let Some(bindings) = ctx.kafka_bindings() {
+        println!("Bootstrap: {}", bindings.bootstrap_servers);
+        println!("Topic prefix: {}", bindings.topic_prefix);
+        
+        // Use bindings to construct an rdkafka client:
+        // let client = ClientConfig::new()
+        //     .set("bootstrap.servers", &bindings.bootstrap_servers)
+        //     .set("client.id", format!("{}client", bindings.client_id_prefix.as_ref().unwrap_or(&"")))
+        //     .create()?;
+    }
+}
+```
+
+Topics are created in `apply_default_seed` phase under the scenario's isolated namespace.
+See [`KafkaResource::apply_default_seed`](src/resources.rs) and [DECISIONS.md D-4](../../DECISIONS.md) for details.
 
 Integration tests that start Kafka are `#[ignore]` unless Docker is available:
 

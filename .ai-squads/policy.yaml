@@ -1,16 +1,17 @@
 default: confirm
 tools:
-  append_file: allow
-  file_tree: allow
-  create_directory: allow
+  read_note: allow
+  git_add: allow
+  edit_file: allow
   run_quality_command: allow
-  run_command: allow
+  task_complete: allow
+  create_directory: allow
   write_note: allow
+  file_tree: allow
+  append_file: allow
+  run_command: allow
   write_file: allow
   text_editor: allow
-  read_note: allow
-  edit_file: allow
-  task_complete: allow
 commands:
   mode: blacklist
   whitelist: []
