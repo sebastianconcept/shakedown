@@ -83,15 +83,13 @@ pub enum ScenarioError {
 impl std::fmt::Display for ScenarioError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ScenarioError::Assertion(msg) => write!(f, "Scenario error: Assertion failed: {}", msg),
-            ScenarioError::StepFailed(msg) => write!(f, "Scenario error: Step failed: {}", msg),
-            ScenarioError::ResourceNotFound(name) => write!(
-                f,
-                "Scenario error: Resource '{}' not found in context",
-                name
-            ),
+            ScenarioError::Assertion(msg) => write!(f, "Scenario assertion error: {}", msg),
+            ScenarioError::StepFailed(msg) => write!(f, "Scenario step failed error: {}", msg),
+            ScenarioError::ResourceNotFound(name) => {
+                write!(f, "Scenario resource not found error: {}", name)
+            }
             ScenarioError::Timeout { timeout } => {
-                write!(f, "Scenario timed out after {:?}", timeout)
+                write!(f, "Scenario timeout error: {:?}", timeout)
             }
             ScenarioError::Other(e) => write!(f, "Scenario error: {}", e),
         }
@@ -193,6 +191,42 @@ impl Error for InfrastructureError {
     }
 }
 
+/// A structured binding handle for a resource (Kafka, Postgres, Redis, etc.).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ResourceHandle {
+    /// Unique identifier for this logical slice of the resource.
+    /// May include scenario prefix, database name, or other namespace info.
+    pub id: String,
+    /// Connection string that clients use to connect.
+    pub connection_string: String,
+    /// Optional extra metadata (e.g., port mapping, container ID).
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Newtype wrapper for scenario identifiers (used for isolation keys, e.g. Kafka topic prefixes).
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct ScenarioId(String);
+
+impl ScenarioId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn empty() -> Self {
+        Self(String::new())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ScenarioId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Error types related to internal framework bugs or invariant violations.
 ///
 /// These errors indicate problems with the Shakedown framework itself,
@@ -273,20 +307,20 @@ mod tests {
         let err = ScenarioError::Assertion("assertion failed".to_string());
         assert_eq!(
             format!("{}", err),
-            "Scenario error: Assertion failed: assertion failed"
+            "Scenario assertion error: assertion failed"
         );
     }
 
     #[test]
     fn infrastructure_error_display() {
         let err = InfrastructureError::Provision {
-            resource: "database".to_string(),
+            resource: "kafka".to_string(),
             source: Box::new(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
                 "connection refused",
             )),
         };
-        assert!(format!("{}", err).contains("database"));
+        assert!(format!("{}", err).contains("kafka"));
     }
 
     #[test]
@@ -331,18 +365,41 @@ mod tests {
 
     #[test]
     fn infrastructure_error_is_send_sync() {
-        let err = InfrastructureError::Teardown {
+        let infra_err = InfrastructureError::Teardown {
             resource: "test".to_string(),
             source: Box::new(std::io::Error::other("failed")),
         };
         fn check_send_sync<T: Send + Sync>(_: T) {}
-        check_send_sync(err);
+        check_send_sync(infra_err);
     }
 
     #[test]
     fn internal_error_is_send_sync() {
-        let err = InternalError::InvariantViolation("test".to_string());
+        let internal_err = InternalError::InvariantViolation("test".to_string());
         fn check_send_sync<T: Send + Sync>(_: T) {}
-        check_send_sync(err);
+        check_send_sync(internal_err);
+    }
+
+    #[test]
+    fn test_scenario_id() {
+        let id = ScenarioId::new("sc_001");
+        assert_eq!(id.to_string(), "sc_001");
+
+        let empty_id = ScenarioId::empty();
+        assert_eq!(empty_id.to_string(), "");
+    }
+
+    #[test]
+    fn resource_handle_serialization() {
+        use serde_json::to_value;
+
+        let handle = ResourceHandle {
+            id: "test_resource".to_string(),
+            connection_string: "localhost:5432".to_string(),
+            metadata: Some(serde_json::json!({"host": "localhost", "port": 5432})),
+        };
+
+        let serialized = to_value(&handle).unwrap();
+        assert!(serialized.as_object().is_some());
     }
 }

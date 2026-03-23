@@ -8,7 +8,7 @@ promote to production by running realistic scenarios that exercise the full stac
 This library provides:
 
 - **Scenario orchestration** — lifecycle phases: provision → readiness → seed → run → assert → teardown
-- **Resource providers** — traits for integrating databases, message queues, and other infrastructure
+- **Resource providers** — async [`Resource`] trait for databases, message queues, and other infrastructure
 - **Error classification** — structured errors distinguishing scenario vs infrastructure failures
 - **Event logging hooks** — structured event collection for failure timelines
 
@@ -24,39 +24,17 @@ shakedown/
 
 ## Extension points
 
-- **ResourceProvider** trait — implement for new infrastructure integrations (Kafka, Postgres, etc.)
-- **EnvironmentBackend** trait — implement for alternative execution environments
-- **register_resource!** macro — register resources declaratively
+- **[`Resource`] trait** — implement for new infrastructure (with `async_trait` for `Box<dyn Resource>` extensions)
+- **[`EnvironmentBackend`] trait** — implement for alternative execution environments (also `async_trait` for `dyn` use)
+- **`Context::register_builtin` / `register_extension`** — wire first-party or third-party resources
 
 ## Milestone status
 
-- **Current**: `mvp-foundation` — orchestration skeleton, error types, extension seams
-- **Next**: `mvp-kafka-vertical` — real resources (Kafka, Postgres), full API
+- **Current**: `mvp-kafka-vertical` — async scenario-aware `Resource`, `BuiltinResource` / `RegisteredResource`, Kafka via `testcontainers-modules` (KRaft) behind `--features kafka`
+- **Next**: `mvp-macros-system-test` — procedural macros for test discovery
+
+Default `cargo test -p shakedown` does not require Docker. Integration tests that start Kafka use `cargo test -p shakedown --features kafka` (and Docker) when present under `tests/`.
 
 ## See also
 
-Product docs (PRD, SPECS, TECH-STACK, adoption guides) live in the **adopted documentation root**, not in this repo — see the workspace [`docs/README.md`](../../docs/README.md).
-
-## Example
-
-```rust
-use shakedown::Context;
-
-#[shakedown_macros::register_resource]
-struct FakeResource;
-
-impl shakedown::Resource for FakeResource {
-    fn provision(_ctx: &mut Context) -> Self { FakeResource }
-
-    fn apply_default_seed(&self) {}
-
-    fn check_ready(&self) -> bool { true }
-
-    fn teardown(self) {}
-}
-
-#[shakedown_macros::system_test]
-async fn my_scenario(_ctx: Context) {
-    // Scenario implementation
-}
-```
+Product docs (PRD, SPECS, TECH-STACK) live in the adopted documentation root — workspace [`docs/README.md`](../../docs/README.md).
