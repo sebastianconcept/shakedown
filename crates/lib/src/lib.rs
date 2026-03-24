@@ -99,8 +99,7 @@ pub mod resources;
 
 #[doc(inline)]
 pub use crate::error::{
-    InfrastructureError, InternalError, ResourceHandle, Result, ScenarioError, ScenarioId,
-    ShakedownError,
+    InfrastructureError, InternalError, ResourceHandle, Result, ScenarioError, ScenarioId, ShakedownError,
 };
 pub use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
 pub use crate::lifecycle::{
@@ -128,32 +127,27 @@ pub fn greeting() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    // Import specific types, avoiding conflicts with std::test attribute
     use crate::error::{
-        InfrastructureError, InternalError, ResourceHandle, ScenarioError, ShakedownError,
+        InfrastructureError, InternalError, ResourceHandle, ScenarioError, ScenarioId, ShakedownError,
     };
-    use crate::event::EventLevel;
+    use crate::event::{EventLevel, EventLog};
+    use crate::greeting;
     use crate::lifecycle::{NoopEnvironmentBackend, Phase, ScenarioKind};
     #[cfg(feature = "kafka")]
     use crate::resources::KafkaResource;
     use crate::resources::{
-        BuiltinResource, CloneResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
-        ResourceBinding, ResourceConfig,
+        BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
     };
-    use crate::{Context, EventLog};
+    use crate::Context;
 
     #[test]
     fn greeting_matches_expected() {
-        // Given the default greeting macro installed for this crate
-        // When we read the greeting string
         let message = greeting();
-        // Then it is the expected phrase
         assert_eq!(message, "Hello, shakedown!");
     }
 
     #[test]
     fn error_hierarchy_compiles() {
-        // Verify all error types are accessible
         let _scenario: ScenarioError = ScenarioError::Assertion("test".to_string());
         let _infra: InfrastructureError = InfrastructureError::Provision {
             resource: "test".to_string(),
@@ -164,13 +158,10 @@ mod tests {
 
     #[test]
     fn test_context_and_types() {
-        // Verify Context and other core types are accessible
         let _ctx = Context::new();
         let _backend = NoopEnvironmentBackend {};
 
-        // Verify Resource trait is accessible
-        // Verify EventLog is accessible
-        let mut event_log = crate::EventLog::new();
+        let mut event_log = EventLog::new();
         event_log.append_raw(EventLevel::Info, "test", "test message");
         assert_eq!(event_log.len(), 1);
 
@@ -186,14 +177,12 @@ mod tests {
         assert!(matches!(builtin, RegisteredResource::Builtin(_)));
         assert!(matches!(extension, RegisteredResource::Extension(_)));
 
-        // Verify PartialEq works
         assert_eq!(builtin, builtin);
         assert_ne!(builtin, extension);
     }
 
     #[test]
     fn test_error_types_are_send_sync() {
-        // Verify all error types implement Send + Sync (important for async runtime)
         fn check_send_sync<T: Send + Sync>(_: T) {}
 
         let _scenario_err = ScenarioError::Assertion("test".to_string());
@@ -257,7 +246,7 @@ mod tests {
                 &mut self,
                 _scenario_id: &ScenarioId,
             ) -> std::result::Result<Vec<ResourceHandle>, InfrastructureError> {
-                tokio::task::yield_now().await; // Simulate async work
+                tokio::task::yield_now().await;
                 Ok(vec![ResourceHandle {
                     id: "async_test".to_string(),
                     connection_string: "://async_test".to_string(),
@@ -266,7 +255,7 @@ mod tests {
             }
 
             async fn check_ready(&self) -> std::result::Result<(), InfrastructureError> {
-                tokio::task::yield_now().await; // Simulate async work
+                tokio::task::yield_now().await;
                 Ok(())
             }
 

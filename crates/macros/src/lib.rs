@@ -6,7 +6,10 @@ use syn::spanned::Spanned;
 
 /// Creates a scenario test wrapped in the full lifecycle.
 #[proc_macro_attribute]
-pub fn test(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Parse attribute - currently unused but reserved for future args like `resources = [...]`
+    let _attr: TokenStream = attr;
+
     let func = match syn::parse::<syn::ItemFn>(item.clone()) {
         Ok(f) => f,
         Err(e) => return e.to_compile_error().into(),
@@ -26,7 +29,11 @@ pub fn test(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .inputs
         .first()
         .map(|arg| match arg {
-            syn::FnArg::Typed(pat_type) => matches!(pat_type.ty.as_ref(), syn::Type::Path(_)),
+            syn::FnArg::Typed(pat_type) => {
+                let ty = pat_type.ty.as_ref();
+                // Accept both bare path types (Context) and reference paths (&mut Context)
+                matches!(ty, syn::Type::Path(_) | syn::Type::Reference(_))
+            },
             syn::FnArg::Receiver(_) => false,
         })
         .unwrap_or(false);
@@ -65,7 +72,9 @@ pub fn test(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Creates a faulty scenario test wrapped in the full lifecycle.
 #[proc_macro_attribute]
-pub fn faulty_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let _attr: TokenStream = attr;
+
     let func = match syn::parse::<syn::ItemFn>(item.clone()) {
         Ok(f) => f,
         Err(e) => return e.to_compile_error().into(),
@@ -85,7 +94,11 @@ pub fn faulty_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .inputs
         .first()
         .map(|arg| match arg {
-            syn::FnArg::Typed(pat_type) => matches!(pat_type.ty.as_ref(), syn::Type::Path(_)),
+            syn::FnArg::Typed(pat_type) => {
+                let ty = pat_type.ty.as_ref();
+                // Accept both bare path types (Context) and reference paths (&mut Context)
+                matches!(ty, syn::Type::Path(_) | syn::Type::Reference(_))
+            },
             syn::FnArg::Receiver(_) => false,
         })
         .unwrap_or(false);
