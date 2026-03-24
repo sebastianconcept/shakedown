@@ -112,6 +112,7 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }.into();
 
+    #[allow(clippy::let_and_return)]
     expanded
 }
 
@@ -218,6 +219,7 @@ pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }.into();
 
+    #[allow(clippy::let_and_return)]
     expanded
 }
 
@@ -265,9 +267,7 @@ fn build_resource_registration(ident: &str) -> syn::Result<proc_macro2::TokenStr
                 ::shakedown::FakeResource::default(),
             ));
         }),
-        #[cfg(feature = "kafka")]
         "Kafka" => Ok(quote! {
-            #[cfg(feature = "kafka")]
             ctx.register_builtin(::shakedown::BuiltinResource::Kafka(
                 ::shakedown::KafkaResource::new(),
             ));

@@ -130,11 +130,10 @@ pub fn greeting() -> &'static str {
 mod tests {
     use crate::error::{
         InfrastructureError, InternalError, ResourceHandle, ScenarioError, ScenarioId,
-        ShakedownError,
     };
     use crate::event::{EventLevel, EventLog};
     use crate::greeting;
-    use crate::lifecycle::{NoopEnvironmentBackend, Phase, ScenarioKind};
+    use crate::lifecycle::NoopEnvironmentBackend;
     #[cfg(feature = "kafka")]
     use crate::resources::KafkaResource;
     use crate::resources::{
@@ -273,4 +272,7 @@ mod tests {
         fn assert_resource<T: Resource>() {}
         assert_resource::<AsyncTestResource>();
     }
+
+    // TODO: US-006 tests for proc macros - integration test files have macro expansion issues
+    // Tests should be placed in separate integration test module or use different approach
 }
