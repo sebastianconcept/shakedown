@@ -128,6 +128,20 @@ impl EnvironmentBackend for NoopEnvironmentBackend {
     }
 }
 
+/// Represents the kind of scenario being executed.
+///
+/// This is used by `#[shakedown::faulty_test]` to mark fault-oriented scenarios,
+/// and by future fault-injection code to decide whether to apply faults like
+/// Toxiproxy toxics.
+#[allow(clippy::derivable_impls)] // Manual impl needed for enum without #[default] marker
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScenarioKind {
+    /// A normal scenario (no faults injected)
+    Normal,
+    /// A faulty scenario (faults may be injected)
+    Faulty,
+}
+
 /// Represents the context for a scenario run.
 pub struct Context {
     /// Registered resources
@@ -138,6 +152,8 @@ pub struct Context {
     scenario_id: ScenarioId,
     /// Kafka bindings when a Kafka resource populated them (from provision metadata).
     kafka_bindings: Option<KafkaBindings>,
+    /// Kind of scenario being executed (Normal or Faulty)
+    scenario_kind: ScenarioKind,
 }
 
 impl Context {
@@ -148,6 +164,7 @@ impl Context {
             environment_backend: Box::new(NoopEnvironmentBackend),
             scenario_id: ScenarioId::empty(),
             kafka_bindings: None,
+            scenario_kind: ScenarioKind::Normal,
         }
     }
 
@@ -158,6 +175,7 @@ impl Context {
             environment_backend: Box::new(backend),
             scenario_id: ScenarioId::empty(),
             kafka_bindings: None,
+            scenario_kind: ScenarioKind::Normal,
         }
     }
 
@@ -168,6 +186,7 @@ impl Context {
             environment_backend: Box::new(NoopEnvironmentBackend),
             scenario_id: ScenarioId::new(scenario_id),
             kafka_bindings: None,
+            scenario_kind: ScenarioKind::Normal,
         }
     }
 
@@ -225,6 +244,16 @@ impl Context {
     /// Get a mutable reference to the scenario ID.
     pub fn set_scenario_id(&mut self, id: impl Into<String>) {
         self.scenario_id = ScenarioId::new(id);
+    }
+
+    /// Get a reference to the scenario kind.
+    pub fn scenario_kind(&self) -> ScenarioKind {
+        self.scenario_kind
+    }
+
+    /// Set the scenario kind for this run.
+    pub fn set_scenario_kind(&mut self, kind: ScenarioKind) {
+        self.scenario_kind = kind;
     }
 }
 

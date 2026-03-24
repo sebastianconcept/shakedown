@@ -30,8 +30,8 @@ shakedown/
 
 ## Milestone status
 
-- **Current**: `mvp-kafka-vertical` — complete. Async scenario-aware `Resource` trait, `BuiltinResource`/`RegisteredResource` enums, Kafka via `testcontainers-modules` (KRaft), `KafkaBindings` on `Context`, proof integration tests (`crates/lib/tests/kafka_vertical.rs`).
-- **Next**: `mvp-macros-system-test` — procedural macros for test discovery
+- **Current**: `mvp-macros-system-test` — procedural macros `#[shakedown::test]` and `#[shakedown::faulty_test]` for test discovery. Adds `ScenarioKind` enum to distinguish normal vs faulty scenarios. See [`crates/macros/README.md`](../macros/README.md).
+- **Next**: `mvp-postgres-mariadb` — Postgres and MariaDB resources
 
 Default `cargo test -p shakedown` does not require Docker.
 

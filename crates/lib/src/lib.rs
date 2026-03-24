@@ -105,6 +105,7 @@ pub use crate::error::{
 pub use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
 pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, Phase,
+    ScenarioKind,
 };
 pub use crate::resources::{
     BuiltinResource, CloneResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
@@ -113,6 +114,13 @@ pub use crate::resources::{
 
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
+
+// Re-export proc macros so users can write #[shakedown::test] directly on their code.
+// Note: shakedown-macros does NOT depend on shakedown (would be circular); it emits
+// `::shakedown::*` paths in generated code, which are resolved at the call site.
+// Use `shakedown_macros::test` or `shakedown_macros::faulty_test` to avoid name collision
+// with std::test attribute when importing both into the same module.
+pub use shakedown_macros::{faulty_test as shakedown_faulty_test, test as shakedown_test};
 
 /// Returns the compile-time default greeting emitted by the `macros` crate.
 #[allow(unused_variables)] // Silence warning until macros crate is wired
