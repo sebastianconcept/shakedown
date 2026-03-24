@@ -1,17 +1,20 @@
 default: confirm
 tools:
-  read_note: allow
-  git_add: allow
-  edit_file: allow
-  run_quality_command: allow
   task_complete: allow
+  file_tree: allow
+  run_command: allow
+  git_commit: allow
+  json_update: allow
+  read_note: allow
+  append_note: allow
+  edit_file: allow
+  text_editor: allow
+  append_file: allow
+  write_file: allow
+  run_quality_command: allow
   create_directory: allow
   write_note: allow
-  file_tree: allow
-  append_file: allow
-  run_command: allow
-  write_file: allow
-  text_editor: allow
+  git_add: allow
 commands:
   mode: blacklist
   whitelist: []
