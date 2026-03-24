@@ -99,7 +99,8 @@ pub mod resources;
 
 #[doc(inline)]
 pub use crate::error::{
-    InfrastructureError, InternalError, ResourceHandle, Result, ScenarioError, ScenarioId, ShakedownError,
+    InfrastructureError, InternalError, ResourceHandle, Result, ScenarioError, ScenarioId,
+    ShakedownError,
 };
 pub use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
 pub use crate::lifecycle::{
@@ -128,7 +129,8 @@ pub fn greeting() -> &'static str {
 #[cfg(test)]
 mod tests {
     use crate::error::{
-        InfrastructureError, InternalError, ResourceHandle, ScenarioError, ScenarioId, ShakedownError,
+        InfrastructureError, InternalError, ResourceHandle, ScenarioError, ScenarioId,
+        ShakedownError,
     };
     use crate::event::{EventLevel, EventLog};
     use crate::greeting;
