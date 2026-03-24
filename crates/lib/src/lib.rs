@@ -118,9 +118,7 @@ pub use crate::resources::KafkaResource;
 // Re-export proc macros so users can write #[shakedown::test] directly on their code.
 // Note: shakedown-macros does NOT depend on shakedown (would be circular); it emits
 // `::shakedown::*` paths in generated code, which are resolved at the call site.
-// Use `shakedown_macros::test` or `shakedown_macros::faulty_test` to avoid name collision
-// with std::test attribute when importing both into the same module.
-pub use shakedown_macros::{faulty_test as shakedown_faulty_test, test as shakedown_test};
+pub use shakedown_macros::{faulty_test, test};
 
 /// Returns the compile-time default greeting emitted by the `macros` crate.
 #[allow(unused_variables)] // Silence warning until macros crate is wired
@@ -130,7 +128,19 @@ pub fn greeting() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // Import specific types, avoiding conflicts with std::test attribute
+    use crate::error::{
+        InfrastructureError, InternalError, ResourceHandle, ScenarioError, ShakedownError,
+    };
+    use crate::event::EventLevel;
+    use crate::lifecycle::{NoopEnvironmentBackend, Phase, ScenarioKind};
+    #[cfg(feature = "kafka")]
+    use crate::resources::KafkaResource;
+    use crate::resources::{
+        BuiltinResource, CloneResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
+        ResourceBinding, ResourceConfig,
+    };
+    use crate::{Context, EventLog};
 
     #[test]
     fn greeting_matches_expected() {
