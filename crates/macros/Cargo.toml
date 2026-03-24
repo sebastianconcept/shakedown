@@ -9,6 +9,10 @@ publish = false
 proc-macro = true
 
 [dependencies]
+proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
-proc-macro2 = "1"
+
+[dev-dependencies]
+trybuild = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
