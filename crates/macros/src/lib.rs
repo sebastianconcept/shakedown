@@ -190,9 +190,11 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let fn_ident = &func.sig.ident;
+    let forwarded_attrs = &func.attrs;
     // `quote!` parses `#func.block` as `#func` + literal `.block`; bind the block first.
     let user_block = &func.block;
     let expanded = quote! {
+        #(#forwarded_attrs)*
         #[::tokio::test]
         async fn #fn_ident() {
             let mut ctx = ::shakedown::Context::new();
@@ -287,8 +289,10 @@ pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let fn_ident = &func.sig.ident;
+    let forwarded_attrs = &func.attrs;
     let user_block = &func.block;
     let expanded = quote! {
+        #(#forwarded_attrs)*
         #[::tokio::test]
         async fn #fn_ident() {
             let mut ctx = ::shakedown::Context::new();

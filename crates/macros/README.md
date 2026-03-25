@@ -56,6 +56,17 @@ async fn with_kafka(ctx: &mut Context) { ... }
 
 Compile-time UI coverage for these attributes lives in `tests/trybuild/` (pass + `compile_fail` cases with `.stderr` snapshots).
 
+## Runtime integration tests
+
+End-to-end runs (macro expansion → `tokio::test` → `run_scenario`) live in the `shakedown` crate:
+
+- [`crates/lib/tests/macro_integration.rs`](../lib/tests/macro_integration.rs) — `FakeResource` only, no Docker.
+- [`crates/lib/tests/macro_kafka.rs`](../lib/tests/macro_kafka.rs) — `#[shakedown::test(resources = [Kafka])]`. The `macro_kafka` integration target uses `required-features = ["kafka"]` in `crates/lib/Cargo.toml`, so it is omitted from default `cargo test --workspace` builds. With `--features kafka`, the test is still **`#[ignore]`** until you opt in (requires Docker):
+
+  ```text
+  cargo test -p shakedown --features kafka macro_kafka -- --ignored
+  ```
+
 ## Usage Examples
 
 ### Basic test

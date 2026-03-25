@@ -1,4 +1,13 @@
-//! Runtime integration tests for `#[shakedown::test]` / `#[shakedown::faulty_test]`.
+//! Runtime integration tests for `#[shakedown::test]` and `#[shakedown::faulty_test]`.
+//!
+//! These tests exercise the generated `run_scenario` wiring with [`FakeResource`] only — no Docker.
+//!
+//! **Optional Kafka + macro path:** when the `kafka` feature is enabled, see `tests/macro_kafka.rs`
+//! (ignored by default; requires Docker). Run it with:
+//!
+//! ```text
+//! cargo test -p shakedown --features kafka macro_kafka -- --ignored
+//! ```
 
 use shakedown::{BuiltinResource, FakeResource, RegisteredResource, ScenarioKind};
 
@@ -28,6 +37,14 @@ async fn test_run_scenario_registers_fake(ctx: &mut shakedown::Context) {
         ctx.resources().first(),
         Some(RegisteredResource::Builtin(BuiltinResource::Fake(_)))
     ));
+}
+
+#[shakedown::test(resources = [Fake])]
+async fn test_scenario_id_matches_function_name(ctx: &mut shakedown::Context) {
+    assert_eq!(
+        ctx.scenario_id().as_str(),
+        "test_scenario_id_matches_function_name"
+    );
 }
 
 #[shakedown::test]

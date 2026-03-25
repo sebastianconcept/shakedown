@@ -61,6 +61,12 @@ mariadb = [
 # MCP server support (post-MVP, optional)
 mcp = []
 
+# Optional macro + Kafka runtime test (Docker); avoids compiling `resources = [Kafka]` without rdkafka
+[[test]]
+name = "macro_kafka"
+path = "tests/macro_kafka.rs"
+required-features = ["kafka"]
+
 # SQLx for Postgres/MariaDB support
 [dependencies.sqlx]
 version = "0.8"
