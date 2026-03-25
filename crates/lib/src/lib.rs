@@ -94,9 +94,13 @@
 //! }
 //! ```
 
+/// Structured errors: scenario vs infrastructure vs internal framework failures.
 pub mod error;
+/// Structured events and in-memory logs for timelines and diagnostics.
 pub mod event;
+/// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
+/// [`resources::Resource`] implementations, registration, and Kafka bindings.
 pub mod resources;
 
 #[doc(inline)]
@@ -118,9 +122,10 @@ pub use crate::resources::{
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
 
-// Re-export proc macros so users can write #[shakedown::test] directly on their code.
-// Note: shakedown-macros does NOT depend on shakedown (would be circular); it emits
-// `::shakedown::*` paths in generated code, which are resolved at the call site.
+/// Procedural attributes for Tokio tests that run the full shakedown lifecycle.
+///
+/// Re-exported so callers depend only on `shakedown`. The macro crate does not depend on this
+/// library (avoids cycles); generated code refers to `::shakedown::…` resolved at the call site.
 pub use shakedown_macros::{faulty_test, test};
 
 #[cfg(test)]
@@ -134,27 +139,23 @@ mod tests {
 
     #[test]
     fn test_context_and_types() {
+        // Given a new scenario context and noop environment backend
         let _ctx = Context::new();
         let _backend = NoopEnvironmentBackend {};
-
+        // When we exercise the public surface (event log, Kafka bindings, scenario kind, resources)
         let mut event_log = EventLog::new();
         event_log.append_raw(EventLevel::Info, "test", "test message");
-        assert_eq!(event_log.len(), 1);
-
         let bindings = KafkaBindings::new("localhost:9092", "prefix_");
-        assert_eq!(bindings.bootstrap_servers, "localhost:9092");
-
-        // ScenarioKind enum distinguishes Normal vs Faulty scenarios
         use crate::lifecycle::ScenarioKind;
         let scenario_kind = ScenarioKind::Normal;
-        assert_eq!(scenario_kind.to_string(), "Normal");
-
         let builtin = RegisteredResource::Builtin(BuiltinResource::Fake(FakeResource::default()));
         let extension = RegisteredResource::Extension(Box::new(FakeResource::default()));
-
+        // Then core types behave as expected for a smoke test
+        assert_eq!(event_log.len(), 1);
+        assert_eq!(bindings.bootstrap_servers, "localhost:9092");
+        assert_eq!(scenario_kind.to_string(), "Normal");
         assert!(matches!(builtin, RegisteredResource::Builtin(_)));
         assert!(matches!(extension, RegisteredResource::Extension(_)));
-
         assert_eq!(builtin, builtin);
         assert_ne!(builtin, extension);
     }
@@ -163,13 +164,15 @@ mod tests {
     fn test_error_types_are_send_sync() {
         fn check_send_sync<T: Send + Sync>(_: T) {}
 
+        // Given one value of each Shakedown error category
         let _scenario_err = ScenarioError::Assertion("test".to_string());
         let _infra_err = InfrastructureError::Provision {
             resource: "test".to_string(),
             source: Box::new(std::io::Error::other("test")),
         };
         let _internal_err = InternalError::Bug("test".to_string());
-
+        // When we require Send + Sync for each
+        // Then the compiler accepts all three
         check_send_sync(_scenario_err);
         check_send_sync(_infra_err);
         check_send_sync(_internal_err);
@@ -177,6 +180,7 @@ mod tests {
 
     #[test]
     fn test_resource_trait_is_send_sync() {
+        // Given a trivial Resource implementation used only for trait-object checks
         use crate::resources::Resource;
         use async_trait::async_trait;
 
@@ -208,12 +212,16 @@ mod tests {
             }
         }
 
+        // Given a minimal Resource implementation
+        // When we store it behind Box<dyn Resource>
         let _boxed: Box<dyn Resource> = Box::new(TestResource);
+        // Then it compiles and can be dropped
         drop(_boxed);
     }
 
     #[test]
     fn test_lifecycle_awaits_async_methods() {
+        // Given a Resource whose async hooks yield so lifecycle truly awaits them
         use async_trait::async_trait;
 
         struct AsyncTestResource;
@@ -246,16 +254,21 @@ mod tests {
             }
         }
 
+        // Given a Resource whose async methods yield to the runtime
+        // When we require it to implement Resource
         fn assert_resource<T: Resource>() {}
+        // Then the compiler accepts AsyncTestResource
         assert_resource::<AsyncTestResource>();
     }
 
     #[test]
     fn test_context_scenario_kind() {
+        // Given a fresh context defaulting to Normal
         let mut ctx = Context::new();
         assert_eq!(ctx.scenario_kind(), crate::lifecycle::ScenarioKind::Normal);
-
+        // When we mark the scenario as Faulty
         ctx.set_scenario_kind(crate::lifecycle::ScenarioKind::Faulty);
+        // Then the context reports Faulty
         assert_eq!(ctx.scenario_kind(), crate::lifecycle::ScenarioKind::Faulty);
     }
 }

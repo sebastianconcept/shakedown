@@ -1,8 +1,13 @@
-//! Proc macros consumed by the workspace `lib` crate.
+//! Procedural macros for the `shakedown` test harness.
 //!
-//! This crate provides the procedural macro attributes for shakedown testing:
-//! - `#[shakedown::test]` — orchestrates a normal scenario lifecycle
-//! - `#[shakedown::faulty_test]` — orchestrates a faulty scenario (for fault injection)
+//! What: attributes that wrap async tests with `shakedown::Context::new`, optional builtin
+//! registration, and `shakedown::run_scenario`.
+//!
+//! Why: callers should not hand-roll lifecycle wiring in every test module.
+//!
+//! How: depend on `shakedown`; use `#[shakedown::test]` or `#[shakedown::faulty_test]` on
+//! `async fn name(ctx: &mut shakedown::Context)`; enable crate features (e.g. `kafka`) on
+//! `shakedown` to unlock matching builtins in `resources = [...]`.
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -35,6 +40,7 @@ fn parse_ident_list_bracketed(input: ParseStream) -> syn::Result<Vec<Ident>> {
     parse_ident_list(&inner)
 }
 
+/// Parse a comma-separated list of idents (no surrounding brackets).
 fn parse_ident_list(input: ParseStream) -> syn::Result<Vec<Ident>> {
     let mut idents = Vec::new();
     while !input.is_empty() {
@@ -72,6 +78,7 @@ impl Parse for TestAttrArgs {
     }
 }
 
+/// Parse `#[shakedown::test]` arguments; returns builtin resource idents when `resources = [..]` is present.
 fn parse_test_attr(attr: TokenStream) -> syn::Result<Option<Vec<Ident>>> {
     if attr.is_empty() {
         return Ok(None);
@@ -105,6 +112,7 @@ impl Parse for FaultyTestAttrParser {
     }
 }
 
+/// Parse `#[shakedown::faulty_test]` arguments, extracting `resources = [..]` when present.
 fn parse_faulty_test_attr(attr: TokenStream) -> syn::Result<Option<Vec<Ident>>> {
     if attr.is_empty() {
         return Ok(None);
@@ -113,6 +121,7 @@ fn parse_faulty_test_attr(attr: TokenStream) -> syn::Result<Option<Vec<Ident>>> 
     Ok(parsed.resources)
 }
 
+/// Returns `true` when the first parameter is `ctx: &mut …::Context`.
 fn first_parameter_is_ctx_mut_context(func: &ItemFn) -> bool {
     let Some(first) = func.sig.inputs.first() else {
         return false;
@@ -123,12 +132,20 @@ fn first_parameter_is_ctx_mut_context(func: &ItemFn) -> bool {
     is_ctx_mut_context_type(pat_type.ty.as_ref())
 }
 
-/// Creates a scenario test wrapped in the full lifecycle.
+/// Wrap an async test in the full shakedown lifecycle (provision → teardown).
 ///
-/// Supports optional `resources` argument to auto-register builtin resources:
-/// - `#[shakedown::test]` — basic test, no auto-registration
-/// - `#[shakedown::test(resources = [Fake])]` — registers Fake resource
-/// - `#[shakedown::test(resources = [Fake, Kafka])]` — registers both (Kafka requires `--features kafka`)
+/// The attributed function must be `async` and take `ctx: &mut shakedown::Context` as the first parameter.
+///
+/// # Resource registration
+///
+/// - `#[shakedown::test]` — no builtins; register manually on `ctx` if needed.
+/// - `#[shakedown::test(resources = [Fake])]` — registers `shakedown::FakeResource`.
+/// - `#[shakedown::test(resources = [Fake, Kafka])]` — also registers Kafka when the `shakedown`
+///   dependency enables the `kafka` feature.
+///
+/// # Panics
+///
+/// Panics with the display string of `shakedown::ShakedownError` if the scenario fails.
 #[proc_macro_attribute]
 pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
     let resources_list = match parse_test_attr(attr) {
@@ -225,10 +242,14 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
     expanded
 }
 
-/// Creates a faulty scenario test wrapped in the full lifecycle.
+/// Like [`test`], but sets `shakedown::ScenarioKind::Faulty` before running.
 ///
-/// Same as `#[shakedown::test]` but sets `ScenarioKind::Faulty` for fault-injection scenarios.
-/// Supports optional `resources` argument identically to `#[shakedown::test]`.
+/// Use for scenarios that opt into fault injection or degraded-mode behaviour. Resource attributes
+/// match [`test`].
+///
+/// # Panics
+///
+/// Panics if `shakedown::run_scenario` returns `Err`, same as [`test`].
 #[proc_macro_attribute]
 pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
     let resources_list = match parse_faulty_test_attr(attr) {
@@ -357,7 +378,10 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
     }
 }
 
-/// Registers a resource for use in Shakedown scenarios.
+/// Placeholder attribute: currently passes the item through unchanged.
+///
+/// Reserved for a future milestone where resources declare themselves to the harness; safe to ignore
+/// for now.
 #[proc_macro_attribute]
 pub fn register_resource(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let _input = match syn::parse2::<syn::Item>(item.clone().into()) {
@@ -368,7 +392,7 @@ pub fn register_resource(_attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! { #_input }.into()
 }
 
-/// Expands to the project's default greeting string.
+/// Expands to a fixed demo string (`"Hello, shakedown!"`) for crate smoke tests.
 #[proc_macro]
 pub fn default_greeting(_input: TokenStream) -> TokenStream {
     use syn::LitStr;

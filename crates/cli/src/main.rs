@@ -1,16 +1,16 @@
-/// Shakedown CLI - Shakedown testing framework for Rust services
-///
-/// Usage: `shakedown [COMMAND]`
-///
-/// Commands:
-/// - run   Run a scenario
-/// - list  List available scenarios
-///
-/// For more information, see the project documentation.
+//! `shakedown` command-line binary (stub).
+//!
+//! What: prints usage, version, and placeholder subcommand names until the runner is implemented.
+//!
+//! Why: reserves the crate/binary name and gives users a single entry point to discover.
+//!
+//! How: run `shakedown`, `shakedown --help`, or `shakedown --version`.
+
 use std::process;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Parse argv and dispatch help, version, or a placeholder error for unknown commands.
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -34,6 +34,7 @@ fn main() {
     }
 }
 
+/// Write usage text to stdout (commands mirror the future product surface).
 fn print_usage() {
     println!("shakedown {}", VERSION);
     println!();

@@ -1,14 +1,22 @@
-//! Resource provider traits and types for Shakedown harness.
+//! Resource providers and registration for the Shakedown harness.
 //!
-//! The [`Resource`] trait is the public extension point — any crate can implement it
-//! to plug a new infrastructure type into shakedown without forking. The trait is
-//! async and scenario-aware (D-6 in mvp-kafka-vertical scoping brief).
+//! What: [`Resource`], [`BuiltinResource`], [`RegisteredResource`], and helpers such as
+//! [`crate::resources::ResourceRegistry`].
+//!
+//! Why: tests need pluggable databases, brokers, and mocks behind one async contract with scenario
+//! isolation (`scenario_id` on provision).
+//!
+//! How: implement [`Resource`] for your system; register via [`crate::lifecycle::Context`] or
+//! `#[shakedown::test(resources = [...])]` for builtins.
 
 use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
 use async_trait::async_trait;
 use std::fmt;
 
-/// Sanitize a scenario id for use inside Kafka topic names (ASCII alnum, `.`, `_`, `-`).
+/// Turn a scenario id into a safe Kafka topic prefix segment.
+///
+/// Prefixes with `shakedown_`, replaces disallowed characters with `_`, and caps length so topic
+/// names stay valid on typical brokers. Used by the Kafka builtin (`kafka` feature) when provisioning.
 pub fn sanitize_kafka_topic_prefix(scenario_id: &str) -> String {
     let mut out = String::with_capacity(scenario_id.len().saturating_add(12));
     out.push_str("shakedown_");
@@ -100,7 +108,11 @@ impl Resource for BuiltinResource {
     }
 }
 
-/// Implementation of `Resource` for the fake (non-containerized) resource.
+/// Stub [`Resource`] with no network or Docker I/O (always succeeds).
+///
+/// Exists so unit tests and CI jobs exercise the lifecycle without Testcontainers. Prefer
+/// `#[shakedown::test(resources = [Fake])]` or [`crate::lifecycle::Context::register_builtin`] with
+/// [`BuiltinResource::Fake`].
 #[derive(Clone, Debug)]
 pub struct FakeResource {
     _priv: std::marker::PhantomData<()>,
@@ -206,6 +218,7 @@ mod kafka_impl {
     }
 
     impl KafkaResource {
+        /// Create default Docker-backed Kafka settings (suite broker started on first provision).
         pub fn new() -> Self {
             Self {
                 image: apache::Kafka::default(),
@@ -433,7 +446,10 @@ mod kafka_impl {
 #[cfg(feature = "kafka")]
 pub use kafka_impl::KafkaResource;
 
-/// Structured bindings for Kafka resource.
+/// Connection and naming details extracted after Kafka provision for a scenario.
+///
+/// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from [`crate::lifecycle::Context::kafka_bindings`]
+/// inside scenarios that produce/consume messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KafkaBindings {
     /// Bootstrap servers URL.
@@ -479,42 +495,52 @@ pub trait CloneResource: Resource + Clone {}
 
 impl<T: Resource + Clone> CloneResource for T {}
 
-/// Represents a resource binding with its configuration.
+/// Pairs a [`Resource`] implementation with declarative [`ResourceConfig`] (for tooling / future CLI).
 #[derive(Debug)]
 pub struct ResourceBinding<T: Resource> {
+    /// Live resource implementation under test.
     pub resource: T,
+    /// Declared type label and connection string (documentation or driver hints).
     pub config: ResourceConfig,
 }
 
-/// Configuration for a resource.
+/// Static description of a resource binding (type name and connection string).
 #[derive(Debug, Clone)]
 pub struct ResourceConfig {
+    /// Logical type key (e.g. `"kafka"`, `"postgres"`).
     pub resource_type: String,
+    /// Human-readable or driver connection string.
     pub connection_string: String,
 }
 
 impl<T: Resource> ResourceBinding<T> {
+    /// Wrap `resource` with `config`.
     pub fn new(resource: T, config: ResourceConfig) -> Self {
         Self { resource, config }
     }
 
+    /// Borrow the inner resource.
     pub fn resource(&self) -> &T {
         &self.resource
     }
 
+    /// Borrow the configuration.
     pub fn config(&self) -> &ResourceConfig {
         &self.config
     }
 }
 
-/// Registration model for resources in the harness.
+/// Either a closed [`BuiltinResource`] or a boxed user [`Resource`], as stored on [`crate::lifecycle::Context`].
 #[allow(clippy::large_enum_variant)]
 pub enum RegisteredResource {
+    /// Shipped-with-the-crate implementation ([`FakeResource`], Kafka when `kafka` feature is on).
     Builtin(BuiltinResource),
+    /// Third-party or test-local [`Resource`] behind dynamic dispatch.
     Extension(Box<dyn Resource>),
 }
 
 impl RegisteredResource {
+    /// Forward to the builtin or extension [`Resource::provision`].
     pub async fn provision(
         &mut self,
         scenario_id: &ScenarioId,
@@ -525,6 +551,7 @@ impl RegisteredResource {
         }
     }
 
+    /// Forward to [`Resource::check_ready`].
     pub async fn check_ready(&self) -> Result<(), InfrastructureError> {
         match self {
             RegisteredResource::Builtin(b) => b.check_ready().await,
@@ -532,6 +559,7 @@ impl RegisteredResource {
         }
     }
 
+    /// Forward to [`Resource::apply_default_seed`].
     pub async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
         match self {
             RegisteredResource::Builtin(b) => b.apply_default_seed().await,
@@ -539,6 +567,7 @@ impl RegisteredResource {
         }
     }
 
+    /// Forward to [`Resource::teardown`].
     pub async fn teardown(&mut self) -> Result<(), InfrastructureError> {
         match self {
             RegisteredResource::Builtin(b) => b.teardown().await,
@@ -546,6 +575,7 @@ impl RegisteredResource {
         }
     }
 
+    /// Dynamic downcast hook for tests and future reflection (builtin vs extension).
     pub fn as_any(&self) -> &dyn std::any::Any {
         match self {
             RegisteredResource::Builtin(b) => b,
@@ -553,10 +583,12 @@ impl RegisteredResource {
         }
     }
 
+    /// Returns `true` if this slot holds a [`BuiltinResource`].
     pub fn is_builtin(&self) -> bool {
         matches!(self, RegisteredResource::Builtin(_))
     }
 
+    /// Returns `true` if this slot holds a boxed extension [`Resource`].
     pub fn is_extension(&self) -> bool {
         matches!(self, RegisteredResource::Extension(_))
     }
@@ -592,34 +624,40 @@ impl PartialEq for RegisteredResource {
     }
 }
 
-/// Resource registration API for the harness.
+/// Standalone list of [`RegisteredResource`] entries (alternative to using [`crate::lifecycle::Context`] alone).
 #[derive(Debug, Default)]
 pub struct ResourceRegistry {
     resources: Vec<RegisteredResource>,
 }
 
 impl ResourceRegistry {
+    /// Create an empty registry.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Append a [`BuiltinResource`].
     pub fn register_builtin(&mut self, resource: BuiltinResource) {
         self.resources.push(RegisteredResource::Builtin(resource));
     }
 
+    /// Append a boxed extension resource.
     pub fn register_extension<R: Resource + 'static>(&mut self, resource: R) {
         self.resources
             .push(RegisteredResource::Extension(Box::new(resource)));
     }
 
+    /// Slice of all registered resources in order.
     pub fn resources(&self) -> &[RegisteredResource] {
         &self.resources
     }
 
+    /// Remove every registered resource.
     pub fn clear(&mut self) {
         self.resources.clear();
     }
 
+    /// `true` when there are no resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
     }
@@ -631,74 +669,98 @@ mod tests {
 
     #[tokio::test]
     async fn fake_resource_provision() {
+        // Given a default fake resource and a scenario id
         let mut fake = FakeResource::default();
+        // When we provision it
         let handles = fake
             .provision(&ScenarioId::new("test"))
             .await
             .expect("provision should succeed");
+        // Then we get a single handle with the stable fake id
         assert_eq!(handles.len(), 1);
         assert_eq!(handles[0].id, "fake_resource");
     }
 
     #[tokio::test]
     async fn fake_resource_check_ready() {
+        // Given a fake resource after provision semantics are not required here
         let fake = FakeResource::default();
-        assert!(fake.check_ready().await.is_ok());
+        // When we check readiness
+        let ready = fake.check_ready().await;
+        // Then it always reports ok
+        assert!(ready.is_ok());
     }
 
     #[tokio::test]
     async fn fake_resource_apply_default_seed() {
+        // Given a mutable fake resource
         let mut fake = FakeResource::default();
-        assert!(fake.apply_default_seed().await.is_ok());
+        // When we apply the default seed
+        let seeded = fake.apply_default_seed().await;
+        // Then seeding succeeds
+        assert!(seeded.is_ok());
     }
 
     #[tokio::test]
     async fn fake_resource_teardown() {
+        // Given a fake resource that was "used" in a scenario
         let mut fake = FakeResource::default();
-        assert!(fake.teardown().await.is_ok());
+        // When we tear it down
+        let torn_down = fake.teardown().await;
+        // Then teardown succeeds
+        assert!(torn_down.is_ok());
     }
 
     #[test]
     fn registered_resource_debug() {
+        // Given a builtin registered resource wrapping a fake
         let builtin = RegisteredResource::Builtin(BuiltinResource::Fake(FakeResource::default()));
-        let _ = format!("{builtin:?}");
+        // When we format it with Debug
+        let debug_text = format!("{builtin:?}");
+        // Then we get a non-empty debug representation
+        assert!(!debug_text.is_empty());
     }
 
     #[test]
     fn registered_resource_partial_eq() {
+        // Given two identical builtin fakes, a different extension, and another extension equal to the first
         let r1 = RegisteredResource::Builtin(BuiltinResource::Fake(FakeResource::default()));
         let r2 = RegisteredResource::Builtin(BuiltinResource::Fake(FakeResource::default()));
-        assert_eq!(r1, r2);
-
         let r3 = RegisteredResource::Extension(Box::new(FakeResource::default()));
-        assert_ne!(r1, r3);
-
         let r4 = RegisteredResource::Extension(Box::new(FakeResource::default()));
+        // When we compare them with PartialEq
+        // Then builtins match each other, builtin differs from extension, and extensions match
+        assert_eq!(r1, r2);
+        assert_ne!(r1, r3);
         assert_eq!(r3, r4);
     }
 
     #[test]
     fn resource_registry() {
+        // Given an empty registry
         let mut registry = ResourceRegistry::new();
+        // When we add a builtin, then an extension, then clear
         registry.register_builtin(BuiltinResource::Fake(FakeResource::default()));
         assert!(!registry.is_empty());
         assert_eq!(registry.resources().len(), 1);
-
         registry.register_extension(FakeResource::default());
         assert_eq!(registry.resources().len(), 2);
-
         registry.clear();
+        // Then the registry is empty again
         assert!(registry.is_empty());
     }
 
     #[test]
     fn resource_binding() {
+        // Given a fake resource and a typed connection config
         let resource = FakeResource::default();
         let config = ResourceConfig {
             resource_type: "fake".to_string(),
             connection_string: "localhost:1234".to_string(),
         };
+        // When we bind them
         let binding = ResourceBinding::new(resource, config);
+        // Then the binding exposes the config we passed in
         assert_eq!(binding.config.resource_type, "fake");
         assert_eq!(binding.config.connection_string, "localhost:1234");
     }
@@ -706,7 +768,10 @@ mod tests {
     #[cfg(feature = "kafka")]
     #[test]
     fn kafka_bindings_topic_namespace() {
+        // Given Kafka bindings for a bootstrap URL and topic prefix
         let bindings = KafkaBindings::new("localhost:9092", "shakedown_test");
+        // When we read fields and derive a topic namespace suffix
+        // Then servers, prefix, client id, and composed namespace match expectations
         assert_eq!(bindings.bootstrap_servers, "localhost:9092");
         assert_eq!(bindings.topic_prefix, "shakedown_test");
         assert!(bindings.client_id_prefix.is_some());
