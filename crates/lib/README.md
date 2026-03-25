@@ -30,8 +30,8 @@ shakedown/
 
 ## Milestone status
 
-- **Current**: `mvp-macros-system-test` — procedural macros `#[shakedown::test]` and `#[shakedown::faulty_test]` for test discovery. Adds `ScenarioKind` enum to distinguish normal vs faulty scenarios. See [`crates/macros/README.md`](../macros/README.md).
-- **Next**: `mvp-postgres-mariadb` — Postgres and MariaDB resources
+- **Current (shipped in repo):** `mvp-macros-system-test` — procedural macros `#[shakedown::test]` and `#[shakedown::faulty_test]` for `cargo test` discovery; they delegate to `run_scenario` and public `Context` / `EventLog` APIs only. `ScenarioKind` (`Normal` / `Faulty`) on `Context` supports `#[shakedown::faulty_test]` today and future fault injection (`mvp-fault-injection`). Usage and optional `resources = [Fake, Kafka]` are documented in [`crates/macros/README.md`](../macros/README.md).
+- **Next:** `mvp-postgres-mariadb` — first-party **Postgres** and **MariaDB** resources on the same `Resource` trait and lifecycle as Kafka (MVP row 4 in adopted [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md)).
 
 Default `cargo test -p shakedown` does not require Docker.
 

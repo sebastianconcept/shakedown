@@ -1,6 +1,18 @@
 # Shakedown Macros
 
-Procedural attribute macros for shakedown testing.
+Procedural attribute macros for shakedown testing. They expand to `#[::tokio::test]` wrappers that call [`run_scenario`](../lib/src/lifecycle.rs) on the `shakedown` crate — same lifecycle as manual harness code.
+
+## Quick start
+
+Add `shakedown` and `tokio` (with test macros) to your crate’s **dev-dependencies**. The generated `#[::tokio::test]` attribute resolves `tokio` from **your** crate, not from `shakedown` alone:
+
+```toml
+[dev-dependencies]
+shakedown = { version = "0.1", path = "../path/to/shakedown" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+Then annotate async functions with `ctx: &mut shakedown::Context` (or `use shakedown::Context`).
 
 ## Available Attributes
 
@@ -93,6 +105,8 @@ async fn with_fake_resource(ctx: &mut Context) {
 ### Faulty test
 
 ```rust,ignore
+use shakedown::{Context, ScenarioKind};
+
 #[shakedown::faulty_test]
 async fn faulty_scenario(ctx: &mut Context) {
     let kind = ctx.scenario_kind();
@@ -107,6 +121,10 @@ async fn faulty_scenario(ctx: &mut Context) {
 - `shakedown-macros` does NOT depend on `shakedown` (no circular dependency).
 - Users need `tokio = { version = "1", features = ["macros", "rt-multi-thread"] }` in their dev-dependencies for `#[tokio::test]` resolution.
 
-## Next Milestone
+## Next milestone
 
-[`mvp-postgres-mariadb`](../lib/README.md) — Postgres and MariaDB resources.
+After macros ship, the orchestration library adds relational resources:
+
+- **Slug:** `mvp-postgres-mariadb` — Postgres and MariaDB `Resource` providers on the same async harness as Kafka.
+- **Spine:** MVP row 4 in adopted docs [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md).
+- **Crate overview:** [`crates/lib/README.md`](../lib/README.md).
