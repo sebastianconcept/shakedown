@@ -5,6 +5,7 @@
 #[test]
 fn macros_ui() {
     let t = trybuild::TestCases::new();
+    t.pass("tests/trybuild/pass/plain_no_resources.rs");
     t.pass("tests/trybuild/pass/basic_test.rs");
     t.pass("tests/trybuild/pass/faulty_test.rs");
     t.pass("tests/trybuild/pass/faulty_test_deferred_args.rs");
