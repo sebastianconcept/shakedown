@@ -1,11 +1,16 @@
 //! Event logging for scenario orchestration.
 //!
-//! Shakedown records structured events during scenario runs, enabling
-//! failure timeline reconstruction and diagnostics.
+//! What: [`Event`] records and [`EventLog`] / [`EventSnapshot`] types for ordered timelines.
+//!
+//! Why: when a scenario fails, operators need level, source, and message without attaching a full
+//! logger to every test.
+//!
+//! How: the lifecycle appends phase transitions; tests and resources may append additional entries;
+//! inspect [`EventLog::events`] after [`crate::lifecycle::run_scenario`] completes.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Represents a log level for events.
+/// Severity for a single [`Event`] (mirrors common log levels).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventLevel {
     /// Debug-level events for detailed tracing
@@ -29,7 +34,11 @@ impl std::fmt::Display for EventLevel {
     }
 }
 
-/// Represents a structured event in the scenario lifecycle.
+/// One timestamped record in the scenario timeline.
+///
+/// Exists so callers log with a consistent shape (level, source, message, time) whether the
+/// emitter is the harness, a resource, or the scenario. Created via [`Event::new`] or helpers
+/// [`Event::info`], [`Event::debug`], etc., and stored in [`EventLog`].
 #[derive(Debug, Clone)]
 pub struct Event {
     /// Timestamp when the event occurred
@@ -79,7 +88,10 @@ impl Event {
     }
 }
 
-/// A simple in-memory event log.
+/// Append-only in-memory collection of [`Event`] values for one scenario run.
+///
+/// Why in-memory: tests should stay hermetic and fast; this type is enough for assertions and
+/// debugging without configuring `tracing` or `log` in every crate.
 #[derive(Debug, Default, Clone)]
 pub struct EventLog {
     /// The collected events
@@ -128,7 +140,10 @@ impl EventLog {
     }
 }
 
-/// A read-only view of an event log.
+/// Immutable copy of an [`EventLog`] at a point in time.
+///
+/// Use when you need to retain events while continuing to append to the original log, or to pass
+/// a cheap clone across threads after the run.
 #[derive(Debug, Clone)]
 pub struct EventSnapshot {
     /// The events at the time of snapshot
@@ -177,8 +192,10 @@ mod tests {
 
     #[test]
     fn test_event_creation() {
+        // Given an info-level event from the scenario source
         let event = Event::info("scenario", "starting scenario");
-
+        // When we inspect its fields
+        // Then level, source, message, and a positive timestamp are set
         assert_eq!(event.level, EventLevel::Info);
         assert_eq!(event.source, "scenario");
         assert_eq!(event.message, "starting scenario");
@@ -187,11 +204,13 @@ mod tests {
 
     #[test]
     fn test_event_levels() {
+        // Given one event per log level from the same source
         let debug = Event::debug("source", "debug message");
         let info = Event::info("source", "info message");
         let warn = Event::warn("source", "warn message");
         let error = Event::error("source", "error message");
-
+        // When we read their levels
+        // Then each matches the constructor used
         assert_eq!(debug.level, EventLevel::Debug);
         assert_eq!(info.level, EventLevel::Info);
         assert_eq!(warn.level, EventLevel::Warn);
@@ -200,35 +219,37 @@ mod tests {
 
     #[test]
     fn test_event_display() {
+        // Given an info-level event
         let event = Event::new(EventLevel::Info, "scenario", "test message");
-
-        assert_eq!(format!("{}", event.level), "INFO");
+        // When we format its level for display
+        let level_display = format!("{}", event.level);
+        // Then we get the uppercase level label
+        assert_eq!(level_display, "INFO");
     }
 
     #[test]
     fn test_event_log_append() {
+        // Given an empty event log
         let mut log = EventLog::new();
-
         assert!(log.is_empty());
-
+        // When we append two structured events
         let event1 = Event::info("scenario", "first event");
         let event2 = Event::debug("resource:fake", "second event");
-
         log.append(event1);
         log.append(event2);
-
+        // Then the log length reflects both entries
         assert_eq!(log.len(), 2);
     }
 
     #[test]
     fn test_event_log_append_raw() {
+        // Given an empty event log
         let mut log = EventLog::new();
-
+        // When we append raw entries at info and error levels
         log.append_raw(EventLevel::Info, "scenario", "test message");
         log.append_raw(EventLevel::Error, "resource:fake", "error occurred");
-
+        // Then both messages are stored with the expected source and text
         assert_eq!(log.len(), 2);
-
         let events = log.events();
         assert_eq!(events[0].message, "test message");
         assert_eq!(events[1].source, "resource:fake");
@@ -236,41 +257,41 @@ mod tests {
 
     #[test]
     fn test_event_log_snapshot() {
+        // Given a log with one event
         let mut log = EventLog::new();
-
         log.append(Event::info("scenario", "test event"));
-
+        // When we take a snapshot and then consume the log into a vector
         let snapshot = EventSnapshot::from_log(&log);
-
+        let events: Vec<Event> = log.into();
+        // Then the snapshot mirrors the single event and the consumed vec matches
         assert_eq!(snapshot.len(), 1);
         assert!(!snapshot.is_empty());
-
-        let events: Vec<Event> = log.into();
         assert_eq!(events.len(), 1);
     }
 
     #[test]
     fn test_event_log_clear() {
+        // Given a log with one event
         let mut log = EventLog::new();
-
         log.append(Event::info("scenario", "test"));
         assert_eq!(log.len(), 1);
-
+        // When we clear the log
         log.clear();
+        // Then it is empty again
         assert!(log.is_empty());
     }
 
     #[test]
     fn test_event_log_iter() {
+        // Given a log with five numbered scenario events
         let mut log = EventLog::new();
-
         for i in 0..5 {
             log.append(Event::info("scenario", format!("event {}", i)));
         }
-
         assert_eq!(log.len(), 5);
-
+        // When we collect messages in order
         let collected: Vec<_> = log.events().iter().map(|e| e.message.clone()).collect();
+        // Then they are the sequence event 0 through event 4
         assert_eq!(
             collected,
             vec!["event 0", "event 1", "event 2", "event 3", "event 4"]

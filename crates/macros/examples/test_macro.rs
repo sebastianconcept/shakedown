@@ -1,3 +1,6 @@
+//! Dev-only scratch binary: prototype `#[tokio::test]` wrapping of a user scenario block.
+
+/// Parse a sample function and print the `quote!` output for manual review.
 fn main() {
     let input = r#"async fn my_test(ctx: &mut shakedown::Context) {
         assert!(true);

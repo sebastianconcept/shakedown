@@ -1,7 +1,12 @@
-//! Error types for Shakedown testing framework.
+//! Error types for the Shakedown harness.
 //!
-//! This module defines a structured error hierarchy that distinguishes
-//! between scenario errors, infrastructure errors, and internal errors.
+//! What: a small hierarchy ([`crate::error::ShakedownError`] → scenario / infrastructure / internal) so callers
+//! classify failures without string matching.
+//!
+//! Why: scenario bugs, flaky infra, and framework bugs need different handling and reporting.
+//!
+//! How: return [`Result`] from lifecycle and resource APIs; wrap or map at boundaries when
+//! integrating with application code.
 
 use std::error::Error;
 
@@ -191,7 +196,12 @@ impl Error for InfrastructureError {
     }
 }
 
-/// A structured binding handle for a resource (Kafka, Postgres, Redis, etc.).
+/// Connection details returned after a resource is provisioned for a scenario.
+///
+/// Exists so scenario code and clients use one typed handle (id, connection string, optional JSON
+/// metadata) instead of ad hoc tuples. Produced by [`crate::resources::Resource::provision`] and
+/// consumed when configuring clients or asserting isolation (e.g. Kafka bootstrap + topic prefix
+/// in `metadata`).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResourceHandle {
     /// Unique identifier for this logical slice of the resource.
@@ -203,19 +213,29 @@ pub struct ResourceHandle {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Newtype wrapper for scenario identifiers (used for isolation keys, e.g. Kafka topic prefixes).
+/// Identifier for one scenario run, carried through provision and teardown for isolation.
+///
+/// Why a newtype: distinguishes scenario ids from other strings (logs, resource names) and keeps
+/// isolation keys (Kafka prefixes, DB names) in one place.
+///
+/// How: set by [`crate::lifecycle::run_scenario`] from the scenario name; read via
+/// [`crate::lifecycle::Context::scenario_id`] inside the scenario body and in
+/// [`crate::resources::Resource::provision`].
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ScenarioId(String);
 
 impl ScenarioId {
+    /// Construct an id from any string-like value (typically the Rust test function name).
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
 
+    /// Empty id before the harness assigns a scenario name.
     pub fn empty() -> Self {
         Self(String::new())
     }
 
+    /// View the id as `str` for formatting and isolation helpers.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -283,9 +303,12 @@ impl Error for InternalError {
 /// Result type alias for Shakedown operations.
 pub type Result<T> = std::result::Result<T, ShakedownError>;
 
-/// Convenience trait for converting any error to an infrastructure error.
+/// Ergonomic conversion of `std::error::Error` values into [`InfrastructureError::Backend`].
+///
+/// Implemented for all `Error + Send + Sync + 'static` types so environment or IO failures can be
+/// wrapped without bespoke match arms at every site.
 pub trait IntoInfrastructureError: Error + Send + Sync {
-    /// Convert self to an infrastructure error.
+    /// Box `self` as the source of an [`InfrastructureError::Backend`].
     fn into_infrastructure_error(self) -> InfrastructureError;
 }
 
@@ -304,15 +327,17 @@ mod tests {
 
     #[test]
     fn scenario_error_display() {
+        // Given a scenario assertion error carrying a message
         let err = ScenarioError::Assertion("assertion failed".to_string());
-        assert_eq!(
-            format!("{}", err),
-            "Scenario assertion error: assertion failed"
-        );
+        // When we format it for display
+        let displayed = format!("{}", err);
+        // Then the output includes the scenario assertion prefix and message
+        assert_eq!(displayed, "Scenario assertion error: assertion failed");
     }
 
     #[test]
     fn infrastructure_error_display() {
+        // Given a provision failure for a named resource wrapping an I/O error
         let err = InfrastructureError::Provision {
             resource: "kafka".to_string(),
             source: Box::new(std::io::Error::new(
@@ -320,72 +345,99 @@ mod tests {
                 "connection refused",
             )),
         };
-        assert!(format!("{}", err).contains("kafka"));
+        // When we format it for display
+        let displayed = format!("{}", err);
+        // Then the resource name appears in the message
+        assert!(displayed.contains("kafka"));
     }
 
     #[test]
     fn internal_error_display() {
+        // Given an invariant violation internal error
         let err = InternalError::InvariantViolation("state must be valid".to_string());
+        // When we format it for display
+        let displayed = format!("{}", err);
+        // Then the output matches the internal invariant wording
         assert_eq!(
-            format!("{}", err),
+            displayed,
             "Internal error: Invariant violation: state must be valid"
         );
     }
 
     #[test]
     fn shakedown_error_from_scenario() {
+        // Given a scenario-level error
         let scenario_err = ScenarioError::Assertion("failed".to_string());
+        // When we lift it into the top-level Shakedown error
         let shakedown_err: ShakedownError = scenario_err.into();
+        // Then it is classified as a scenario error
         assert!(matches!(shakedown_err, ShakedownError::Scenario(_)));
     }
 
     #[test]
     fn shakedown_error_from_infrastructure() {
+        // Given an infrastructure provision error
         let infra_err = InfrastructureError::Provision {
             resource: "kafka".to_string(),
             source: Box::new(std::io::Error::other("failed")),
         };
+        // When we lift it into the top-level Shakedown error
         let shakedown_err: ShakedownError = infra_err.into();
+        // Then it is classified as an infrastructure error
         assert!(matches!(shakedown_err, ShakedownError::Infrastructure(_)));
     }
 
     #[test]
     fn shakedown_error_from_internal() {
+        // Given an internal framework error
         let internal_err = InternalError::Bug("unknown bug".to_string());
+        // When we lift it into the top-level Shakedown error
         let shakedown_err: ShakedownError = internal_err.into();
+        // Then it is classified as an internal error
         assert!(matches!(shakedown_err, ShakedownError::Internal(_)));
     }
 
     #[test]
     fn scenario_error_is_send_sync() {
+        // Given a scenario error value
         let err = ScenarioError::Assertion("test".to_string());
+        // When we require Send + Sync at the type level
         fn check_send_sync<T: Send + Sync>(_: T) {}
+        // Then the compiler accepts it
         check_send_sync(err);
     }
 
     #[test]
     fn infrastructure_error_is_send_sync() {
+        // Given an infrastructure teardown error
         let infra_err = InfrastructureError::Teardown {
             resource: "test".to_string(),
             source: Box::new(std::io::Error::other("failed")),
         };
+        // When we require Send + Sync at the type level
         fn check_send_sync<T: Send + Sync>(_: T) {}
+        // Then the compiler accepts it
         check_send_sync(infra_err);
     }
 
     #[test]
     fn internal_error_is_send_sync() {
+        // Given an internal invariant error
         let internal_err = InternalError::InvariantViolation("test".to_string());
+        // When we require Send + Sync at the type level
         fn check_send_sync<T: Send + Sync>(_: T) {}
+        // Then the compiler accepts it
         check_send_sync(internal_err);
     }
 
     #[test]
     fn test_scenario_id() {
+        // Given a scenario id built from a string and the empty sentinel
         let id = ScenarioId::new("sc_001");
-        assert_eq!(id.to_string(), "sc_001");
-
         let empty_id = ScenarioId::empty();
+        // When we display them
+        // Then the non-empty id round-trips and the empty id prints as nothing
+        assert_eq!(id.to_string(), "sc_001");
         assert_eq!(empty_id.to_string(), "");
     }
 
@@ -393,13 +445,15 @@ mod tests {
     fn resource_handle_serialization() {
         use serde_json::to_value;
 
+        // Given a resource handle with metadata
         let handle = ResourceHandle {
             id: "test_resource".to_string(),
             connection_string: "localhost:5432".to_string(),
             metadata: Some(serde_json::json!({"host": "localhost", "port": 5432})),
         };
-
-        let serialized = to_value(&handle).unwrap();
+        // When we serialize it to JSON
+        let serialized = to_value(&handle).expect("serialize resource handle");
+        // Then we get a JSON object
         assert!(serialized.as_object().is_some());
     }
 }

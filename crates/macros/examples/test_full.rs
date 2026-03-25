@@ -1,3 +1,6 @@
+//! Dev-only scratch binary: pretty-print a near-macro expansion wrapping a scenario body in `tokio::test`.
+
+/// Parse a sample async scenario fn and emit the expanded token stream for inspection.
 fn main() {
     let input = r#"async fn my_test(ctx: &mut shakedown::Context) {
         assert!(true);

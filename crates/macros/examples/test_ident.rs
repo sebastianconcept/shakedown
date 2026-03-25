@@ -1,3 +1,6 @@
+//! Dev-only scratch binary: experiment with `quote` and `syn::ItemFn` idents for macro expansion.
+
+/// Print two `quote!` expansions using different ident bindings.
 fn main() {
     let input = r#"async fn my_test(ctx: &mut shakedown::Context) {
         assert!(true);

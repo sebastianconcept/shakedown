@@ -15,12 +15,14 @@ use shakedown::{BuiltinResource, RegisteredResource};
 #[shakedown::test(resources = [Kafka])]
 #[ignore = "requires Docker; run: cargo test -p shakedown --features kafka macro_kafka -- --ignored"]
 async fn macro_attributed_kafka_provisions_and_exposes_bindings(ctx: &mut shakedown::Context) {
+    // Given Docker-backed Kafka provisioned via the macro resource list
+    // When we read Kafka bindings and the registered resource list
     let bindings = ctx
         .kafka_bindings()
         .expect("kafka bindings after Kafka provision");
     assert!(!bindings.bootstrap_servers.is_empty());
     assert!(!bindings.topic_prefix.is_empty());
-
+    // Then bootstrap and topic prefix are populated and Kafka is the registered builtin
     assert!(
         matches!(
             ctx.resources().first(),
