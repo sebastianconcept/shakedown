@@ -8,7 +8,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
-use syn::{bracketed, FnArg, Ident, ItemFn, Token, Type};
+use syn::{bracketed, Expr, FnArg, Ident, ItemFn, Token, Type};
 
 /// True when `ty` is `&mut ...::Context` (mutable reference to a path whose last segment is `Context`).
 fn is_ctx_mut_context_type(ty: &Type) -> bool {
@@ -28,7 +28,25 @@ fn is_ctx_mut_context_type(ty: &Type) -> bool {
         .is_some_and(|segment| segment.ident == "Context")
 }
 
-/// `#[shakedown::test]` / `#[shakedown::faulty_test]` attribute: optional `resources = [Fake, Kafka, ...]`.
+/// Comma-separated idents inside `[ ... ]` (e.g. `resources = [Fake, Kafka]`).
+fn parse_ident_list_bracketed(input: ParseStream) -> syn::Result<Vec<Ident>> {
+    let inner;
+    bracketed!(inner in input);
+    parse_ident_list(&inner)
+}
+
+fn parse_ident_list(input: ParseStream) -> syn::Result<Vec<Ident>> {
+    let mut idents = Vec::new();
+    while !input.is_empty() {
+        idents.push(input.parse::<Ident>()?);
+        if !input.is_empty() {
+            input.parse::<Token![,]>()?;
+        }
+    }
+    Ok(idents)
+}
+
+/// `#[shakedown::test]` attribute: optional `resources = [Fake, Kafka, ...]` only.
 struct TestAttrArgs {
     resources: Option<Vec<Ident>>,
 }
@@ -47,15 +65,7 @@ impl Parse for TestAttrArgs {
             ));
         }
         input.parse::<Token![=]>()?;
-        let inner;
-        bracketed!(inner in input);
-        let mut resources = Vec::new();
-        while !inner.is_empty() {
-            resources.push(inner.parse::<Ident>()?);
-            if !inner.is_empty() {
-                inner.parse::<Token![,]>()?;
-            }
-        }
+        let resources = parse_ident_list_bracketed(input)?;
         Ok(Self {
             resources: Some(resources),
         })
@@ -68,6 +78,39 @@ fn parse_test_attr(attr: TokenStream) -> syn::Result<Option<Vec<Ident>>> {
     }
     let args: TestAttrArgs = syn::parse(attr)?;
     Ok(args.resources)
+}
+
+/// `#[shakedown::faulty_test]` attribute: `resources = [...]` plus any `name = <expr>` pairs
+/// reserved for `mvp-fault-injection` are accepted and ignored in this milestone.
+struct FaultyTestAttrParser {
+    resources: Option<Vec<Ident>>,
+}
+
+impl Parse for FaultyTestAttrParser {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut resources = None;
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            if key == "resources" {
+                resources = Some(parse_ident_list_bracketed(input)?);
+            } else {
+                let _ = Expr::parse(input)?;
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(Self { resources })
+    }
+}
+
+fn parse_faulty_test_attr(attr: TokenStream) -> syn::Result<Option<Vec<Ident>>> {
+    if attr.is_empty() {
+        return Ok(None);
+    }
+    let parsed: FaultyTestAttrParser = syn::parse(attr)?;
+    Ok(parsed.resources)
 }
 
 fn first_parameter_is_ctx_mut_context(func: &ItemFn) -> bool {
@@ -186,7 +229,7 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Supports optional `resources` argument identically to `#[shakedown::test]`.
 #[proc_macro_attribute]
 pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let resources_list = match parse_test_attr(attr) {
+    let resources_list = match parse_faulty_test_attr(attr) {
         Ok(list) => list,
         Err(e) => return e.to_compile_error().into(),
     };

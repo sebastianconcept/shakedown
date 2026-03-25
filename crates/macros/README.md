@@ -40,6 +40,8 @@ async fn fault_injected_scenario(ctx: &mut Context) {
 
 The generated code calls `ctx.set_scenario_kind(ScenarioKind::Faulty)` before running the scenario.
 
+Additional `name = <expr>` attribute arguments are **ignored** until `mvp-fault-injection` wires fault settings; only `resources = [...]` is interpreted today.
+
 ### Optional `resources` argument
 
 Register builtin resources on the context before the scenario runs:
