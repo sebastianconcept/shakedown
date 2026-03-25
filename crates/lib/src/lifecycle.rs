@@ -32,7 +32,9 @@
 //!     let mut ctx = Context::new();
 //!     let mut event_log = EventLog::new();
 //!
-//!     run_scenario(&mut ctx, "test-scenario", my_scenario, &mut event_log).await.unwrap();
+//!     run_scenario(&mut ctx, "test-scenario", |c| Box::pin(my_scenario(c)), &mut event_log)
+//!         .await
+//!         .unwrap();
 //!
 //!     // Retrieve events after scenario completion
 //!     let events = event_log.events();
@@ -140,6 +142,15 @@ pub enum ScenarioKind {
     Normal,
     /// A faulty scenario (faults may be injected)
     Faulty,
+}
+
+impl std::fmt::Display for ScenarioKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScenarioKind::Normal => write!(f, "Normal"),
+            ScenarioKind::Faulty => write!(f, "Faulty"),
+        }
+    }
 }
 
 /// Represents the context for a scenario run.
@@ -312,6 +323,10 @@ async fn teardown_all_resources(ctx: &mut Context) {
 /// Events emitted during the scenario run are appended to the provided [`EventLog`].
 /// After completion, callers can retrieve all events for debugging or analysis.
 ///
+/// `scenario_fn` takes only `&mut Context` and must return a [`std::pin::Pin`]-boxed [`Future`]
+/// so the run phase can borrow `Context` across `.await` while the harness keeps using
+/// `event_log` after the scenario body completes.
+///
 /// # Example
 ///
 /// ```ignore
@@ -326,21 +341,24 @@ async fn teardown_all_resources(ctx: &mut Context) {
 ///     let mut ctx = Context::new();
 ///     let mut event_log = EventLog::new();
 ///
-///     run_scenario(&mut ctx, "test-scenario", my_scenario, &mut event_log).await.unwrap();
+///     run_scenario(&mut ctx, "test-scenario", |c| Box::pin(my_scenario(c)), &mut event_log)
+///         .await
+///         .unwrap();
 ///
 ///     // Retrieve events after scenario completion
 ///     let events = event_log.events();
 /// }
 /// ```
-pub async fn run_scenario<F, Fut>(
+pub async fn run_scenario<F>(
     ctx: &mut Context,
     scenario_id: impl Into<String>,
     scenario_fn: F,
     event_log: &mut EventLog,
 ) -> Result<(), ShakedownError>
 where
-    F: Fn(&mut Context, &mut EventLog) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    F: for<'s> FnOnce(
+        &'s mut Context,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 's>>,
 {
     // Update scenario ID
     ctx.set_scenario_id(scenario_id);
@@ -399,7 +417,7 @@ where
     // Run phase
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting run phase");
     // Execute the scenario function
-    let _ = scenario_fn(ctx, event_log).await;
+    let _ = scenario_fn(ctx).await;
 
     // Assert phase (in a real implementation, this would run assertions)
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting assert phase");
@@ -534,7 +552,7 @@ mod tests {
     #[test]
     fn test_error_classification() {
         // Test that errors are properly classified into scenario vs infrastructure
-        use crate::ShakedownError;
+        use crate::error::ShakedownError;
 
         // Scenario error (user logic/assertions)
         let scenario_err: ShakedownError =
@@ -651,7 +669,7 @@ mod tests {
         let result = run_scenario(
             &mut ctx,
             "test-scenario",
-            |_ctx: &mut Context, _event_log: &mut EventLog| async {},
+            |_ctx: &mut Context| Box::pin(async {}),
             &mut event_log,
         )
         .await;
@@ -670,7 +688,7 @@ mod tests {
         run_scenario(
             &mut ctx,
             "test-events-scenario",
-            |_ctx: &mut Context, _event_log: &mut EventLog| async {},
+            |_ctx: &mut Context| Box::pin(async {}),
             &mut event_log,
         )
         .await
@@ -768,7 +786,7 @@ mod tests {
         let result = run_scenario(
             &mut ctx,
             "test-async-resource",
-            |_ctx: &mut Context, _event_log: &mut EventLog| async {},
+            |_ctx: &mut Context| Box::pin(async {}),
             &mut EventLog::new(),
         )
         .await;

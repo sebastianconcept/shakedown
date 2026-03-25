@@ -1,8 +1,10 @@
-//! Compile-fail test: #[shakedown::test] on a sync function (should fail).
-//!
-//! Expected to fail with clear error message.
+//! Fail test: #[shakedown::test] on a non-async function
+//! 
+//! This should fail compilation with a clear error message.
 
 #[shakedown::test]
-fn sync_order_event(ctx: &mut shakedown::Context) {
-    // This should fail to compile because the macro requires an async function
+fn sync_test(ctx: &mut shakedown::Context) {
+    // This is wrong - must be async
 }
+
+fn main() {}

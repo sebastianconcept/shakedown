@@ -1,0 +1,5 @@
+error: unknown resource type `InvalidResource`; valid builtin resources are `Fake` and `Kafka` (Kafka requires `kafka` feature on `shakedown`)
+ --> tests/trybuild/fail/invalid_resource.rs:5:32
+  |
+5 | #[shakedown::test(resources = [InvalidResource])]
+  |                                ^^^^^^^^^^^^^^^

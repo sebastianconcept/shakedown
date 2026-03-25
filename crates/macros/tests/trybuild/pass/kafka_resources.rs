@@ -1,15 +1,10 @@
-//! Compile-pass test: #[shakedown::test] with Kafka resource (feature-gated).
-//!
-//! Expected to compile and pass when `kafka` feature is enabled.
+//! Reserved for Kafka compile-pass when `shakedown-macros` wires a `kafka` dev-dependency feature.
+//! Today `Kafka` in `resources = [...]` is validated only under `cargo test -p shakedown --features kafka`
+//! (integration tests). Duplicate Fake case kept so this file stays a valid future extension point.
 
-#[cfg(feature = "kafka")]
-#[cfg(test)]
-mod tests {
-    use shakedown::{Context, resources::KafkaResource};
-
-    // Test with Kafka resource specified in attribute (feature-gated)
-    #[shakedown::test(resources = [Kafka])]
-    async fn with_kafka_resource(ctx: &mut Context) {
-        let _bindings = ctx.kafka_bindings();
-    }
+#[shakedown::test(resources = [Fake])]
+async fn kafka_feature_placeholder(ctx: &mut shakedown::Context) {
+    let _ = ctx;
 }
+
+fn main() {}

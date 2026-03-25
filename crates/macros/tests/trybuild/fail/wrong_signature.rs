@@ -1,8 +1,10 @@
-//! Compile-fail test: #[shakedown::test] with wrong parameter signature (should fail).
-//!
-//! Expected to fail with clear error message.
+//! Fail test: #[shakedown::test] with wrong parameter signature
+//! 
+//! This should fail compilation because the first parameter must be ctx: &mut Context.
 
 #[shakedown::test]
-async fn event_without_ctx(ctx: i32) {
-    // This should fail to compile because the macro expects ctx: &mut Context
+async fn wrong_param(ctx: shakedown::Context) {
+    // Wrong - should be &mut Context, not owned value
 }
+
+fn main() {}

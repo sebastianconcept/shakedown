@@ -13,16 +13,16 @@ use shakedown::Context;
 
 #[shakedown::test]
 async fn order_created_event(ctx: &mut Context) {
-    // Scenario body here
-    let event = ctx.event_queue().consume_one().await;
+    // Scenario body — e.g. exercise resources and assert on ctx / lifecycle
+    assert!(!ctx.scenario_id().to_string().is_empty());
 }
 ```
 
-The macro generates a `#[tokio::test]` wrapper that calls [`run_scenario`](../lib/src/lifecycle.rs):
+The macro expands to an outer `#[::tokio::test]` async function that calls [`run_scenario`](../lib/src/lifecycle.rs):
 
 - Creates `Context::new()` and `EventLog::new()`
-- Registers resources (when specified via attribute argument)
-- Calls `run_scenario(&mut ctx, scenario_id, |ctx, _event_log| { ... }, event_log)`
+- Registers builtin resources when given `resources = [...]`
+- Calls `run_scenario(&mut ctx, scenario_id, |ctx| Box::pin(async move { ... }), &mut event_log).await`
 - Panics with a clear error if `run_scenario` returns `Err`
 
 ### `#[shakedown::faulty_test]`
@@ -40,14 +40,19 @@ async fn fault_injected_scenario(ctx: &mut Context) {
 
 The generated code calls `ctx.set_scenario_kind(ScenarioKind::Faulty)` before running the scenario.
 
-### Optional Attributes Argument (US-003 - Deferred)
+### Optional `resources` argument
 
-Future iteration will support resource registration via attribute:
+Register builtin resources on the context before the scenario runs:
 
 ```rust,ignore
-#[shakedown::test(resources = [Fake])]  // Registers FakeResource automatically
+#[shakedown::test(resources = [Fake])]
 async fn test(ctx: &mut Context) { ... }
+
+#[shakedown::test(resources = [Fake, Kafka])]  // needs `shakedown` with `kafka` feature
+async fn with_kafka(ctx: &mut Context) { ... }
 ```
+
+Compile-time UI coverage for these attributes lives in `tests/trybuild/` (pass + `compile_fail` cases with `.stderr` snapshots).
 
 ## Usage Examples
 
@@ -63,12 +68,12 @@ async fn basic_test(ctx: &mut Context) {
 }
 ```
 
-### Test with resources (deferred - US-003)
+### Test with resources
 
 ```rust,ignore
-#[shakedown::test(resources = [Fake])]  // Auto-registers FakeResource
+#[shakedown::test(resources = [Fake])]
 async fn with_fake_resource(ctx: &mut Context) {
-    let _fake_handle = ctx.resources_mut()[0].as_builtin();
+    assert!(!ctx.resources().is_empty());
 }
 ```
 
