@@ -6,7 +6,79 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{spanned::Spanned, FnArg, ItemFn};
+use syn::parse::{Parse, ParseStream};
+use syn::spanned::Spanned;
+use syn::{bracketed, FnArg, Ident, ItemFn, Token, Type};
+
+/// True when `ty` is `&mut ...::Context` (mutable reference to a path whose last segment is `Context`).
+fn is_ctx_mut_context_type(ty: &Type) -> bool {
+    let Type::Reference(type_reference) = ty else {
+        return false;
+    };
+    if type_reference.mutability.is_none() {
+        return false;
+    }
+    let Type::Path(type_path) = type_reference.elem.as_ref() else {
+        return false;
+    };
+    type_path
+        .path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "Context")
+}
+
+/// `#[shakedown::test]` / `#[shakedown::faulty_test]` attribute: optional `resources = [Fake, Kafka, ...]`.
+struct TestAttrArgs {
+    resources: Option<Vec<Ident>>,
+}
+
+impl Parse for TestAttrArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.is_empty() {
+            return Ok(Self { resources: None });
+        }
+
+        let key: Ident = input.parse()?;
+        if key != "resources" {
+            return Err(syn::Error::new(
+                key.span(),
+                "unknown attribute argument (only `resources = [ ... ]` is supported in this milestone)",
+            ));
+        }
+        input.parse::<Token![=]>()?;
+        let inner;
+        bracketed!(inner in input);
+        let mut resources = Vec::new();
+        while !inner.is_empty() {
+            resources.push(inner.parse::<Ident>()?);
+            if !inner.is_empty() {
+                inner.parse::<Token![,]>()?;
+            }
+        }
+        Ok(Self {
+            resources: Some(resources),
+        })
+    }
+}
+
+fn parse_test_attr(attr: TokenStream) -> syn::Result<Option<Vec<Ident>>> {
+    if attr.is_empty() {
+        return Ok(None);
+    }
+    let args: TestAttrArgs = syn::parse(attr)?;
+    Ok(args.resources)
+}
+
+fn first_parameter_is_ctx_mut_context(func: &ItemFn) -> bool {
+    let Some(first) = func.sig.inputs.first() else {
+        return false;
+    };
+    let FnArg::Typed(pat_type) = first else {
+        return false;
+    };
+    is_ctx_mut_context_type(pat_type.ty.as_ref())
+}
 
 /// Creates a scenario test wrapped in the full lifecycle.
 ///
@@ -16,8 +88,10 @@ use syn::{spanned::Spanned, FnArg, ItemFn};
 /// - `#[shakedown::test(resources = [Fake, Kafka])]` — registers both (Kafka requires `--features kafka`)
 #[proc_macro_attribute]
 pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Parse attribute arguments using simple lookahead approach
-    let resources_list = parse_macro_args(attr);
+    let resources_list = match parse_test_attr(attr) {
+        Ok(list) => list,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     let func = match syn::parse::<ItemFn>(item.clone()) {
         Ok(f) => f,
@@ -34,22 +108,7 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
 
-    // Validate first parameter is ctx: &mut Context (or bare Context type)
-    let has_correct_param = func
-        .sig
-        .inputs
-        .first()
-        .map(|arg| match arg {
-            FnArg::Typed(pat_type) => {
-                let ty = pat_type.ty.as_ref();
-                // Accept both bare path types (Context) and reference paths (&mut Context)
-                matches!(ty, syn::Type::Path(_) | syn::Type::Reference(_))
-            }
-            FnArg::Receiver(_) => false,
-        })
-        .unwrap_or(false);
-
-    if !has_correct_param {
+    if !first_parameter_is_ctx_mut_context(&func) {
         return syn::Error::new(
             func.sig.fn_token.span(),
             "#[shakedown::test] expected signature: async fn name(ctx: &mut Context)",
@@ -68,8 +127,8 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
             // Build registration code for each resource
             let mut registrations = Vec::new();
 
-            for ident in &resource_names {
-                let reg = build_resource_registration(ident);
+            for resource_ident in &resource_names {
+                let reg = build_resource_registration(resource_ident);
                 match reg {
                     Ok(code) => registrations.push(code),
                     Err(e) => return e.into_compile_error().into(),
@@ -87,9 +146,12 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    let fn_ident = &func.sig.ident;
+    // `quote!` parses `#func.block` as `#func` + literal `.block`; bind the block first.
+    let user_block = &func.block;
     let expanded = quote! {
         #[::tokio::test]
-        async fn #func.sig.ident() {
+        async fn #fn_ident() {
             let mut ctx = ::shakedown::Context::new();
             let mut event_log = ::shakedown::EventLog::new();
 
@@ -99,9 +161,10 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
             let result = ::shakedown::run_scenario(
                 &mut ctx,
                 #func_name,
-                |ctx: &mut ::shakedown::Context, _event_log: &mut ::shakedown::EventLog| async move {
-                    // User's scenario body
-                    #func.block
+                |ctx: &mut ::shakedown::Context| {
+                    ::std::boxed::Box::pin(async move {
+                        #user_block
+                    })
                 },
                 &mut event_log,
             ).await;
@@ -110,7 +173,8 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
                 panic!("shakedown scenario failed: {}", e);
             }
         }
-    }.into();
+    }
+    .into();
 
     #[allow(clippy::let_and_return)]
     expanded
@@ -122,8 +186,10 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Supports optional `resources` argument identically to `#[shakedown::test]`.
 #[proc_macro_attribute]
 pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Parse attribute arguments (same as test macro)
-    let resources_list = parse_macro_args(attr);
+    let resources_list = match parse_test_attr(attr) {
+        Ok(list) => list,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     let func = match syn::parse::<ItemFn>(item.clone()) {
         Ok(f) => f,
@@ -140,22 +206,7 @@ pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
 
-    // Validate first parameter is ctx: &mut Context (or bare Context type)
-    let has_correct_param = func
-        .sig
-        .inputs
-        .first()
-        .map(|arg| match arg {
-            FnArg::Typed(pat_type) => {
-                let ty = pat_type.ty.as_ref();
-                // Accept both bare path types (Context) and reference paths (&mut Context)
-                matches!(ty, syn::Type::Path(_) | syn::Type::Reference(_))
-            }
-            FnArg::Receiver(_) => false,
-        })
-        .unwrap_or(false);
-
-    if !has_correct_param {
+    if !first_parameter_is_ctx_mut_context(&func) {
         return syn::Error::new(
             func.sig.fn_token.span(),
             "#[shakedown::faulty_test] expected signature: async fn name(ctx: &mut Context)",
@@ -173,8 +224,8 @@ pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(resource_names) => {
             let mut registrations = Vec::new();
 
-            for ident in &resource_names {
-                let reg = build_resource_registration(ident);
+            for resource_ident in &resource_names {
+                let reg = build_resource_registration(resource_ident);
                 match reg {
                     Ok(code) => registrations.push(code),
                     Err(e) => return e.into_compile_error().into(),
@@ -192,9 +243,11 @@ pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    let fn_ident = &func.sig.ident;
+    let user_block = &func.block;
     let expanded = quote! {
         #[::tokio::test]
-        async fn #func.sig.ident() {
+        async fn #fn_ident() {
             let mut ctx = ::shakedown::Context::new();
             let mut event_log = ::shakedown::EventLog::new();
 
@@ -206,9 +259,10 @@ pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
             let result = ::shakedown::run_scenario(
                 &mut ctx,
                 #func_name,
-                |ctx: &mut ::shakedown::Context, _event_log: &mut ::shakedown::EventLog| async move {
-                    // User's scenario body
-                    #func.block
+                |ctx: &mut ::shakedown::Context| {
+                    ::std::boxed::Box::pin(async move {
+                        #user_block
+                    })
                 },
                 &mut event_log,
             ).await;
@@ -217,64 +271,41 @@ pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
                 panic!("shakedown scenario failed: {}", e);
             }
         }
-    }.into();
+    }
+    .into();
 
     #[allow(clippy::let_and_return)]
     expanded
 }
 
-/// Parses the attribute arguments to extract optional resources list.
-fn parse_macro_args(attr: TokenStream) -> Option<Vec<String>> {
-    // Check if attr contains "[resources" pattern or just a bracket group with identifiers
-    let tokens: Vec<proc_macro::TokenTree> = attr.into_iter().collect();
-
-    let mut resource_names = Vec::new();
-    let mut in_brackets = false;
-
-    for token in &tokens {
-        match token {
-            proc_macro::TokenTree::Ident(ident) => {
-                if ident.to_string() == "resources" && !in_brackets {
-                    // Found the keyword, enter bracket mode
-                    in_brackets = true;
-                } else if in_brackets {
-                    // This is a resource identifier (skip "resources" keyword itself)
-                    if ident.to_string() != "resources" {
-                        resource_names.push(ident.to_string());
-                    }
-                }
-            }
-            proc_macro::TokenTree::Punct(punct) => {
-                let ch = punct.as_char();
-                if ch == '[' && !in_brackets {
-                    in_brackets = true;
-                } else if ch == ']' {
-                    in_brackets = false;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Some(resource_names)
-}
-
 /// Builds registration code for a single resource identifier.
-fn build_resource_registration(ident: &str) -> syn::Result<proc_macro2::TokenStream> {
-    match ident {
+fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenStream> {
+    let name = ident.to_string();
+    match name.as_str() {
         "Fake" => Ok(quote! {
             ctx.register_builtin(::shakedown::BuiltinResource::Fake(
                 ::shakedown::FakeResource::default(),
             ));
         }),
         "Kafka" => Ok(quote! {
-            ctx.register_builtin(::shakedown::BuiltinResource::Kafka(
-                ::shakedown::KafkaResource::new(),
-            ));
+            #[cfg(feature = "kafka")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Kafka(
+                    ::shakedown::KafkaResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "kafka"))]
+            {
+                ::core::compile_error!(
+                    "Kafka in #[shakedown::test(resources = [...])] requires `kafka` feature on the `shakedown` dependency"
+                );
+            }
         }),
         _ => Err(syn::Error::new(
-            proc_macro2::Span::call_site(),
-            format!("unknown resource type: `{}`. Valid resources: `Fake`, `Kafka` (requires --features kafka)", ident),
+            ident.span(),
+            format!(
+                "unknown resource type `{name}`; valid builtin resources are `Fake` and `Kafka` (Kafka requires `kafka` feature on `shakedown`)"
+            ),
         )),
     }
 }

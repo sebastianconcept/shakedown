@@ -1,8 +1,14 @@
-//! Trybuild tests for shakedown-macros.
+//! trybuild: compile-pass and compile-fail checks for `#[shakedown::test]` / `#[shakedown::faulty_test]`.
 //!
-//! These tests verify macro expansion correctness at compile time:
-//! - Valid macro usage compiles successfully (pass tests)
-//! - Invalid macro usage produces clear compile errors (fail tests)
+//! Paths are relative to the `shakedown-macros` crate root (`CARGO_MANIFEST_DIR`).
 
-// Note: Individual test files (test_pass.rs, test_fail.rs) contain the actual
-// macro-usage examples. This file documents the intent.
+#[test]
+fn macros_ui() {
+    let t = trybuild::TestCases::new();
+    t.pass("tests/trybuild/pass/basic_test.rs");
+    t.pass("tests/trybuild/pass/faulty_test.rs");
+    t.pass("tests/trybuild/pass/resources_arg.rs");
+    t.compile_fail("tests/trybuild/fail/sync_function.rs");
+    t.compile_fail("tests/trybuild/fail/wrong_signature.rs");
+    t.compile_fail("tests/trybuild/fail/invalid_resource.rs");
+}

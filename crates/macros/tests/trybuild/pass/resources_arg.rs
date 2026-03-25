@@ -1,22 +1,10 @@
-//! Compile-pass test: #[shakedown::test] with optional resources argument.
-//!
-//! Expected to compile and pass. This verifies the macro correctly handles the
-//! resources attribute argument.
+//! Pass test: #[shakedown::test] with resources argument
+//! 
+//! This verifies that the resources arg works correctly for auto-registering Fake.
 
-#[cfg(test)]
-mod tests {
-    use shakedown::{Context, resources::FakeResource};
-
-    // Test with Fake resource specified in attribute
-    #[shakedown::test(resources = [Fake])]
-    async fn with_fake_resource(ctx: &mut Context) {
-        let _scenario_id = ctx.scenario_id();
-    }
-
-    // Test without specifying resources (user registers manually)
-    #[shakedown::test]
-    async fn manual_resource_registration(ctx: &mut Context) {
-        // User can register resources inside the test body before their logic
-        let _ = ctx.scenario_id();
-    }
+#[shakedown_macros::test(resources = [Fake])]
+async fn test_with_fake(ctx: &mut shakedown::Context) {
+    assert!(!ctx.is_empty());
 }
+
+fn main() {}

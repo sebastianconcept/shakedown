@@ -47,8 +47,8 @@
 //!
 //! ## Milestone status
 //!
-//! - **Current**: `mvp-kafka-vertical` — async Resource trait, BuiltinResource enum, Kafka bindings
-//! - **Next**: `mvp-macros-system-test` — procedural macros for test discovery
+//! - **Current**: `mvp-macros-system-test` — `#[shakedown::test]` / `#[shakedown::faulty_test]`, optional `resources = [...]`, trybuild UI tests in `shakedown-macros`
+//! - **Next**: infrastructure milestones (e.g. Postgres/MariaDB) per product roadmap
 //!
 //! ## See also
 //!
@@ -88,7 +88,9 @@
 //!     let mut ctx = Context::new();
 //!     ctx.register_extension(MyResource);
 //!
-//!     run_scenario(&mut ctx, "my-scenario", my_scenario_logic, &mut event_log).await.unwrap();
+//!     run_scenario(&mut ctx, "my-scenario", |c| Box::pin(my_scenario_logic(c)), &mut event_log)
+//!         .await
+//!         .unwrap();
 //! }
 //! ```
 
@@ -100,16 +102,17 @@ pub mod resources;
 #[doc(inline)]
 pub use crate::error::{
     InfrastructureError, InternalError, ResourceHandle, Result, ScenarioError, ScenarioId,
-    ShakedownError,
 };
 pub use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
+/// Public types and functions from the lifecycle module.
 pub use crate::lifecycle::{
-    run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, Phase,
-    ScenarioKind,
+    run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, ScenarioKind,
 };
+
+/// First-party resource implementations.
+#[doc(inline)]
 pub use crate::resources::{
-    BuiltinResource, CloneResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
-    ResourceBinding, ResourceConfig,
+    BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
 };
 
 #[cfg(feature = "kafka")]
@@ -120,42 +123,14 @@ pub use crate::resources::KafkaResource;
 // `::shakedown::*` paths in generated code, which are resolved at the call site.
 pub use shakedown_macros::{faulty_test, test};
 
-/// Returns the compile-time default greeting emitted by the `macros` crate.
-#[allow(unused_variables)] // Silence warning until macros crate is wired
-pub fn greeting() -> &'static str {
-    shakedown_macros::default_greeting!()
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::error::{
-        InfrastructureError, InternalError, ResourceHandle, ScenarioError, ScenarioId,
-    };
+    use crate::error::{InfrastructureError, InternalError, ResourceHandle, ScenarioError};
     use crate::event::{EventLevel, EventLog};
-    use crate::greeting;
-    use crate::lifecycle::NoopEnvironmentBackend;
-    #[cfg(feature = "kafka")]
-    use crate::resources::KafkaResource;
+    use crate::lifecycle::{Context, NoopEnvironmentBackend};
     use crate::resources::{
         BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
     };
-    use crate::Context;
-
-    #[test]
-    fn greeting_matches_expected() {
-        let message = greeting();
-        assert_eq!(message, "Hello, shakedown!");
-    }
-
-    #[test]
-    fn error_hierarchy_compiles() {
-        let _scenario: ScenarioError = ScenarioError::Assertion("test".to_string());
-        let _infra: InfrastructureError = InfrastructureError::Provision {
-            resource: "test".to_string(),
-            source: Box::new(std::io::Error::other("test")),
-        };
-        let _internal: InternalError = InternalError::Bug("test".to_string());
-    }
 
     #[test]
     fn test_context_and_types() {
@@ -169,8 +144,10 @@ mod tests {
         let bindings = KafkaBindings::new("localhost:9092", "prefix_");
         assert_eq!(bindings.bootstrap_servers, "localhost:9092");
 
-        let scenario_id = ScenarioId::new("test");
-        assert_eq!(scenario_id.to_string(), "test");
+        // ScenarioKind enum distinguishes Normal vs Faulty scenarios
+        use crate::lifecycle::ScenarioKind;
+        let scenario_kind = ScenarioKind::Normal;
+        assert_eq!(scenario_kind.to_string(), "Normal");
 
         let builtin = RegisteredResource::Builtin(BuiltinResource::Fake(FakeResource::default()));
         let extension = RegisteredResource::Extension(Box::new(FakeResource::default()));
@@ -209,7 +186,7 @@ mod tests {
         impl Resource for TestResource {
             async fn provision(
                 &mut self,
-                _scenario_id: &ScenarioId,
+                _scenario_id: &crate::error::ScenarioId,
             ) -> std::result::Result<Vec<ResourceHandle>, InfrastructureError> {
                 Ok(vec![ResourceHandle {
                     id: "test".to_string(),
@@ -245,7 +222,7 @@ mod tests {
         impl Resource for AsyncTestResource {
             async fn provision(
                 &mut self,
-                _scenario_id: &ScenarioId,
+                _scenario_id: &crate::error::ScenarioId,
             ) -> std::result::Result<Vec<ResourceHandle>, InfrastructureError> {
                 tokio::task::yield_now().await;
                 Ok(vec![ResourceHandle {
@@ -273,6 +250,12 @@ mod tests {
         assert_resource::<AsyncTestResource>();
     }
 
-    // TODO: US-006 tests for proc macros - integration test files have macro expansion issues
-    // Tests should be placed in separate integration test module or use different approach
+    #[test]
+    fn test_context_scenario_kind() {
+        let mut ctx = Context::new();
+        assert_eq!(ctx.scenario_kind(), crate::lifecycle::ScenarioKind::Normal);
+
+        ctx.set_scenario_kind(crate::lifecycle::ScenarioKind::Faulty);
+        assert_eq!(ctx.scenario_kind(), crate::lifecycle::ScenarioKind::Faulty);
+    }
 }

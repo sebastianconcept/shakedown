@@ -6,3 +6,5 @@
 async fn with_invalid_resource(ctx: &mut shakedown::Context) {
     // This should fail to compile because InvalidResource is not a known builtin
 }
+
+fn main() {}
