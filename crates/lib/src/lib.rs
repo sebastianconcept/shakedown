@@ -48,7 +48,7 @@
 //! ## Milestone status
 //!
 //! - **Current**: `mvp-macros-system-test` — `#[shakedown::test]` / `#[shakedown::faulty_test]`, optional `resources = [...]`, trybuild UI tests in `shakedown-macros`
-//! - **Next**: infrastructure milestones (e.g. Postgres/MariaDB) per product roadmap
+//! - **In progress**: `mvp-postgres-mariadb` — PostgreSQL `Resource` + `PostgresBindings` (`postgres` feature); MariaDB/MySQL/SQLite next
 //!
 //! ## See also
 //!
@@ -118,6 +118,9 @@ pub use crate::lifecycle::{
 pub use crate::resources::{
     BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
 };
+
+#[cfg(feature = "postgres")]
+pub use crate::resources::{PostgresBindings, PostgresResource};
 
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;

@@ -31,7 +31,8 @@ shakedown/
 ## Milestone status
 
 - **Current (shipped in repo):** `mvp-macros-system-test` — procedural macros `#[shakedown::test]` and `#[shakedown::faulty_test]` for `cargo test` discovery; they delegate to `run_scenario` and public `Context` / `EventLog` APIs only. `ScenarioKind` (`Normal` / `Faulty`) on `Context` supports `#[shakedown::faulty_test]` today and future fault injection (`mvp-fault-injection`). Usage and optional `resources = [Fake, Kafka]` are documented in [`crates/macros/README.md`](../macros/README.md).
-- **Next:** `mvp-postgres-mariadb` — first-party **Postgres** and **MariaDB** resources on the same `Resource` trait and lifecycle as Kafka (MVP row 4 in adopted [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md)).
+- **In progress:** `mvp-postgres-mariadb` — first-party **PostgreSQL** (`PostgresResource`, `PostgresBindings`, `Context::postgres_bindings`) with suite-shared Docker container and per-scenario databases; **MariaDB**, **MySQL**, and **SQLite** follow the same pattern (MVP row 4 in adopted [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md)).
+- **Next after relational resources:** `mvp-outbox` — outbox helpers on Kafka + relational bindings.
 
 Default `cargo test -p shakedown` does not require Docker.
 
@@ -68,9 +69,19 @@ Default `cargo test -p shakedown` does not require Docker.
 Topics are created in `apply_default_seed` phase under the scenario's isolated namespace.
 See [`KafkaResource::apply_default_seed`](src/resources.rs) and [DECISIONS.md D-4](../../DECISIONS.md) for details.
 
-Integration tests that start Kafka are `#[ignore]` unless Docker is available:
+**Postgres (`testcontainers-modules::postgres`, `postgres:16` default tag):**
 
-`cargo test -p shakedown --features kafka --test kafka_docker -- --ignored`
+- [`PostgresResource`](src/resources.rs) uses a **suite-level** server: the first provision in a process starts one container; further instances share it until the last `Resource::teardown` drops the refcounted container. Each scenario gets a dedicated database name derived from [`sanitize_sql_database_name`](src/resources.rs).
+- **Image tag:** [`PostgresResource::with_image_tag`](src/resources.rs), or set `SHAKEDOWN_POSTGRES_IMAGE_TAG` and use [`PostgresResource::with_image_tag_from_env`](src/resources.rs). Default image tag is **`16`** (non-alpine, aligned with adopted SPECS).
+
+[`PostgresBindings`](src/resources.rs) is applied to [`Context`] after provision (same pattern as `KafkaBindings`). Default seed for Postgres is empty; scenarios own schema and data.
+
+Integration tests that start Kafka or Postgres are `#[ignore]` unless Docker is available:
+
+```text
+cargo test -p shakedown --features kafka --test macro_kafka -- --ignored
+cargo test -p shakedown --features postgres --test postgres_vertical -- --ignored
+```
 
 Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
 
