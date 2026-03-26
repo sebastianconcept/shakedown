@@ -94,6 +94,18 @@ name = "postgres_vertical"
 path = "tests/postgres_vertical.rs"
 required-features = ["postgres"]
 
+# MariaDB suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "mariadb_vertical"
+path = "tests/mariadb_vertical.rs"
+required-features = ["mariadb"]
+
+# Oracle MySQL suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "mysql_vertical"
+path = "tests/mysql_vertical.rs"
+required-features = ["mysql"]
+
 # SQLite bindings + in-memory proof (no Docker)
 [[test]]
 name = "sqlite_vertical"
