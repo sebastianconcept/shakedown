@@ -26,6 +26,25 @@ pub enum ShakedownError {
     Internal(InternalError),
     /// Outbox helpers require one relational binding in Context
     NoRelationalBindings,
+    /// Outbox assertion expected row was not found
+    OutboxRowNotFound {
+        aggregate_id: String,
+        event_type: String,
+        expected_status: String,
+    },
+    /// Outbox assertion found row in unexpected state
+    OutboxWrongState {
+        aggregate_id: String,
+        event_type: String,
+        expected: String,
+        actual: String,
+    },
+    /// Outbox retry assertion failed threshold check
+    OutboxRetryBelowThreshold {
+        aggregate_id: String,
+        attempts: i32,
+        min_attempts: i32,
+    },
 }
 
 impl std::fmt::Display for ShakedownError {
@@ -40,6 +59,34 @@ impl std::fmt::Display for ShakedownError {
                     "No relational bindings are set on Context (enable postgres, mariadb, mysql, or sqlite and provision one resource)"
                 )
             }
+            ShakedownError::OutboxRowNotFound {
+                aggregate_id,
+                event_type,
+                expected_status,
+            } => write!(
+                f,
+                "Outbox row not found for aggregate_id='{}', event_type='{}', expected status='{}'",
+                aggregate_id, event_type, expected_status
+            ),
+            ShakedownError::OutboxWrongState {
+                aggregate_id,
+                event_type,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "Outbox row in wrong state for aggregate_id='{}', event_type='{}': expected '{}', got '{}'",
+                aggregate_id, event_type, expected, actual
+            ),
+            ShakedownError::OutboxRetryBelowThreshold {
+                aggregate_id,
+                attempts,
+                min_attempts,
+            } => write!(
+                f,
+                "Outbox retry below threshold for aggregate_id='{}': attempts={} min_attempts={}",
+                aggregate_id, attempts, min_attempts
+            ),
         }
     }
 }
@@ -51,6 +98,9 @@ impl Error for ShakedownError {
             ShakedownError::Infrastructure(e) => Some(e),
             ShakedownError::Internal(e) => Some(e),
             ShakedownError::NoRelationalBindings => None,
+            ShakedownError::OutboxRowNotFound { .. } => None,
+            ShakedownError::OutboxWrongState { .. } => None,
+            ShakedownError::OutboxRetryBelowThreshold { .. } => None,
         }
     }
 }
