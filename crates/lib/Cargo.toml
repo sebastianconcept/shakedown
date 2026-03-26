@@ -31,6 +31,9 @@ testcontainers-modules = { version = "0.15", default-features = false, optional 
 # Async Postgres client for admin/readiness queries (no sqlx in public API)
 tokio-postgres = { version = "0.7", optional = true, default-features = false, features = ["runtime"] }
 
+# Async MySQL/MariaDB protocol for admin/readiness queries (SPECS: no sqlx in public API)
+mysql_async = { version = "0.36.1", optional = true }
+
 # Toxiproxy for fault injection (D-12 decision)
 noxious-client = "1.0"
 
@@ -58,10 +61,11 @@ postgres = [
     "testcontainers-modules/postgres",
 ]
 # MariaDB integration with real infrastructure (requires Docker)
-# Includes: sqlx, testcontainers
 mariadb = [
-    "dep:sqlx",
+    "dep:mysql_async",
     "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/mariadb",
 ]
 # MCP server support (post-MVP, optional)
 mcp = []
@@ -77,10 +81,3 @@ required-features = ["kafka"]
 name = "postgres_vertical"
 path = "tests/postgres_vertical.rs"
 required-features = ["postgres"]
-
-# SQLx for Postgres/MariaDB support
-[dependencies.sqlx]
-version = "0.8"
-default-features = false
-features = ["runtime-tokio-rustls", "postgres", "mysql"]
-optional = true

@@ -44,6 +44,8 @@
 
 use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownError};
 use crate::event::{EventLevel, EventLog};
+#[cfg(feature = "mariadb")]
+use crate::resources::MariaDBBindings;
 #[cfg(feature = "postgres")]
 use crate::resources::PostgresBindings;
 use crate::resources::{
@@ -162,7 +164,7 @@ impl std::fmt::Display for ScenarioKind {
 ///
 /// How: constructed with [`Context::new`] or by `#[shakedown::test]`; the scenario function receives
 /// `&mut Context` to register extras or read [`Context::scenario_id`], [`Context::kafka_bindings`],
-/// and (with the `postgres` feature) [`Context::postgres_bindings`].
+/// and (with the `postgres` / `mariadb` features) relational bindings accessors.
 pub struct Context {
     /// Registered resources
     resources: Vec<RegisteredResource>,
@@ -175,6 +177,9 @@ pub struct Context {
     /// Postgres bindings when a Postgres resource populated them (`postgres` feature).
     #[cfg(feature = "postgres")]
     postgres_bindings: Option<PostgresBindings>,
+    /// MariaDB bindings when a MariaDB resource populated them (`mariadb` feature).
+    #[cfg(feature = "mariadb")]
+    mariadb_bindings: Option<MariaDBBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
 }
@@ -189,6 +194,8 @@ impl Context {
             kafka_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
+            #[cfg(feature = "mariadb")]
+            mariadb_bindings: None,
             scenario_kind: ScenarioKind::Normal,
         }
     }
@@ -202,6 +209,8 @@ impl Context {
             kafka_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
+            #[cfg(feature = "mariadb")]
+            mariadb_bindings: None,
             scenario_kind: ScenarioKind::Normal,
         }
     }
@@ -215,6 +224,8 @@ impl Context {
             kafka_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
+            #[cfg(feature = "mariadb")]
+            mariadb_bindings: None,
             scenario_kind: ScenarioKind::Normal,
         }
     }
@@ -277,6 +288,18 @@ impl Context {
         self.postgres_bindings.as_ref()
     }
 
+    /// Set MariaDB bindings for this scenario (typically after MariaDB provision).
+    #[cfg(feature = "mariadb")]
+    pub fn set_mariadb_bindings(&mut self, mariadb_bindings: MariaDBBindings) {
+        self.mariadb_bindings = Some(mariadb_bindings);
+    }
+
+    /// Get MariaDB bindings if available (`mariadb` feature).
+    #[cfg(feature = "mariadb")]
+    pub fn mariadb_bindings(&self) -> Option<&MariaDBBindings> {
+        self.mariadb_bindings.as_ref()
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -333,6 +356,46 @@ fn apply_resource_handles_to_postgres_bindings(ctx: &mut Context, handles: &[Res
         ) = (host, port, database, username, password, connection_url)
         {
             ctx.set_postgres_bindings(PostgresBindings {
+                host: host.to_string(),
+                port,
+                database: database.to_string(),
+                username: username.to_string(),
+                password: password.to_string(),
+                connection_url: connection_url.to_string(),
+            });
+        }
+    }
+}
+
+#[cfg(feature = "mariadb")]
+/// If any handle metadata carries MariaDB engine fields, set [`Context::set_mariadb_bindings`].
+fn apply_resource_handles_to_mariadb_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for h in handles {
+        let Some(meta) = &h.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if engine != "mariadb" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|v| v.as_str());
+        let port = meta.get("port").and_then(|v| v.as_u64()).map(|p| p as u16);
+        let database = meta.get("database").and_then(|v| v.as_str());
+        let username = meta.get("username").and_then(|v| v.as_str());
+        let password = meta.get("password").and_then(|v| v.as_str());
+        let connection_url = meta.get("connection_url").and_then(|v| v.as_str());
+        if let (
+            Some(host),
+            Some(port),
+            Some(database),
+            Some(username),
+            Some(password),
+            Some(connection_url),
+        ) = (host, port, database, username, password, connection_url)
+        {
+            ctx.set_mariadb_bindings(MariaDBBindings {
                 host: host.to_string(),
                 port,
                 database: database.to_string(),
@@ -450,6 +513,8 @@ where
                 apply_resource_handles_to_kafka_bindings(ctx, &handles);
                 #[cfg(feature = "postgres")]
                 apply_resource_handles_to_postgres_bindings(ctx, &handles);
+                #[cfg(feature = "mariadb")]
+                apply_resource_handles_to_mariadb_bindings(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
             }
             Err(e) => {
