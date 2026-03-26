@@ -64,7 +64,12 @@ async fn test(ctx: &mut Context) { ... }
 
 #[shakedown::test(resources = [Fake, Kafka])]  // needs `shakedown` with `kafka` feature
 async fn with_kafka(ctx: &mut Context) { ... }
+
+#[shakedown::test(resources = [Postgres, MariaDB, Mysql, Sqlite])]
+async fn with_relational_resources(ctx: &mut Context) { ... }
 ```
+
+Accepted resource names today are `Fake`, `Kafka`, `Postgres`, `MariaDB`, `Mysql`, and `Sqlite` (feature-gated where applicable).
 
 Compile-time UI coverage for these attributes lives in `tests/trybuild/` (pass + `compile_fail` cases with `.stderr` snapshots).
 
@@ -125,6 +130,6 @@ async fn faulty_scenario(ctx: &mut Context) {
 
 After macros ship, the orchestration library adds relational resources:
 
-- **Slug:** `mvp-postgres-mariadb` — Postgres and MariaDB `Resource` providers on the same async harness as Kafka.
+- **Slug:** `mvp-postgres-mariadb` — Postgres, MariaDB, Mysql, and Sqlite `Resource` providers on the same async harness as Kafka.
 - **Spine:** MVP row 4 in adopted docs [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md).
 - **Crate overview:** [`crates/lib/README.md`](../lib/README.md).
