@@ -36,6 +36,31 @@ shakedown/
 
 Default `cargo test -p shakedown` does not require Docker.
 
+## Common workflows with `just`
+
+This repository includes a root [`justfile`](../../justfile) with common commands:
+
+```text
+just help
+just qa
+just qa-full
+just test-lib
+just test-macros
+just test-outbox-sqlite
+```
+
+`just qa` uses `cargo nextest run --workspace` for faster feedback loops when
+`cargo-nextest` is installed, and falls back to `cargo test --workspace` otherwise.
+`just qa-full` always runs `cargo test --workspace` for full parity checks.
+
+Docker-backed ignored tests are opt-in:
+
+```text
+just test-kafka-ignored
+just test-postgres-ignored
+just test-outbox-postgres-ignored
+```
+
 **Kafka (KRaft, `testcontainers-modules::kafka::apache`):**
 
 - [`KafkaResource`](src/resources.rs) uses a **suite-level** broker: the first provision in a process starts one container; further `KafkaResource` instances share it until the last `Resource::teardown` removes the container (see adopted docs `SPECS-IMPLEMENTATION.md`, linked from [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md)).
