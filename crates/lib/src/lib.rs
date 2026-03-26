@@ -48,7 +48,7 @@
 //! ## Milestone status
 //!
 //! - **Current**: `mvp-macros-system-test` — `#[shakedown::test]` / `#[shakedown::faulty_test]`, optional `resources = [...]`, trybuild UI tests in `shakedown-macros`
-//! - **In progress**: `mvp-postgres-mariadb` — PostgreSQL (`postgres`), MariaDB (`mariadb`), Oracle MySQL (`mysql`) `Resource` types + bindings; SQLite next
+//! - **In progress**: `mvp-postgres-mariadb` — PostgreSQL (`postgres`), MariaDB (`mariadb`), Oracle MySQL (`mysql`), SQLite (`sqlite`) `Resource` types + bindings
 //!
 //! ## See also
 //!
@@ -127,6 +127,9 @@ pub use crate::resources::{MariaDBBindings, MariaDBResource};
 
 #[cfg(feature = "mysql")]
 pub use crate::resources::{MysqlBindings, MysqlResource};
+
+#[cfg(feature = "sqlite")]
+pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResource};
 
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;

@@ -369,10 +369,24 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Sqlite" => Ok(quote! {
+            #[cfg(feature = "sqlite")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Sqlite(
+                    ::shakedown::SqliteResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "sqlite"))]
+            {
+                ::core::compile_error!(
+                    "Sqlite in #[shakedown::test(resources = [...])] requires `sqlite` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtin resources are `Fake` and `Kafka` (Kafka requires `kafka` feature on `shakedown`)"
+                "unknown resource type `{name}`; valid builtins include `Fake`, `Kafka` (needs `kafka` on `shakedown`), `Sqlite` (needs `sqlite` on `shakedown`), and TCP SQL engines when enabled"
             ),
         )),
     }

@@ -50,6 +50,8 @@ use crate::resources::MariaDBBindings;
 use crate::resources::MysqlBindings;
 #[cfg(feature = "postgres")]
 use crate::resources::PostgresBindings;
+#[cfg(feature = "sqlite")]
+use crate::resources::SqliteBindings;
 use crate::resources::{
     BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
 };
@@ -166,7 +168,7 @@ impl std::fmt::Display for ScenarioKind {
 ///
 /// How: constructed with [`Context::new`] or by `#[shakedown::test]`; the scenario function receives
 /// `&mut Context` to register extras or read [`Context::scenario_id`], [`Context::kafka_bindings`],
-/// and (with the `postgres` / `mariadb` / `mysql` features) relational bindings accessors.
+/// and (with the `postgres` / `mariadb` / `mysql` / `sqlite` features) relational bindings accessors.
 pub struct Context {
     /// Registered resources
     resources: Vec<RegisteredResource>,
@@ -185,6 +187,9 @@ pub struct Context {
     /// Oracle MySQL bindings when a MySQL resource populated them (`mysql` feature).
     #[cfg(feature = "mysql")]
     mysql_bindings: Option<MysqlBindings>,
+    /// SQLite bindings when a SQLite resource populated them (`sqlite` feature).
+    #[cfg(feature = "sqlite")]
+    sqlite_bindings: Option<SqliteBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
 }
@@ -203,6 +208,8 @@ impl Context {
             mariadb_bindings: None,
             #[cfg(feature = "mysql")]
             mysql_bindings: None,
+            #[cfg(feature = "sqlite")]
+            sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
         }
     }
@@ -220,6 +227,8 @@ impl Context {
             mariadb_bindings: None,
             #[cfg(feature = "mysql")]
             mysql_bindings: None,
+            #[cfg(feature = "sqlite")]
+            sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
         }
     }
@@ -237,6 +246,8 @@ impl Context {
             mariadb_bindings: None,
             #[cfg(feature = "mysql")]
             mysql_bindings: None,
+            #[cfg(feature = "sqlite")]
+            sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
         }
     }
@@ -321,6 +332,18 @@ impl Context {
     #[cfg(feature = "mysql")]
     pub fn mysql_bindings(&self) -> Option<&MysqlBindings> {
         self.mysql_bindings.as_ref()
+    }
+
+    /// Set SQLite bindings for this scenario (typically after SQLite provision).
+    #[cfg(feature = "sqlite")]
+    pub fn set_sqlite_bindings(&mut self, sqlite_bindings: SqliteBindings) {
+        self.sqlite_bindings = Some(sqlite_bindings);
+    }
+
+    /// Get SQLite bindings if available (`sqlite` feature).
+    #[cfg(feature = "sqlite")]
+    pub fn sqlite_bindings(&self) -> Option<&SqliteBindings> {
+        self.sqlite_bindings.as_ref()
     }
 
     /// Check if the context has any registered resources.
@@ -427,6 +450,28 @@ fn apply_resource_handles_to_mariadb_bindings(ctx: &mut Context, handles: &[Reso
                 connection_url: connection_url.to_string(),
             });
         }
+    }
+}
+
+#[cfg(feature = "sqlite")]
+/// If any handle metadata carries SQLite engine fields, set [`Context::set_sqlite_bindings`].
+fn apply_resource_handles_to_sqlite_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for h in handles {
+        let Some(meta) = &h.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if engine != "sqlite" {
+            continue;
+        }
+        let Some(database_url) = meta.get("database_url").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        ctx.set_sqlite_bindings(SqliteBindings {
+            database_url: database_url.to_string(),
+        });
     }
 }
 
@@ -580,6 +625,8 @@ where
                 apply_resource_handles_to_mariadb_bindings(ctx, &handles);
                 #[cfg(feature = "mysql")]
                 apply_resource_handles_to_mysql_bindings(ctx, &handles);
+                #[cfg(feature = "sqlite")]
+                apply_resource_handles_to_sqlite_bindings(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
             }
             Err(e) => {
