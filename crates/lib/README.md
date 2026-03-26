@@ -97,6 +97,21 @@ cargo test -p shakedown --features postgres --test postgres_vertical -- --ignore
 
 Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
 
+## Outbox helpers (SQLite path)
+
+With `features = ["outbox", "sqlite"]`, Shakedown supports offline outbox assertions against the
+scenario-isolated in-memory SQLite database:
+
+- `ctx.outbox().setup().await?`
+- `ctx.outbox().assert_pending(...).await?`
+- `ctx.outbox().assert_sent(...).await?`
+- `ctx.outbox().assert_failed(...).await?`
+- `ctx.outbox().assert_retry(...).await?`
+
+SQLite limitation: `SELECT FOR UPDATE SKIP LOCKED` is unavailable, so claim-locking/publisher
+concurrency semantics are not validated on the SQLite path. Use Postgres/MariaDB/MySQL paths when
+you need lock semantics coverage.
+
 ## See also
 
 Product docs (PRD, SPECS, TECH-STACK) live in the adopted documentation root — workspace [`docs/README.md`](../../docs/README.md) points at **`~/docs/shakedown/`**.

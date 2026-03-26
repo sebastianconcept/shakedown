@@ -195,6 +195,9 @@ impl<'ctx> Outbox<'ctx> {
             let sqlite_url = sqlite_bindings.database_url.clone();
             tokio::task::spawn_blocking(move || {
                 use rusqlite::OpenFlags;
+                // SQLite does not support SELECT FOR UPDATE SKIP LOCKED.
+                // Outbox claim-locking semantics are out of scope for this path; only row-state
+                // assertions (pending/sent/failed/retry) are verified here.
                 let connection = rusqlite::Connection::open_with_flags(
                     sqlite_url.as_str(),
                     OpenFlags::SQLITE_OPEN_URI
