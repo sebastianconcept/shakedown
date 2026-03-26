@@ -369,6 +369,48 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Postgres" => Ok(quote! {
+            #[cfg(feature = "postgres")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Postgres(
+                    ::shakedown::PostgresResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "postgres"))]
+            {
+                ::core::compile_error!(
+                    "Postgres in #[shakedown::test(resources = [...])] requires `postgres` feature on the `shakedown` dependency"
+                );
+            }
+        }),
+        "MariaDB" => Ok(quote! {
+            #[cfg(feature = "mariadb")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::MariaDB(
+                    ::shakedown::MariaDBResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "mariadb"))]
+            {
+                ::core::compile_error!(
+                    "MariaDB in #[shakedown::test(resources = [...])] requires `mariadb` feature on the `shakedown` dependency"
+                );
+            }
+        }),
+        "Mysql" => Ok(quote! {
+            #[cfg(feature = "mysql")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Mysql(
+                    ::shakedown::MysqlResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "mysql"))]
+            {
+                ::core::compile_error!(
+                    "Mysql in #[shakedown::test(resources = [...])] requires `mysql` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Sqlite" => Ok(quote! {
             #[cfg(feature = "sqlite")]
             {
@@ -386,7 +428,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins include `Fake`, `Kafka` (needs `kafka` on `shakedown`), `Sqlite` (needs `sqlite` on `shakedown`), and TCP SQL engines when enabled"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Postgres`, `MariaDB`, `Mysql`, and `Sqlite`"
             ),
         )),
     }
@@ -412,4 +454,42 @@ pub fn default_greeting(_input: TokenStream) -> TokenStream {
     use syn::LitStr;
     let _lit = LitStr::new("Hello, shakedown!", proc_macro2::Span::call_site());
     quote! { #_lit }.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_resource_registration;
+    use syn::parse_str;
+
+    #[test]
+    fn accepts_relational_builtins() {
+        for resource_name in ["Postgres", "MariaDB", "Mysql", "Sqlite"] {
+            let resource_ident =
+                parse_str(resource_name).expect("resource identifier should parse");
+            assert!(
+                build_resource_registration(&resource_ident).is_ok(),
+                "{resource_name} should be accepted by resources parser",
+            );
+        }
+    }
+
+    #[test]
+    fn relational_builtins_emit_feature_gated_expansion() {
+        for (resource_name, expected_feature) in [
+            ("Postgres", "postgres"),
+            ("MariaDB", "mariadb"),
+            ("Mysql", "mysql"),
+            ("Sqlite", "sqlite"),
+        ] {
+            let resource_ident =
+                parse_str(resource_name).expect("resource identifier should parse");
+            let expansion = build_resource_registration(&resource_ident)
+                .expect("resource registration should build")
+                .to_string();
+            assert!(
+                expansion.contains(&format!("feature = \"{expected_feature}\"")),
+                "{resource_name} expansion should be cfg-gated by {expected_feature}",
+            );
+        }
+    }
 }

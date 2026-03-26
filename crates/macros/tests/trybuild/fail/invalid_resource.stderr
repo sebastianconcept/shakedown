@@ -1,4 +1,4 @@
-error: unknown resource type `InvalidResource`; valid builtins include `Fake`, `Kafka` (needs `kafka` on `shakedown`), `Sqlite` (needs `sqlite` on `shakedown`), and TCP SQL engines when enabled
+error: unknown resource type `InvalidResource`; valid builtins are `Fake`, `Kafka`, `Postgres`, `MariaDB`, `Mysql`, and `Sqlite`
  --> tests/trybuild/fail/invalid_resource.rs:5:32
   |
 5 | #[shakedown::test(resources = [InvalidResource])]
