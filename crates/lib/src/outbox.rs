@@ -354,7 +354,7 @@ impl<'ctx> Outbox<'ctx> {
             let maybe_row = client
                 .query_opt(
                     r#"
-SELECT id, aggregate_type, aggregate_id, type, payload::text, status, attempts, created_at::text, sent_at::text
+SELECT id::text, aggregate_type, aggregate_id, type, payload::text, status, attempts, created_at::text, sent_at::text
 FROM outbox_event
 WHERE aggregate_id = $1 AND type = $2
 LIMIT 1
