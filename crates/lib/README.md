@@ -30,9 +30,9 @@ shakedown/
 
 ## Milestone status
 
-- **Current (shipped in repo):** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
-- **Previous milestone:** `mvp-macros-system-test` — procedural macros `#[shakedown::test]` and `#[shakedown::faulty_test]` for `cargo test` discovery; they delegate to `run_scenario` and public `Context` / `EventLog` APIs only. `ScenarioKind` (`Normal` / `Faulty`) on `Context` supports `#[shakedown::faulty_test]` today and future fault injection (`mvp-fault-injection`). Usage and optional `resources = [...]` are documented in [`crates/macros/README.md`](../macros/README.md).
-- **Next milestone:** `mvp-outbox` — outbox helpers on Kafka + relational bindings.
+- **Current (shipped in repo):** `mvp-outbox` — first-party outbox helpers are available on top of relational + Kafka bindings (`ctx.outbox().setup()`, row-state assertions, payload assertions, and Kafka publish assertions).
+- **Previous milestone:** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
+- **Next milestone:** `mvp-fault-injection` — Toxiproxy-backed fault scenarios on the `#[shakedown::faulty_test]` path.
 
 Default `cargo test -p shakedown` does not require Docker.
 
@@ -97,16 +97,48 @@ cargo test -p shakedown --features postgres --test postgres_vertical -- --ignore
 
 Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
 
-## Outbox helpers (SQLite path)
+## Outbox helpers
 
-With `features = ["outbox", "sqlite"]`, Shakedown supports offline outbox assertions against the
-scenario-isolated in-memory SQLite database:
+Enable outbox assertions with relational + Kafka features:
 
-- `ctx.outbox().setup().await?`
-- `ctx.outbox().assert_pending(...).await?`
-- `ctx.outbox().assert_sent(...).await?`
-- `ctx.outbox().assert_failed(...).await?`
-- `ctx.outbox().assert_retry(...).await?`
+```toml
+[dependencies]
+shakedown = { version = "...", features = ["outbox", "postgres", "kafka"] }
+```
+
+Minimal scenario template:
+
+```rust
+#[shakedown::default_seed(resources = [Postgres, Kafka])]
+async fn seed(ctx: &mut Context) -> Result<(), ShakedownError> {
+    ctx.outbox().setup().await?;
+    ctx.kafka().ensure_topics(&["orders"]).await?;
+    Ok(())
+}
+
+#[shakedown::test(resources = [Postgres, Kafka])]
+async fn outbox_order_published(ctx: &mut Context) -> Result<(), ShakedownError> {
+    // Trigger your service path that writes to outbox_event and publishes to Kafka.
+
+    ctx.outbox()
+        .assert_sent("order-42", "OrderPlaced")
+        .await?
+        .with_payload::<serde_json::Value>(|payload| {
+            payload["total"].as_f64().is_some_and(|total| total == 99.0)
+        })
+        .await?;
+
+    ctx.outbox()
+        .assert_kafka_published("orders", "order-42")
+        .await?;
+
+    Ok(())
+}
+```
+
+For fast offline checks, `features = ["outbox", "sqlite"]` supports row-state assertions in the
+scenario-isolated in-memory SQLite database (`assert_pending`, `assert_sent`, `assert_failed`,
+`assert_retry`).
 
 SQLite limitation: `SELECT FOR UPDATE SKIP LOCKED` is unavailable, so claim-locking/publisher
 concurrency semantics are not validated on the SQLite path. Use Postgres/MariaDB/MySQL paths when
