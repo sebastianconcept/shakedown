@@ -71,6 +71,41 @@ async fn outbox_postgres_to_kafka_flow_proves_sent_and_published() {
                     .await
                     .expect("insert pending outbox row");
 
+                postgres_client
+                    .execute(
+                        "INSERT INTO outbox_event (id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at)
+                         VALUES ($1::uuid, $2, $3, $4, $5::text::jsonb, $6, $7, $8::timestamptz)",
+                        &[
+                            &"00000000-0000-0000-0000-000000000001",
+                            &"order",
+                            &"order-2",
+                            &"OrderPlaced",
+                            &r#"{"aggregate_id":"order-2","total":10.0}"#,
+                            &"sent",
+                            &1_i32,
+                            &"2026-01-01T00:00:00Z",
+                        ],
+                    )
+                    .await
+                    .expect("insert deterministic base row");
+                postgres_client
+                    .execute(
+                        "INSERT INTO outbox_event (id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at)
+                         VALUES ($1::uuid, $2, $3, $4, $5::text::jsonb, $6, $7, $8::timestamptz)",
+                        &[
+                            &"00000000-0000-0000-0000-000000000999",
+                            &"order",
+                            &"order-2",
+                            &"OrderPlaced",
+                            &r#"{"aggregate_id":"order-2","total":20.0}"#,
+                            &"sent",
+                            &4_i32,
+                            &"2026-01-01T00:00:00Z",
+                        ],
+                    )
+                    .await
+                    .expect("insert deterministic latest row");
+
                 scenario_context
                     .outbox()
                     .assert_pending("order-1", "OrderPlaced")
@@ -121,6 +156,12 @@ async fn outbox_postgres_to_kafka_flow_proves_sent_and_published() {
                     })
                     .await
                     .expect("payload assertion should pass");
+
+                scenario_context
+                    .outbox()
+                    .assert_retry("order-2", "OrderPlaced", 3)
+                    .await
+                    .expect("retry assertion should use deterministic latest row");
 
                 scenario_context
                     .outbox()

@@ -108,7 +108,7 @@ pub struct OutboxAssertBuilder {
 }
 
 #[cfg(feature = "kafka")]
-const DEFAULT_KAFKA_ASSERT_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_KAFKA_ASSERT_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl OutboxAssertBuilder {
     /// Return the asserted outbox entry for additional ad-hoc checks.
@@ -253,7 +253,7 @@ impl<'ctx> Outbox<'ctx> {
         event_type: &str,
         min_attempts: i32,
     ) -> Result<(), ShakedownError> {
-        let entry = self.fetch_entry(aggregate_id, event_type).await?;
+        let entry = self.fetch_latest_entry(aggregate_id, event_type).await?;
         if entry.attempts < min_attempts {
             return Err(ShakedownError::OutboxRetryBelowThreshold {
                 aggregate_id: aggregate_id.to_string(),
@@ -323,19 +323,239 @@ impl<'ctx> Outbox<'ctx> {
         event_type: &str,
         expected_state: OutboxRowState,
     ) -> Result<OutboxAssertBuilder, ShakedownError> {
-        let entry = self.fetch_entry(aggregate_id, event_type).await?;
-        if entry.status != expected_state {
-            return Err(ShakedownError::OutboxWrongState {
-                aggregate_id: aggregate_id.to_string(),
-                event_type: event_type.to_string(),
-                expected: outbox_row_state_label(expected_state).to_string(),
-                actual: outbox_row_state_label(entry.status.clone()).to_string(),
-            });
-        }
+        let entry = self
+            .fetch_entry_with_status(aggregate_id, event_type, expected_state)
+            .await?;
         Ok(OutboxAssertBuilder { entry })
     }
 
-    async fn fetch_entry(
+    async fn fetch_entry_with_status(
+        &self,
+        aggregate_id: &str,
+        event_type: &str,
+        expected_state: OutboxRowState,
+    ) -> Result<OutboxEntry, ShakedownError> {
+        let expected_status = outbox_row_state_label(expected_state);
+        #[cfg(feature = "postgres")]
+        if let Some(postgres_bindings) = self.context.postgres_bindings() {
+            let (client, connection) = tokio_postgres::connect(
+                postgres_bindings.connection_url.as_str(),
+                tokio_postgres::NoTls,
+            )
+            .await
+            .map_err(as_backend_error)?;
+            tokio::spawn(async move {
+                let _ = connection.await;
+            });
+            let maybe_row = client
+                .query_opt(
+                    r#"
+SELECT id::text, aggregate_type, aggregate_id, type, payload::text, status, attempts, created_at::text, sent_at::text
+FROM outbox_event
+WHERE aggregate_id = $1 AND type = $2 AND status = $3
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#,
+                    &[&aggregate_id, &event_type, &expected_status],
+                )
+                .await
+                .map_err(as_backend_error)?;
+            if let Some(row) = maybe_row {
+                let payload_text: String = row.get(4);
+                let payload = parse_payload_json(payload_text.as_str())?;
+                let aggregate_id_value: String = row.get(2);
+                let event_type_value: String = row.get(3);
+                let status_text: String = row.get(5);
+                return Ok(OutboxEntry {
+                    id: row.get(0),
+                    aggregate_type: row.get(1),
+                    aggregate_id: aggregate_id_value.clone(),
+                    event_type: event_type_value.clone(),
+                    payload,
+                    status: parse_outbox_row_state(
+                        status_text.as_str(),
+                        aggregate_id_value.as_str(),
+                        event_type_value.as_str(),
+                    )?,
+                    attempts: row.get(6),
+                    created_at: row.get(7),
+                    sent_at: row.get(8),
+                });
+            }
+            return Err(ShakedownError::OutboxRowNotFound {
+                aggregate_id: aggregate_id.to_string(),
+                event_type: event_type.to_string(),
+                expected_status: expected_status.to_string(),
+            });
+        }
+
+        #[cfg(feature = "mariadb")]
+        if let Some(mariadb_bindings) = self.context.mariadb_bindings() {
+            use mysql_async::prelude::Queryable;
+            let options = mysql_async::Opts::from_url(mariadb_bindings.connection_url.as_str())
+                .map_err(as_backend_error)?;
+            let pool = mysql_async::Pool::new(options);
+            let mut connection = pool.get_conn().await.map_err(as_backend_error)?;
+            let maybe_row: Option<(String, String, String, String, String, String, i32, String, Option<String>)> = connection
+                .exec_first(
+                    r#"
+SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
+FROM outbox_event
+WHERE aggregate_id = ? AND type = ? AND status = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#,
+                    (aggregate_id, event_type, expected_status),
+                )
+                .await
+                .map_err(as_backend_error)?;
+            connection.disconnect().await.map_err(as_backend_error)?;
+            if let Some(row) = maybe_row {
+                let payload = parse_payload_json(row.4.as_str())?;
+                return Ok(OutboxEntry {
+                    id: row.0,
+                    aggregate_type: row.1,
+                    aggregate_id: row.2,
+                    event_type: row.3,
+                    payload,
+                    status: parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?,
+                    attempts: row.6,
+                    created_at: row.7,
+                    sent_at: row.8,
+                });
+            }
+            return Err(ShakedownError::OutboxRowNotFound {
+                aggregate_id: aggregate_id.to_string(),
+                event_type: event_type.to_string(),
+                expected_status: expected_status.to_string(),
+            });
+        }
+
+        #[cfg(feature = "mysql")]
+        if let Some(mysql_bindings) = self.context.mysql_bindings() {
+            use mysql_async::prelude::Queryable;
+            let options = mysql_async::Opts::from_url(mysql_bindings.connection_url.as_str())
+                .map_err(as_backend_error)?;
+            let pool = mysql_async::Pool::new(options);
+            let mut connection = pool.get_conn().await.map_err(as_backend_error)?;
+            let maybe_row: Option<(String, String, String, String, String, String, i32, String, Option<String>)> = connection
+                .exec_first(
+                    r#"
+SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
+FROM outbox_event
+WHERE aggregate_id = ? AND type = ? AND status = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#,
+                    (aggregate_id, event_type, expected_status),
+                )
+                .await
+                .map_err(as_backend_error)?;
+            connection.disconnect().await.map_err(as_backend_error)?;
+            if let Some(row) = maybe_row {
+                let payload = parse_payload_json(row.4.as_str())?;
+                return Ok(OutboxEntry {
+                    id: row.0,
+                    aggregate_type: row.1,
+                    aggregate_id: row.2,
+                    event_type: row.3,
+                    payload,
+                    status: parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?,
+                    attempts: row.6,
+                    created_at: row.7,
+                    sent_at: row.8,
+                });
+            }
+            return Err(ShakedownError::OutboxRowNotFound {
+                aggregate_id: aggregate_id.to_string(),
+                event_type: event_type.to_string(),
+                expected_status: expected_status.to_string(),
+            });
+        }
+
+        #[cfg(feature = "sqlite")]
+        if let Some(sqlite_bindings) = self.context.sqlite_bindings() {
+            let sqlite_url = sqlite_bindings.database_url.clone();
+            let aggregate_id_value = aggregate_id.to_string();
+            let event_type_value = event_type.to_string();
+            let maybe_row: Option<(
+                String,
+                String,
+                String,
+                String,
+                String,
+                String,
+                i32,
+                String,
+                Option<String>,
+            )> = tokio::task::spawn_blocking(move || {
+                use rusqlite::OpenFlags;
+                let connection = rusqlite::Connection::open_with_flags(
+                    sqlite_url.as_str(),
+                    OpenFlags::SQLITE_OPEN_URI
+                        | OpenFlags::SQLITE_OPEN_READ_WRITE
+                        | OpenFlags::SQLITE_OPEN_CREATE,
+                )?;
+                let mut statement = connection.prepare(
+                    r#"
+SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at, sent_at
+FROM outbox_event
+WHERE aggregate_id = ?1 AND type = ?2 AND status = ?3
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#,
+                )?;
+                let mut rows = statement.query([
+                    aggregate_id_value,
+                    event_type_value,
+                    expected_status.to_string(),
+                ])?;
+                if let Some(row) = rows.next()? {
+                    Ok::<_, rusqlite::Error>(Some((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                    )))
+                } else {
+                    Ok::<_, rusqlite::Error>(None)
+                }
+            })
+            .await
+            .map_err(as_backend_error)?
+            .map_err(as_backend_error)?;
+            if let Some(row) = maybe_row {
+                let payload = parse_payload_json(row.4.as_str())?;
+                let status =
+                    parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?;
+                return Ok(OutboxEntry {
+                    id: row.0,
+                    aggregate_type: row.1,
+                    aggregate_id: row.2,
+                    event_type: row.3,
+                    payload,
+                    status,
+                    attempts: row.6,
+                    created_at: row.7,
+                    sent_at: row.8,
+                });
+            }
+            return Err(ShakedownError::OutboxRowNotFound {
+                aggregate_id: aggregate_id.to_string(),
+                event_type: event_type.to_string(),
+                expected_status: expected_status.to_string(),
+            });
+        }
+
+        Err(ShakedownError::NoRelationalBindings)
+    }
+
+    async fn fetch_latest_entry(
         &self,
         aggregate_id: &str,
         event_type: &str,
@@ -357,6 +577,7 @@ impl<'ctx> Outbox<'ctx> {
 SELECT id::text, aggregate_type, aggregate_id, type, payload::text, status, attempts, created_at::text, sent_at::text
 FROM outbox_event
 WHERE aggregate_id = $1 AND type = $2
+ORDER BY created_at DESC, id DESC
 LIMIT 1
 "#,
                     &[&aggregate_id, &event_type],
@@ -365,16 +586,21 @@ LIMIT 1
                 .map_err(as_backend_error)?;
             if let Some(row) = maybe_row {
                 let payload_text: String = row.get(4);
-                let payload = serde_json::from_str(payload_text.as_str()).map_err(|error| {
-                    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
-                })?;
+                let payload = parse_payload_json(payload_text.as_str())?;
+                let aggregate_id_value: String = row.get(2);
+                let event_type_value: String = row.get(3);
+                let status_text: String = row.get(5);
                 return Ok(OutboxEntry {
                     id: row.get(0),
                     aggregate_type: row.get(1),
-                    aggregate_id: row.get(2),
-                    event_type: row.get(3),
+                    aggregate_id: aggregate_id_value.clone(),
+                    event_type: event_type_value.clone(),
                     payload,
-                    status: parse_outbox_row_state(&row.get::<usize, String>(5)),
+                    status: parse_outbox_row_state(
+                        status_text.as_str(),
+                        aggregate_id_value.as_str(),
+                        event_type_value.as_str(),
+                    )?,
                     attempts: row.get(6),
                     created_at: row.get(7),
                     sent_at: row.get(8),
@@ -400,6 +626,7 @@ LIMIT 1
 SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
 FROM outbox_event
 WHERE aggregate_id = ? AND type = ?
+ORDER BY created_at DESC, id DESC
 LIMIT 1
 "#,
                     (aggregate_id, event_type),
@@ -408,16 +635,14 @@ LIMIT 1
                 .map_err(as_backend_error)?;
             connection.disconnect().await.map_err(as_backend_error)?;
             if let Some(row) = maybe_row {
-                let payload = serde_json::from_str(row.4.as_str()).map_err(|error| {
-                    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
-                })?;
+                let payload = parse_payload_json(row.4.as_str())?;
                 return Ok(OutboxEntry {
                     id: row.0,
                     aggregate_type: row.1,
-                    aggregate_id: row.2,
-                    event_type: row.3,
+                    aggregate_id: row.2.clone(),
+                    event_type: row.3.clone(),
                     payload,
-                    status: parse_outbox_row_state(row.5.as_str()),
+                    status: parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?,
                     attempts: row.6,
                     created_at: row.7,
                     sent_at: row.8,
@@ -443,6 +668,7 @@ LIMIT 1
 SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
 FROM outbox_event
 WHERE aggregate_id = ? AND type = ?
+ORDER BY created_at DESC, id DESC
 LIMIT 1
 "#,
                     (aggregate_id, event_type),
@@ -451,16 +677,14 @@ LIMIT 1
                 .map_err(as_backend_error)?;
             connection.disconnect().await.map_err(as_backend_error)?;
             if let Some(row) = maybe_row {
-                let payload = serde_json::from_str(row.4.as_str()).map_err(|error| {
-                    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
-                })?;
+                let payload = parse_payload_json(row.4.as_str())?;
                 return Ok(OutboxEntry {
                     id: row.0,
                     aggregate_type: row.1,
-                    aggregate_id: row.2,
-                    event_type: row.3,
+                    aggregate_id: row.2.clone(),
+                    event_type: row.3.clone(),
                     payload,
-                    status: parse_outbox_row_state(row.5.as_str()),
+                    status: parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?,
                     attempts: row.6,
                     created_at: row.7,
                     sent_at: row.8,
@@ -478,7 +702,17 @@ LIMIT 1
             let sqlite_url = sqlite_bindings.database_url.clone();
             let aggregate_id_value = aggregate_id.to_string();
             let event_type_value = event_type.to_string();
-            let maybe_row = tokio::task::spawn_blocking(move || {
+            let maybe_row: Option<(
+                String,
+                String,
+                String,
+                String,
+                String,
+                String,
+                i32,
+                String,
+                Option<String>,
+            )> = tokio::task::spawn_blocking(move || {
                 use rusqlite::OpenFlags;
                 let connection = rusqlite::Connection::open_with_flags(
                     sqlite_url.as_str(),
@@ -491,25 +725,23 @@ LIMIT 1
 SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at, sent_at
 FROM outbox_event
 WHERE aggregate_id = ?1 AND type = ?2
+ORDER BY created_at DESC, id DESC
 LIMIT 1
 "#,
                 )?;
                 let mut rows = statement.query([aggregate_id_value, event_type_value])?;
                 if let Some(row) = rows.next()? {
-                    let payload_text: String = row.get(4)?;
-                    let payload = serde_json::from_str(payload_text.as_str())
-                        .unwrap_or_else(|_| serde_json::json!(payload_text));
-                    Ok::<_, rusqlite::Error>(Some(OutboxEntry {
-                        id: row.get(0)?,
-                        aggregate_type: row.get(1)?,
-                        aggregate_id: row.get(2)?,
-                        event_type: row.get(3)?,
-                        payload,
-                        status: parse_outbox_row_state(row.get::<usize, String>(5)?.as_str()),
-                        attempts: row.get(6)?,
-                        created_at: row.get(7)?,
-                        sent_at: row.get(8)?,
-                    }))
+                    Ok::<_, rusqlite::Error>(Some((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                    )))
                 } else {
                     Ok::<_, rusqlite::Error>(None)
                 }
@@ -517,8 +749,21 @@ LIMIT 1
             .await
             .map_err(as_backend_error)?
             .map_err(as_backend_error)?;
-            if let Some(entry) = maybe_row {
-                return Ok(entry);
+            if let Some(row) = maybe_row {
+                let payload = parse_payload_json(row.4.as_str())?;
+                let status =
+                    parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?;
+                return Ok(OutboxEntry {
+                    id: row.0,
+                    aggregate_type: row.1,
+                    aggregate_id: row.2,
+                    event_type: row.3,
+                    payload,
+                    status,
+                    attempts: row.6,
+                    created_at: row.7,
+                    sent_at: row.8,
+                });
             }
             return Err(ShakedownError::OutboxRowNotFound {
                 aggregate_id: aggregate_id.to_string(),
@@ -535,12 +780,25 @@ fn as_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> Sh
     ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
 }
 
-fn parse_outbox_row_state(status: &str) -> OutboxRowState {
+fn parse_payload_json(payload_text: &str) -> Result<serde_json::Value, ShakedownError> {
+    serde_json::from_str(payload_text)
+        .map_err(|error| ShakedownError::PayloadDeserialisation(error.to_string()))
+}
+
+fn parse_outbox_row_state(
+    status: &str,
+    aggregate_id: &str,
+    event_type: &str,
+) -> Result<OutboxRowState, ShakedownError> {
     match status {
-        "pending" => OutboxRowState::Pending,
-        "sent" => OutboxRowState::Sent,
-        "failed" => OutboxRowState::Failed,
-        _ => OutboxRowState::Failed,
+        "pending" => Ok(OutboxRowState::Pending),
+        "sent" => Ok(OutboxRowState::Sent),
+        "failed" => Ok(OutboxRowState::Failed),
+        _ => Err(ShakedownError::OutboxUnknownState {
+            status: status.to_string(),
+            aggregate_id: aggregate_id.to_string(),
+            event_type: event_type.to_string(),
+        }),
     }
 }
 
