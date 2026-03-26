@@ -31,7 +31,7 @@ shakedown/
 ## Milestone status
 
 - **Current (shipped in repo):** `mvp-macros-system-test` — procedural macros `#[shakedown::test]` and `#[shakedown::faulty_test]` for `cargo test` discovery; they delegate to `run_scenario` and public `Context` / `EventLog` APIs only. `ScenarioKind` (`Normal` / `Faulty`) on `Context` supports `#[shakedown::faulty_test]` today and future fault injection (`mvp-fault-injection`). Usage and optional `resources = [Fake, Kafka]` are documented in [`crates/macros/README.md`](../macros/README.md).
-- **In progress:** `mvp-postgres-mariadb` — first-party **PostgreSQL** (`PostgresResource`, `PostgresBindings`, `Context::postgres_bindings`) with suite-shared Docker container and per-scenario databases; **MariaDB**, **MySQL**, and **SQLite** follow the same pattern (MVP row 4 in adopted [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md)).
+- **In progress:** `mvp-postgres-mariadb` — first-party **PostgreSQL** and **MariaDB** (`PostgresResource` / `MariaDBResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers and per-scenario databases; **MySQL** and **SQLite** follow the same pattern (MVP row 4 in adopted [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md)).
 - **Next after relational resources:** `mvp-outbox` — outbox helpers on Kafka + relational bindings.
 
 Default `cargo test -p shakedown` does not require Docker.
@@ -75,6 +75,12 @@ See [`KafkaResource::apply_default_seed`](src/resources.rs) and [DECISIONS.md D-
 - **Image tag:** [`PostgresResource::with_image_tag`](src/resources.rs), or set `SHAKEDOWN_POSTGRES_IMAGE_TAG` and use [`PostgresResource::with_image_tag_from_env`](src/resources.rs). Default image tag is **`16`** (non-alpine, aligned with adopted SPECS).
 
 [`PostgresBindings`](src/resources.rs) is applied to [`Context`] after provision (same pattern as `KafkaBindings`). Default seed for Postgres is empty; scenarios own schema and data.
+
+**MariaDB (`testcontainers-modules::mariadb`, `mariadb:11` default tag):**
+
+- [`MariaDBResource`](src/resources.rs) mirrors Postgres: suite-level container, per-scenario `CREATE DATABASE` / `DROP DATABASE`, `mysql_async` for admin and readiness (`SELECT 1` on the scenario database). Root user matches the official image (empty password in the testcontainers module).
+- **Image tag:** [`MariaDBResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_MARIADB_IMAGE_TAG` via [`MariaDBResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`11`** (adopted SPECS).
+- [`MariaDBBindings`](src/resources.rs) is applied after provision (`engine: mariadb` in handle metadata).
 
 Integration tests that start Kafka or Postgres are `#[ignore]` unless Docker is available:
 
