@@ -25,8 +25,11 @@ rdkafka = { version = "=0.38", optional = true, default-features = false, featur
 # Testcontainers (base container runtime)
 testcontainers = { version = "0.27", default-features = false, optional = true }
 
-# Kafka module (KRaft / apache image — use `kafka::apache`, not default Confluent+ZK re-export)
-testcontainers-modules = { version = "0.15", default-features = false, features = ["kafka"], optional = true }
+# Community images (enable per parent feature: `kafka`, `postgres`, …)
+testcontainers-modules = { version = "0.15", default-features = false, optional = true }
+
+# Async Postgres client for admin/readiness queries (no sqlx in public API)
+tokio-postgres = { version = "0.7", optional = true, default-features = false, features = ["runtime"] }
 
 # Toxiproxy for fault injection (D-12 decision)
 noxious-client = "1.0"
@@ -45,12 +48,14 @@ kafka = [
     "dep:rdkafka",
     "dep:testcontainers",
     "dep:testcontainers-modules",
+    "testcontainers-modules/kafka",
 ]
 # Postgres integration with real infrastructure (requires Docker)
-# Includes: sqlx, testcontainers
 postgres = [
-    "dep:sqlx",
+    "dep:tokio-postgres",
     "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/postgres",
 ]
 # MariaDB integration with real infrastructure (requires Docker)
 # Includes: sqlx, testcontainers
@@ -66,6 +71,12 @@ mcp = []
 name = "macro_kafka"
 path = "tests/macro_kafka.rs"
 required-features = ["kafka"]
+
+# Postgres suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "postgres_vertical"
+path = "tests/postgres_vertical.rs"
+required-features = ["postgres"]
 
 # SQLx for Postgres/MariaDB support
 [dependencies.sqlx]
