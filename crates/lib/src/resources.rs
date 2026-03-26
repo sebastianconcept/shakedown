@@ -58,6 +58,27 @@ pub fn sanitize_sql_database_name(scenario_id: &str) -> String {
     out
 }
 
+/// Build a unique SQLite **named in-memory** URI for a scenario id.
+///
+/// Uses `file:<name>?mode=memory&cache=shared` so additional connections opened with the same URL
+/// attach to one logical database; distinct scenario ids yield distinct names (isolation). The
+/// harness keeps a primary [`rusqlite::Connection`] while [`crate::lifecycle::Context`] exposes the
+/// same URI in [`SqliteBindings::database_url`] for user clients.
+pub fn sqlite_named_memory_uri(scenario_id: &str) -> String {
+    let mut safe = String::new();
+    for ch in scenario_id.chars().take(120) {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            safe.push(ch.to_ascii_lowercase());
+        } else {
+            safe.push('_');
+        }
+    }
+    if safe.is_empty() {
+        safe.push_str("scenario");
+    }
+    format!("file:shakedown_{safe}?mode=memory&cache=shared")
+}
+
 /// Async resource contract — implement this trait to add a new infrastructure type.
 ///
 /// Methods are async because provisioning (especially containers) involves I/O.
@@ -107,6 +128,10 @@ pub enum BuiltinResource {
     #[cfg(feature = "mysql")]
     /// Docker-backed Oracle MySQL (suite-shared container via testcontainers-modules).
     Mysql(MysqlResource),
+
+    #[cfg(feature = "sqlite")]
+    /// In-memory SQLite per scenario (no Docker; [`SqliteResource`]).
+    Sqlite(SqliteResource),
 }
 
 #[async_trait]
@@ -125,6 +150,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MariaDB(r) => r.provision(scenario_id).await,
             #[cfg(feature = "mysql")]
             BuiltinResource::Mysql(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "sqlite")]
+            BuiltinResource::Sqlite(r) => r.provision(scenario_id).await,
         }
     }
 
@@ -139,6 +166,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MariaDB(r) => r.check_ready().await,
             #[cfg(feature = "mysql")]
             BuiltinResource::Mysql(r) => r.check_ready().await,
+            #[cfg(feature = "sqlite")]
+            BuiltinResource::Sqlite(r) => r.check_ready().await,
         }
     }
 
@@ -153,6 +182,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MariaDB(r) => r.apply_default_seed().await,
             #[cfg(feature = "mysql")]
             BuiltinResource::Mysql(r) => r.apply_default_seed().await,
+            #[cfg(feature = "sqlite")]
+            BuiltinResource::Sqlite(r) => r.apply_default_seed().await,
         }
     }
 
@@ -167,6 +198,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MariaDB(r) => r.teardown().await,
             #[cfg(feature = "mysql")]
             BuiltinResource::Mysql(r) => r.teardown().await,
+            #[cfg(feature = "sqlite")]
+            BuiltinResource::Sqlite(r) => r.teardown().await,
         }
     }
 }
@@ -1502,6 +1535,133 @@ mod mysql_impl {
     }
 }
 
+#[cfg(feature = "sqlite")]
+mod sqlite_impl {
+    use super::{sqlite_named_memory_uri, Resource, ResourceHandle};
+    use crate::error::{InfrastructureError, ScenarioId};
+    use async_trait::async_trait;
+    use rusqlite::{Connection, OpenFlags};
+    use std::sync::{Arc, Mutex};
+
+    const RESOURCE_NAME: &str = "sqlite";
+
+    /// In-memory SQLite for one scenario (no Docker).
+    ///
+    /// Opens a **named shared-cache in-memory** database (see [`super::sqlite_named_memory_uri`]) so
+    /// [`SqliteBindings::database_url`] can be used with `rusqlite` or other drivers to open further
+    /// connections to the same logical database.
+    ///
+    /// `rusqlite::Connection` is not [`Sync`]; it is wrapped in [`Arc`] [`Mutex`] so [`BuiltinResource`]
+    /// remains [`Sync`] and readiness can use [`tokio::task::spawn_blocking`] (works on the default
+    /// single-threaded `#[tokio::test]` runtime).
+    #[derive(Debug)]
+    pub struct SqliteResource {
+        connection: Option<Arc<Mutex<Connection>>>,
+        /// Retained for debugging; matches metadata `database_url`.
+        database_url: String,
+    }
+
+    impl Default for SqliteResource {
+        fn default() -> Self {
+            Self {
+                connection: None,
+                database_url: String::new(),
+            }
+        }
+    }
+
+    impl SqliteResource {
+        /// New SQLite resource (connection opened on [`Resource::provision`]).
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    #[async_trait]
+    impl Resource for SqliteResource {
+        async fn provision(
+            &mut self,
+            scenario_id: &ScenarioId,
+        ) -> Result<Vec<ResourceHandle>, InfrastructureError> {
+            if self.connection.is_some() {
+                return Err(InfrastructureError::AlreadyProvisioned(
+                    RESOURCE_NAME.into(),
+                ));
+            }
+
+            let database_url = sqlite_named_memory_uri(scenario_id.as_str());
+            let open_url = database_url.clone();
+            let connection = tokio::task::spawn_blocking(move || {
+                Connection::open_with_flags(
+                    open_url.as_str(),
+                    OpenFlags::SQLITE_OPEN_URI
+                        | OpenFlags::SQLITE_OPEN_READ_WRITE
+                        | OpenFlags::SQLITE_OPEN_CREATE,
+                )
+            })
+            .await
+            .map_err(|join_error| InfrastructureError::Provision {
+                resource: RESOURCE_NAME.into(),
+                source: Box::new(std::io::Error::other(join_error.to_string())),
+            })?
+            .map_err(|source| InfrastructureError::Provision {
+                resource: RESOURCE_NAME.into(),
+                source: Box::new(source),
+            })?;
+
+            self.connection = Some(Arc::new(Mutex::new(connection)));
+            self.database_url.clone_from(&database_url);
+
+            Ok(vec![ResourceHandle {
+                id: format!("sqlite_{scenario_id}"),
+                connection_string: database_url.clone(),
+                metadata: Some(serde_json::json!({
+                    "database_url": database_url,
+                    "engine": "sqlite",
+                })),
+            }])
+        }
+
+        async fn check_ready(&self) -> Result<(), InfrastructureError> {
+            let arc = self
+                .connection
+                .as_ref()
+                .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+            let arc = Arc::clone(arc);
+            tokio::task::spawn_blocking(move || {
+                let connection = arc
+                    .lock()
+                    .map_err(|poison| InfrastructureError::Readiness {
+                        resource: RESOURCE_NAME.into(),
+                        source: Box::new(std::io::Error::other(poison.to_string())),
+                    })?;
+                connection
+                    .query_row("SELECT 1", [], |row| row.get::<_, i32>(0))
+                    .map_err(|source| InfrastructureError::Readiness {
+                        resource: RESOURCE_NAME.into(),
+                        source: Box::new(source),
+                    })?;
+                Ok::<(), InfrastructureError>(())
+            })
+            .await
+            .map_err(|join_error| InfrastructureError::Readiness {
+                resource: RESOURCE_NAME.into(),
+                source: Box::new(std::io::Error::other(join_error.to_string())),
+            })?
+        }
+
+        async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+            Ok(())
+        }
+
+        async fn teardown(&mut self) -> Result<(), InfrastructureError> {
+            self.connection.take();
+            self.database_url.clear();
+            Ok(())
+        }
+    }
+}
+
 #[cfg(feature = "kafka")]
 pub use kafka_impl::KafkaResource;
 
@@ -1513,6 +1673,9 @@ pub use mariadb_impl::MariaDBResource;
 
 #[cfg(feature = "mysql")]
 pub use mysql_impl::MysqlResource;
+
+#[cfg(feature = "sqlite")]
+pub use sqlite_impl::SqliteResource;
 
 /// Connection and naming details extracted after Kafka provision for a scenario.
 ///
@@ -1621,6 +1784,17 @@ pub struct MysqlBindings {
     pub connection_url: String,
 }
 
+/// Connection details for a provisioned in-memory SQLite database.
+///
+/// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
+/// [`crate::lifecycle::Context::sqlite_bindings`] after provision.
+#[cfg(feature = "sqlite")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqliteBindings {
+    /// URI string for this scenario's database (named in-memory with shared cache; see feature SPECS).
+    pub database_url: String,
+}
+
 /// A marker trait for resources that can be cloned.
 pub trait CloneResource: Resource + Clone {}
 
@@ -1664,7 +1838,7 @@ impl<T: Resource> ResourceBinding<T> {
 /// Either a closed [`BuiltinResource`] or a boxed user [`Resource`], as stored on [`crate::lifecycle::Context`].
 #[allow(clippy::large_enum_variant)]
 pub enum RegisteredResource {
-    /// Shipped-with-the-crate implementation ([`FakeResource`], Kafka / Postgres / MariaDB / MySQL when features are on).
+    /// Shipped-with-the-crate implementation ([`FakeResource`], Kafka, TCP SQL engines, SQLite when features are on).
     Builtin(BuiltinResource),
     /// Third-party or test-local [`Resource`] behind dynamic dispatch.
     Extension(Box<dyn Resource>),
@@ -1892,6 +2066,17 @@ mod tests {
         assert!(sanitized.len() <= 63);
         assert!(sanitized.starts_with("shakedown_"));
         assert_eq!(sanitize_sql_database_name(""), "shakedown_scenario");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn sqlite_named_memory_uri_is_unique_per_scenario() {
+        let a = super::sqlite_named_memory_uri("test_a");
+        let b = super::sqlite_named_memory_uri("test_b");
+        assert_ne!(a, b);
+        assert!(a.starts_with("file:shakedown_"));
+        assert!(a.contains("mode=memory"));
+        assert!(a.contains("cache=shared"));
     }
 
     #[test]
