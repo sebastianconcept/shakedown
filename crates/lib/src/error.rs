@@ -45,6 +45,8 @@ pub enum ShakedownError {
         attempts: i32,
         min_attempts: i32,
     },
+    /// Outbox Kafka assertion did not find a matching record before timeout
+    OutboxKafkaRecordNotFound { topic: String, aggregate_id: String },
 }
 
 impl std::fmt::Display for ShakedownError {
@@ -87,6 +89,11 @@ impl std::fmt::Display for ShakedownError {
                 "Outbox retry below threshold for aggregate_id='{}': attempts={} min_attempts={}",
                 aggregate_id, attempts, min_attempts
             ),
+            ShakedownError::OutboxKafkaRecordNotFound { topic, aggregate_id } => write!(
+                f,
+                "Outbox Kafka record not found for aggregate_id='{}' in topic='{}' before timeout",
+                aggregate_id, topic
+            ),
         }
     }
 }
@@ -101,6 +108,7 @@ impl Error for ShakedownError {
             ShakedownError::OutboxRowNotFound { .. } => None,
             ShakedownError::OutboxWrongState { .. } => None,
             ShakedownError::OutboxRetryBelowThreshold { .. } => None,
+            ShakedownError::OutboxKafkaRecordNotFound { .. } => None,
         }
     }
 }
