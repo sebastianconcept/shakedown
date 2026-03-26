@@ -24,6 +24,8 @@ pub enum ShakedownError {
     Infrastructure(InfrastructureError),
     /// Internal errors (unexpected bugs, invariant violations)
     Internal(InternalError),
+    /// Outbox helpers require one relational binding in Context
+    NoRelationalBindings,
 }
 
 impl std::fmt::Display for ShakedownError {
@@ -32,6 +34,12 @@ impl std::fmt::Display for ShakedownError {
             ShakedownError::Scenario(e) => write!(f, "Scenario error: {}", e),
             ShakedownError::Infrastructure(e) => write!(f, "Infrastructure error: {}", e),
             ShakedownError::Internal(e) => write!(f, "Internal error: {}", e),
+            ShakedownError::NoRelationalBindings => {
+                write!(
+                    f,
+                    "No relational bindings are set on Context (enable postgres, mariadb, mysql, or sqlite and provision one resource)"
+                )
+            }
         }
     }
 }
@@ -42,6 +50,7 @@ impl Error for ShakedownError {
             ShakedownError::Scenario(e) => Some(e),
             ShakedownError::Infrastructure(e) => Some(e),
             ShakedownError::Internal(e) => Some(e),
+            ShakedownError::NoRelationalBindings => None,
         }
     }
 }

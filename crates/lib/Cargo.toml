@@ -79,6 +79,8 @@ mysql = [
 ]
 # In-memory SQLite per scenario (no Docker)
 sqlite = ["dep:rusqlite"]
+# Outbox helpers (requires at least one relational feature)
+outbox = []
 # MCP server support (post-MVP, optional)
 mcp = []
 

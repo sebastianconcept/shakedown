@@ -44,6 +44,16 @@
 
 use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownError};
 use crate::event::{EventLevel, EventLog};
+#[cfg(all(
+    feature = "outbox",
+    any(
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+        feature = "sqlite"
+    )
+))]
+use crate::outbox::Outbox;
 #[cfg(feature = "mariadb")]
 use crate::resources::MariaDBBindings;
 #[cfg(feature = "mysql")]
@@ -344,6 +354,20 @@ impl Context {
     #[cfg(feature = "sqlite")]
     pub fn sqlite_bindings(&self) -> Option<&SqliteBindings> {
         self.sqlite_bindings.as_ref()
+    }
+
+    /// Build an outbox helper bound to this context (`outbox` + relational features).
+    #[cfg(all(
+        feature = "outbox",
+        any(
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+            feature = "sqlite"
+        )
+    ))]
+    pub fn outbox(&self) -> Outbox<'_> {
+        Outbox::new(self)
     }
 
     /// Check if the context has any registered resources.

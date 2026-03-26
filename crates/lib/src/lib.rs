@@ -100,8 +100,32 @@ pub mod error;
 pub mod event;
 /// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
+/// Outbox table setup and assertions (`outbox` + relational features).
+#[cfg(all(
+    feature = "outbox",
+    any(
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+        feature = "sqlite"
+    )
+))]
+pub mod outbox;
 /// [`resources::Resource`] implementations, registration, and Kafka bindings.
 pub mod resources;
+
+#[cfg(all(
+    feature = "outbox",
+    not(any(
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+        feature = "sqlite"
+    ))
+))]
+compile_error!(
+    "Feature `outbox` requires at least one relational feature: `postgres`, `mariadb`, `mysql`, or `sqlite`."
+);
 
 #[doc(inline)]
 pub use crate::error::{
@@ -133,6 +157,17 @@ pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResour
 
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
+
+#[cfg(all(
+    feature = "outbox",
+    any(
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+        feature = "sqlite"
+    )
+))]
+pub use crate::outbox::Outbox;
 
 /// Procedural attributes for Tokio tests that run the full shakedown lifecycle.
 ///
