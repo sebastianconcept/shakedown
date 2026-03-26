@@ -5,6 +5,14 @@
 
 use crate::error::{InfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
+#[cfg(feature = "kafka")]
+use rdkafka::config::ClientConfig;
+#[cfg(feature = "kafka")]
+use rdkafka::consumer::{BaseConsumer, Consumer};
+#[cfg(feature = "kafka")]
+use rdkafka::message::Message;
+#[cfg(feature = "kafka")]
+use std::time::{Duration, Instant};
 
 /// Row state for records in the canonical `outbox_event` table.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +106,9 @@ pub struct Outbox<'ctx> {
 pub struct OutboxAssertBuilder {
     entry: OutboxEntry,
 }
+
+#[cfg(feature = "kafka")]
+const DEFAULT_KAFKA_ASSERT_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl OutboxAssertBuilder {
     /// Return the asserted outbox entry for additional ad-hoc checks.
@@ -232,6 +243,59 @@ impl<'ctx> Outbox<'ctx> {
             });
         }
         Ok(())
+    }
+
+    /// Assert a Kafka record for `aggregate_id` exists in the scenario-namespaced topic.
+    ///
+    /// The caller provides the base topic name; this helper applies the scenario topic prefix.
+    #[cfg(feature = "kafka")]
+    pub async fn assert_kafka_published(
+        &self,
+        base_topic: &str,
+        aggregate_id: &str,
+    ) -> Result<(), ShakedownError> {
+        let kafka_bindings = self.context.kafka_bindings().ok_or_else(|| {
+            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
+                "kafka bindings".to_string(),
+            ))
+        })?;
+
+        let topic = kafka_bindings.topic_namespace(base_topic);
+        let consumer_group = format!(
+            "shakedown-outbox-assert-{}",
+            self.context.scenario_id().as_str()
+        );
+        let consumer: BaseConsumer = ClientConfig::new()
+            .set(
+                "bootstrap.servers",
+                kafka_bindings.bootstrap_servers.as_str(),
+            )
+            .set("group.id", consumer_group.as_str())
+            .set("enable.auto.commit", "false")
+            .set("auto.offset.reset", "earliest")
+            .create()
+            .map_err(as_backend_error)?;
+
+        consumer
+            .subscribe(&[topic.as_str()])
+            .map_err(as_backend_error)?;
+
+        let deadline = Instant::now() + DEFAULT_KAFKA_ASSERT_TIMEOUT;
+        while Instant::now() < deadline {
+            let remaining_duration = deadline.saturating_duration_since(Instant::now());
+            let poll_duration = remaining_duration.min(Duration::from_millis(200));
+            if let Some(result) = consumer.poll(poll_duration) {
+                let message = result.map_err(as_backend_error)?;
+                if kafka_message_matches_aggregate_id(&message, aggregate_id) {
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(ShakedownError::OutboxKafkaRecordNotFound {
+            topic,
+            aggregate_id: aggregate_id.to_string(),
+        })
     }
 
     async fn assert_state(
@@ -467,6 +531,30 @@ fn outbox_row_state_label(state: OutboxRowState) -> &'static str {
         OutboxRowState::Sent => "sent",
         OutboxRowState::Failed => "failed",
     }
+}
+
+#[cfg(feature = "kafka")]
+fn kafka_message_matches_aggregate_id(message: &impl Message, aggregate_id: &str) -> bool {
+    if let Some(key_bytes) = message.key() {
+        if let Ok(key_text) = std::str::from_utf8(key_bytes) {
+            if key_text == aggregate_id {
+                return true;
+            }
+        }
+    }
+
+    if let Some(payload_bytes) = message.payload() {
+        if let Ok(payload_text) = std::str::from_utf8(payload_bytes) {
+            if let Ok(payload_json) = serde_json::from_str::<serde_json::Value>(payload_text) {
+                return payload_json
+                    .get("aggregate_id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|payload_aggregate_id| payload_aggregate_id == aggregate_id);
+            }
+        }
+    }
+
+    false
 }
 
 #[cfg(all(test, feature = "sqlite"))]
