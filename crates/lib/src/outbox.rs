@@ -115,6 +115,22 @@ impl OutboxAssertBuilder {
     pub fn entry(&self) -> &OutboxEntry {
         &self.entry
     }
+
+    /// Deserialize payload as `T` and apply a user assertion predicate.
+    pub async fn with_payload<T: serde::de::DeserializeOwned>(
+        self,
+        payload_assertion: impl FnOnce(&T) -> bool,
+    ) -> Result<(), ShakedownError> {
+        let payload = serde_json::from_value::<T>(self.entry.payload.clone())
+            .map_err(|error| ShakedownError::PayloadDeserialisation(error.to_string()))?;
+        if !payload_assertion(&payload) {
+            return Err(ShakedownError::PayloadAssertionFailed {
+                aggregate_id: self.entry.aggregate_id,
+                event_type: self.entry.event_type,
+            });
+        }
+        Ok(())
+    }
 }
 
 impl<'ctx> Outbox<'ctx> {
@@ -563,6 +579,12 @@ mod tests {
     use crate::error::ShakedownError;
     use crate::lifecycle::Context;
     use crate::resources::{BuiltinResource, SqliteResource};
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize)]
+    struct OrderPlaced {
+        total: f64,
+    }
 
     #[tokio::test]
     async fn setup_is_idempotent_for_sqlite() {
@@ -613,7 +635,7 @@ mod tests {
                                     "order",
                                     "order-1",
                                     "OrderPlaced",
-                                    r#"{"aggregate_id":"order-1"}"#,
+                                    r#"{"aggregate_id":"order-1","total":99.0}"#,
                                     "pending",
                                     2_i32,
                                 ),
@@ -627,12 +649,19 @@ mod tests {
                                     "order",
                                     "order-2",
                                     "OrderPlaced",
-                                    r#"{"aggregate_id":"order-2"}"#,
+                                    r#"{"aggregate_id":"order-2","total":42.0}"#,
                                     "failed",
                                     5_i32,
                                 ),
                             )
                             .expect("insert failed row");
+                        connection
+                            .execute(
+                                "INSERT INTO outbox_event (aggregate_type, aggregate_id, type, payload, status, attempts)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                                ("order", "order-3", "OrderPlaced", r#"{"not_total":"oops"}"#, "sent", 1_i32),
+                            )
+                            .expect("insert sent row with invalid payload shape");
                     })
                     .await
                     .expect("blocking task should join");
@@ -646,6 +675,13 @@ mod tests {
                         .await
                         .expect("failed assert should pass");
                     outbox
+                        .assert_pending("order-1", "OrderPlaced")
+                        .await
+                        .expect("pending assert should pass")
+                        .with_payload::<OrderPlaced>(|payload| payload.total == 99.0)
+                        .await
+                        .expect("typed payload assert should pass");
+                    outbox
                         .assert_retry("order-2", "OrderPlaced", 3)
                         .await
                         .expect("retry threshold should pass");
@@ -655,6 +691,30 @@ mod tests {
                         .await
                         .expect_err("sent assert should fail for pending row");
                     assert!(matches!(wrong_state, ShakedownError::OutboxWrongState { .. }));
+
+                    let payload_assertion_failed = outbox
+                        .assert_pending("order-1", "OrderPlaced")
+                        .await
+                        .expect("pending row should exist")
+                        .with_payload::<OrderPlaced>(|payload| payload.total == 1.0)
+                        .await
+                        .expect_err("payload predicate should fail");
+                    assert!(matches!(
+                        payload_assertion_failed,
+                        ShakedownError::PayloadAssertionFailed { .. }
+                    ));
+
+                    let payload_deserialisation_error = outbox
+                        .assert_sent("order-3", "OrderPlaced")
+                        .await
+                        .expect("sent row should exist")
+                        .with_payload::<OrderPlaced>(|payload| payload.total == 50.0)
+                        .await
+                        .expect_err("payload deserialisation should fail");
+                    assert!(matches!(
+                        payload_deserialisation_error,
+                        ShakedownError::PayloadDeserialisation(_)
+                    ));
                 })
             },
             &mut event_log,

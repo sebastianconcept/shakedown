@@ -47,6 +47,13 @@ pub enum ShakedownError {
     },
     /// Outbox Kafka assertion did not find a matching record before timeout
     OutboxKafkaRecordNotFound { topic: String, aggregate_id: String },
+    /// Outbox payload deserialisation failed
+    PayloadDeserialisation(String),
+    /// Outbox payload assertion predicate returned false
+    PayloadAssertionFailed {
+        aggregate_id: String,
+        event_type: String,
+    },
 }
 
 impl std::fmt::Display for ShakedownError {
@@ -94,6 +101,19 @@ impl std::fmt::Display for ShakedownError {
                 "Outbox Kafka record not found for aggregate_id='{}' in topic='{}' before timeout",
                 aggregate_id, topic
             ),
+            ShakedownError::PayloadDeserialisation(error_message) => write!(
+                f,
+                "Outbox payload deserialisation failed: {}",
+                error_message
+            ),
+            ShakedownError::PayloadAssertionFailed {
+                aggregate_id,
+                event_type,
+            } => write!(
+                f,
+                "Outbox payload assertion failed for aggregate_id='{}', event_type='{}'",
+                aggregate_id, event_type
+            ),
         }
     }
 }
@@ -109,6 +129,8 @@ impl Error for ShakedownError {
             ShakedownError::OutboxWrongState { .. } => None,
             ShakedownError::OutboxRetryBelowThreshold { .. } => None,
             ShakedownError::OutboxKafkaRecordNotFound { .. } => None,
+            ShakedownError::PayloadDeserialisation(_) => None,
+            ShakedownError::PayloadAssertionFailed { .. } => None,
         }
     }
 }
