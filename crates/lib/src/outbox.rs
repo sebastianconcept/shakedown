@@ -6,6 +6,40 @@
 use crate::error::{InfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
 
+/// Row state for records in the canonical `outbox_event` table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutboxRowState {
+    /// Event is waiting for publisher processing.
+    Pending,
+    /// Event has been published successfully.
+    Sent,
+    /// Event publishing failed.
+    Failed,
+}
+
+/// One `outbox_event` row mapped to a stable Rust shape for assertions.
+#[derive(Debug, Clone)]
+pub struct OutboxEntry {
+    /// Primary key of the event.
+    pub id: String,
+    /// Domain aggregate type (for example `order`).
+    pub aggregate_type: String,
+    /// Domain aggregate identifier.
+    pub aggregate_id: String,
+    /// Event type (`type` SQL column).
+    pub event_type: String,
+    /// Raw event payload as JSON.
+    pub payload: serde_json::Value,
+    /// Current row state.
+    pub status: OutboxRowState,
+    /// Publish attempts count.
+    pub attempts: i32,
+    /// Engine-normalized creation timestamp.
+    pub created_at: String,
+    /// Engine-normalized sent timestamp, when available.
+    pub sent_at: Option<String>,
+}
+
 #[cfg(feature = "postgres")]
 const POSTGRES_SETUP_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS outbox_event (
@@ -146,7 +180,7 @@ fn as_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> Sh
 
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
-    use super::Outbox;
+    use super::{Outbox, OutboxEntry, OutboxRowState};
     use crate::lifecycle::Context;
     use crate::resources::{BuiltinResource, SqliteResource};
 
@@ -169,5 +203,26 @@ mod tests {
         )
         .await
         .expect("scenario should pass");
+    }
+
+    #[test]
+    fn outbox_types_are_debug_and_clone() {
+        let pending = OutboxRowState::Pending;
+        let sent = OutboxRowState::Sent;
+        let failed = OutboxRowState::Failed;
+        let row = OutboxEntry {
+            id: "evt-1".to_string(),
+            aggregate_type: "order".to_string(),
+            aggregate_id: "order-1".to_string(),
+            event_type: "OrderPlaced".to_string(),
+            payload: serde_json::json!({"aggregate_id":"order-1"}),
+            status: pending.clone(),
+            attempts: 0,
+            created_at: "2026-03-26T00:00:00Z".to_string(),
+            sent_at: None,
+        };
+        assert!(format!("{:?}", row).contains("OutboxEntry"));
+        assert!(matches!(sent.clone(), OutboxRowState::Sent));
+        assert!(matches!(failed.clone(), OutboxRowState::Failed));
     }
 }

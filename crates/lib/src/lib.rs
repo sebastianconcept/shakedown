@@ -167,7 +167,7 @@ pub use crate::resources::KafkaResource;
         feature = "sqlite"
     )
 ))]
-pub use crate::outbox::Outbox;
+pub use crate::outbox::{Outbox, OutboxEntry, OutboxRowState};
 
 /// Procedural attributes for Tokio tests that run the full shakedown lifecycle.
 ///
