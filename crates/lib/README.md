@@ -31,7 +31,7 @@ shakedown/
 ## Milestone status
 
 - **Current (shipped in repo):** `mvp-macros-system-test` — procedural macros `#[shakedown::test]` and `#[shakedown::faulty_test]` for `cargo test` discovery; they delegate to `run_scenario` and public `Context` / `EventLog` APIs only. `ScenarioKind` (`Normal` / `Faulty`) on `Context` supports `#[shakedown::faulty_test]` today and future fault injection (`mvp-fault-injection`). Usage and optional `resources = [Fake, Kafka]` are documented in [`crates/macros/README.md`](../macros/README.md).
-- **In progress:** `mvp-postgres-mariadb` — first-party **PostgreSQL** and **MariaDB** (`PostgresResource` / `MariaDBResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers and per-scenario databases; **MySQL** and **SQLite** follow the same pattern (MVP row 4 in adopted [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md)).
+- **In progress:** `mvp-postgres-mariadb` — first-party **PostgreSQL**, **MariaDB**, and **Oracle MySQL** (`PostgresResource` / `MariaDBResource` / `MysqlResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers and per-scenario databases; **SQLite** follows next (MVP row 4 in adopted [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md)).
 - **Next after relational resources:** `mvp-outbox` — outbox helpers on Kafka + relational bindings.
 
 Default `cargo test -p shakedown` does not require Docker.
@@ -81,6 +81,12 @@ See [`KafkaResource::apply_default_seed`](src/resources.rs) and [DECISIONS.md D-
 - [`MariaDBResource`](src/resources.rs) mirrors Postgres: suite-level container, per-scenario `CREATE DATABASE` / `DROP DATABASE`, `mysql_async` for admin and readiness (`SELECT 1` on the scenario database). Root user matches the official image (empty password in the testcontainers module).
 - **Image tag:** [`MariaDBResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_MARIADB_IMAGE_TAG` via [`MariaDBResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`11`** (adopted SPECS).
 - [`MariaDBBindings`](src/resources.rs) is applied after provision (`engine: mariadb` in handle metadata).
+
+**Oracle MySQL (`testcontainers-modules::mysql`, `mysql:8.4` default tag):**
+
+- [`MysqlResource`](src/resources.rs) is a **separate** builtin from MariaDB (R-8): suite-level container, per-scenario database, `mysql_async` for admin and readiness. Uses the official **`mysql`** Docker image, not `mariadb`.
+- **Image tag:** [`MysqlResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_MYSQL_IMAGE_TAG` via [`MysqlResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`8.4`** (adopted SPECS).
+- [`MysqlBindings`](src/resources.rs) is applied after provision (`engine: mysql` in handle metadata).
 
 Integration tests that start Kafka or Postgres are `#[ignore]` unless Docker is available:
 

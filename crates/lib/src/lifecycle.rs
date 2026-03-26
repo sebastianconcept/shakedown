@@ -46,6 +46,8 @@ use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownErr
 use crate::event::{EventLevel, EventLog};
 #[cfg(feature = "mariadb")]
 use crate::resources::MariaDBBindings;
+#[cfg(feature = "mysql")]
+use crate::resources::MysqlBindings;
 #[cfg(feature = "postgres")]
 use crate::resources::PostgresBindings;
 use crate::resources::{
@@ -164,7 +166,7 @@ impl std::fmt::Display for ScenarioKind {
 ///
 /// How: constructed with [`Context::new`] or by `#[shakedown::test]`; the scenario function receives
 /// `&mut Context` to register extras or read [`Context::scenario_id`], [`Context::kafka_bindings`],
-/// and (with the `postgres` / `mariadb` features) relational bindings accessors.
+/// and (with the `postgres` / `mariadb` / `mysql` features) relational bindings accessors.
 pub struct Context {
     /// Registered resources
     resources: Vec<RegisteredResource>,
@@ -180,6 +182,9 @@ pub struct Context {
     /// MariaDB bindings when a MariaDB resource populated them (`mariadb` feature).
     #[cfg(feature = "mariadb")]
     mariadb_bindings: Option<MariaDBBindings>,
+    /// Oracle MySQL bindings when a MySQL resource populated them (`mysql` feature).
+    #[cfg(feature = "mysql")]
+    mysql_bindings: Option<MysqlBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
 }
@@ -196,6 +201,8 @@ impl Context {
             postgres_bindings: None,
             #[cfg(feature = "mariadb")]
             mariadb_bindings: None,
+            #[cfg(feature = "mysql")]
+            mysql_bindings: None,
             scenario_kind: ScenarioKind::Normal,
         }
     }
@@ -211,6 +218,8 @@ impl Context {
             postgres_bindings: None,
             #[cfg(feature = "mariadb")]
             mariadb_bindings: None,
+            #[cfg(feature = "mysql")]
+            mysql_bindings: None,
             scenario_kind: ScenarioKind::Normal,
         }
     }
@@ -226,6 +235,8 @@ impl Context {
             postgres_bindings: None,
             #[cfg(feature = "mariadb")]
             mariadb_bindings: None,
+            #[cfg(feature = "mysql")]
+            mysql_bindings: None,
             scenario_kind: ScenarioKind::Normal,
         }
     }
@@ -298,6 +309,18 @@ impl Context {
     #[cfg(feature = "mariadb")]
     pub fn mariadb_bindings(&self) -> Option<&MariaDBBindings> {
         self.mariadb_bindings.as_ref()
+    }
+
+    /// Set MySQL (Oracle) bindings for this scenario (typically after MySQL provision).
+    #[cfg(feature = "mysql")]
+    pub fn set_mysql_bindings(&mut self, mysql_bindings: MysqlBindings) {
+        self.mysql_bindings = Some(mysql_bindings);
+    }
+
+    /// Get Oracle MySQL bindings if available (`mysql` feature).
+    #[cfg(feature = "mysql")]
+    pub fn mysql_bindings(&self) -> Option<&MysqlBindings> {
+        self.mysql_bindings.as_ref()
     }
 
     /// Check if the context has any registered resources.
@@ -396,6 +419,46 @@ fn apply_resource_handles_to_mariadb_bindings(ctx: &mut Context, handles: &[Reso
         ) = (host, port, database, username, password, connection_url)
         {
             ctx.set_mariadb_bindings(MariaDBBindings {
+                host: host.to_string(),
+                port,
+                database: database.to_string(),
+                username: username.to_string(),
+                password: password.to_string(),
+                connection_url: connection_url.to_string(),
+            });
+        }
+    }
+}
+
+#[cfg(feature = "mysql")]
+/// If any handle metadata carries MySQL engine fields, set [`Context::set_mysql_bindings`].
+fn apply_resource_handles_to_mysql_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for h in handles {
+        let Some(meta) = &h.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if engine != "mysql" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|v| v.as_str());
+        let port = meta.get("port").and_then(|v| v.as_u64()).map(|p| p as u16);
+        let database = meta.get("database").and_then(|v| v.as_str());
+        let username = meta.get("username").and_then(|v| v.as_str());
+        let password = meta.get("password").and_then(|v| v.as_str());
+        let connection_url = meta.get("connection_url").and_then(|v| v.as_str());
+        if let (
+            Some(host),
+            Some(port),
+            Some(database),
+            Some(username),
+            Some(password),
+            Some(connection_url),
+        ) = (host, port, database, username, password, connection_url)
+        {
+            ctx.set_mysql_bindings(MysqlBindings {
                 host: host.to_string(),
                 port,
                 database: database.to_string(),
@@ -515,6 +578,8 @@ where
                 apply_resource_handles_to_postgres_bindings(ctx, &handles);
                 #[cfg(feature = "mariadb")]
                 apply_resource_handles_to_mariadb_bindings(ctx, &handles);
+                #[cfg(feature = "mysql")]
+                apply_resource_handles_to_mysql_bindings(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
             }
             Err(e) => {
