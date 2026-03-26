@@ -30,9 +30,9 @@ shakedown/
 
 ## Milestone status
 
-- **Current (shipped in repo):** `mvp-macros-system-test` — procedural macros `#[shakedown::test]` and `#[shakedown::faulty_test]` for `cargo test` discovery; they delegate to `run_scenario` and public `Context` / `EventLog` APIs only. `ScenarioKind` (`Normal` / `Faulty`) on `Context` supports `#[shakedown::faulty_test]` today and future fault injection (`mvp-fault-injection`). Usage and optional `resources = [Fake, Kafka]` are documented in [`crates/macros/README.md`](../macros/README.md).
-- **In progress:** `mvp-postgres-mariadb` — first-party **PostgreSQL**, **MariaDB**, and **Oracle MySQL** (`PostgresResource` / `MariaDBResource` / `MysqlResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers and per-scenario databases; **SQLite** follows next (MVP row 4 in adopted [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md)).
-- **Next after relational resources:** `mvp-outbox` — outbox helpers on Kafka + relational bindings.
+- **Current (shipped in repo):** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
+- **Previous milestone:** `mvp-macros-system-test` — procedural macros `#[shakedown::test]` and `#[shakedown::faulty_test]` for `cargo test` discovery; they delegate to `run_scenario` and public `Context` / `EventLog` APIs only. `ScenarioKind` (`Normal` / `Faulty`) on `Context` supports `#[shakedown::faulty_test]` today and future fault injection (`mvp-fault-injection`). Usage and optional `resources = [...]` are documented in [`crates/macros/README.md`](../macros/README.md).
+- **Next milestone:** `mvp-outbox` — outbox helpers on Kafka + relational bindings.
 
 Default `cargo test -p shakedown` does not require Docker.
 
