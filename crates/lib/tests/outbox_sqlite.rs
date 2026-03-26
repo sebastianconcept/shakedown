@@ -3,6 +3,7 @@
 //! SQLite outbox proof without Docker.
 
 use rusqlite::{Connection, OpenFlags};
+use shakedown::error::ShakedownError;
 use shakedown::{run_scenario, BuiltinResource, Context, EventLog, SqliteResource};
 
 #[tokio::test]
@@ -81,6 +82,70 @@ async fn sqlite_outbox_setup_and_state_assertions_work_without_docker() {
                             ),
                         )
                         .expect("insert sent row");
+
+                    connection
+                        .execute(
+                            "INSERT INTO outbox_event (aggregate_type, aggregate_id, type, payload, status, attempts)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            (
+                                "order",
+                                "order-44",
+                                "OrderPlaced",
+                                "{this-is-not-valid-json",
+                                "sent",
+                                1_i32,
+                            ),
+                        )
+                        .expect("insert malformed JSON row");
+
+                    connection
+                        .execute(
+                            "INSERT INTO outbox_event (aggregate_type, aggregate_id, type, payload, status, attempts)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            (
+                                "order",
+                                "order-55",
+                                "OrderPlaced",
+                                r#"{"aggregate_id":"order-55","total":77.0}"#,
+                                "retrying",
+                                9_i32,
+                            ),
+                        )
+                        .expect("insert unknown status row");
+
+                    connection
+                        .execute(
+                            "INSERT INTO outbox_event (id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            (
+                                "evt-001",
+                                "order",
+                                "order-66",
+                                "OrderPlaced",
+                                r#"{"aggregate_id":"order-66","total":11.0}"#,
+                                "sent",
+                                1_i32,
+                                "2026-01-01T00:00:00Z",
+                            ),
+                        )
+                        .expect("insert older deterministic row");
+
+                    connection
+                        .execute(
+                            "INSERT INTO outbox_event (id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            (
+                                "evt-999",
+                                "order",
+                                "order-66",
+                                "OrderPlaced",
+                                r#"{"aggregate_id":"order-66","total":22.0}"#,
+                                "sent",
+                                4_i32,
+                                "2026-01-01T00:00:00Z",
+                            ),
+                        )
+                        .expect("insert newer deterministic row by id");
                 })
                 .await
                 .expect("blocking write task");
@@ -105,6 +170,32 @@ async fn sqlite_outbox_setup_and_state_assertions_work_without_docker() {
                     .assert_retry("order-22", "OrderPlaced", 3)
                     .await
                     .expect("retry threshold should be asserted");
+
+                scenario_context
+                    .outbox()
+                    .assert_retry("order-66", "OrderPlaced", 3)
+                    .await
+                    .expect("retry should use latest deterministic row");
+
+                let malformed_payload_error = scenario_context
+                    .outbox()
+                    .assert_sent("order-44", "OrderPlaced")
+                    .await
+                    .expect_err("malformed JSON payload must fail");
+                assert!(matches!(
+                    malformed_payload_error,
+                    ShakedownError::PayloadDeserialisation(_)
+                ));
+
+                let unknown_status_error = scenario_context
+                    .outbox()
+                    .assert_retry("order-55", "OrderPlaced", 1)
+                    .await
+                    .expect_err("unknown status must fail explicitly");
+                assert!(matches!(
+                    unknown_status_error,
+                    ShakedownError::OutboxUnknownState { .. }
+                ));
             })
         },
         &mut event_log,

@@ -39,6 +39,12 @@ pub enum ShakedownError {
         expected: String,
         actual: String,
     },
+    /// Outbox row has an unknown status value
+    OutboxUnknownState {
+        status: String,
+        aggregate_id: String,
+        event_type: String,
+    },
     /// Outbox retry assertion failed threshold check
     OutboxRetryBelowThreshold {
         aggregate_id: String,
@@ -87,6 +93,15 @@ impl std::fmt::Display for ShakedownError {
                 "Outbox row in wrong state for aggregate_id='{}', event_type='{}': expected '{}', got '{}'",
                 aggregate_id, event_type, expected, actual
             ),
+            ShakedownError::OutboxUnknownState {
+                status,
+                aggregate_id,
+                event_type,
+            } => write!(
+                f,
+                "Outbox row has unknown status '{}' for aggregate_id='{}', event_type='{}'",
+                status, aggregate_id, event_type
+            ),
             ShakedownError::OutboxRetryBelowThreshold {
                 aggregate_id,
                 attempts,
@@ -127,6 +142,7 @@ impl Error for ShakedownError {
             ShakedownError::NoRelationalBindings => None,
             ShakedownError::OutboxRowNotFound { .. } => None,
             ShakedownError::OutboxWrongState { .. } => None,
+            ShakedownError::OutboxUnknownState { .. } => None,
             ShakedownError::OutboxRetryBelowThreshold { .. } => None,
             ShakedownError::OutboxKafkaRecordNotFound { .. } => None,
             ShakedownError::PayloadDeserialisation(_) => None,
