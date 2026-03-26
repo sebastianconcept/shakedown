@@ -67,6 +67,13 @@ mariadb = [
     "dep:testcontainers-modules",
     "testcontainers-modules/mariadb",
 ]
+# Oracle MySQL integration with real infrastructure (requires Docker; distinct from MariaDB — R-8)
+mysql = [
+    "dep:mysql_async",
+    "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/mysql",
+]
 # MCP server support (post-MVP, optional)
 mcp = []
 
