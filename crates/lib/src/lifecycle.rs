@@ -36,9 +36,10 @@
 //!         .await
 //!         .unwrap();
 //!
-//!     // Retrieve events after scenario completion
-//!     let events = event_log.events();
-//!     assert!(events.iter().any(|e| e.source == "scenario" && e.level == EventLevel::Info));
+//!     // Retrieve application events after scenario completion (see also [`EventLog::entries`])
+//!     assert!(event_log
+//!         .events()
+//!         .any(|e| e.source == "scenario" && e.level == EventLevel::Info));
 //! }
 //! ```
 
@@ -67,22 +68,7 @@ use crate::resources::{
 };
 use async_trait::async_trait;
 
-/// Ordered phase of [`run_scenario`] (provision through teardown).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Phase {
-    /// Provision resources
-    Provision,
-    /// Check resource readiness
-    Readiness,
-    /// Seed data into resources
-    Seed,
-    /// Run the scenario logic
-    Run,
-    /// Assert scenario outcomes
-    Assert,
-    /// Teardown resources
-    Teardown,
-}
+pub use crate::phase::Phase;
 
 /// High-level state machine position for a scenario (reserved for richer orchestration).
 #[derive(Debug)]
@@ -612,8 +598,8 @@ async fn teardown_all_resources(ctx: &mut Context) {
 ///         .await
 ///         .unwrap();
 ///
-///     // Retrieve events after scenario completion
-///     let events = event_log.events();
+///     // Application-level events (`EventLog::entries` for the full log including infrastructure)
+///     let _application_events: Vec<_> = event_log.events().collect();
 /// }
 /// ```
 pub async fn run_scenario<F>(
@@ -820,7 +806,7 @@ mod tests {
         log.append(Event::info("scenario", "test event 1"));
         log.append(Event::debug("resource:fake", "test event 2"));
         assert_eq!(log.len(), 2);
-        let events = log.events();
+        let events: Vec<_> = log.events().collect();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].message, "test event 1");
         assert_eq!(events[1].source, "resource:fake");
@@ -932,7 +918,7 @@ mod tests {
         log.append_raw(EventLevel::Warn, "source3", "warn message");
         log.append_raw(EventLevel::Error, "source4", "error message");
         assert_eq!(log.len(), 4);
-        let events = log.events();
+        let events: Vec<_> = log.events().collect();
         assert_eq!(events[0].level, EventLevel::Debug);
         assert_eq!(events[1].level, EventLevel::Info);
         assert_eq!(events[2].level, EventLevel::Warn);
@@ -942,7 +928,7 @@ mod tests {
         let event = Event::info("scenario", "test");
         log.append(event);
         assert_eq!(log.len(), 1);
-        let retrieved = log.events();
+        let retrieved: Vec<_> = log.events().collect();
         // Then the last message is the structured one we appended after clear
         assert_eq!(retrieved[0].message, "test");
     }
@@ -980,7 +966,7 @@ mod tests {
         )
         .await
         .expect("run_scenario should succeed");
-        let events = event_log.events();
+        let events: Vec<_> = event_log.events().collect();
         // Then lifecycle phases emitted at least one event tagged with the lifecycle source
         assert!(events.iter().any(|e| e.source == "lifecycle"));
     }

@@ -119,6 +119,8 @@ pub mod lifecycle;
     )
 ))]
 pub mod outbox;
+/// Lifecycle phase labels (shared with infrastructure event records).
+pub mod phase;
 /// [`resources::Resource`] implementations, registration, and Kafka bindings.
 pub mod resources;
 
@@ -139,11 +141,15 @@ compile_error!(
 pub use crate::error::{
     InfrastructureError, InternalError, ResourceHandle, Result, ScenarioError, ScenarioId,
 };
-pub use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
+pub use crate::event::{
+    DockerEventKind, Event, EventLevel, EventLog, EventSnapshot, InfraEvent, InfraSeverity,
+    LogEntry, ScenarioLogEntry,
+};
 /// Public types and functions from the lifecycle module.
 pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, ScenarioKind,
 };
+pub use crate::phase::Phase;
 
 #[cfg(any(
     feature = "kafka",
