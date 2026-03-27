@@ -8,7 +8,8 @@ use bollard::models::{ContainerNetworkStats, ContainerStatsResponse};
 use bollard::query_parameters::{ListContainersOptionsBuilder, StatsOptionsBuilder};
 use bollard::Docker;
 use futures_util::StreamExt;
-use tokio::sync::{watch, Mutex};
+use std::sync::Mutex;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, MissedTickBehavior};
 
@@ -17,6 +18,10 @@ use crate::phase::Phase;
 
 use super::labels::shakedown_docker_label_filter;
 use super::ring_buffer::RingBuffer;
+
+/// Shared per-container rings keyed by Docker container id (see [`ResourceStatsMonitor`]).
+pub(crate) type SharedResourceStatsRings =
+    std::sync::Arc<Mutex<HashMap<String, RingBuffer<InfraEvent>>>>;
 
 /// Polling interval and per-container ring depth (defaults: 1s, 60 samples).
 #[derive(Debug, Clone)]
@@ -49,7 +54,7 @@ impl StatsConfig {
 
 pub(crate) struct ResourceStatsMonitor {
     join: JoinHandle<()>,
-    rings: Arc<Mutex<HashMap<String, RingBuffer<InfraEvent>>>>,
+    rings: SharedResourceStatsRings,
 }
 
 impl ResourceStatsMonitor {
@@ -57,23 +62,29 @@ impl ResourceStatsMonitor {
         docker: Docker,
         phase_receiver: watch::Receiver<(Phase, String)>,
         configuration: StatsConfig,
-    ) -> Self {
-        let rings = Arc::new(Mutex::new(HashMap::new()));
-        let rings_clone = Arc::clone(&rings);
+    ) -> (Self, SharedResourceStatsRings) {
+        let rings: SharedResourceStatsRings = Arc::new(Mutex::new(HashMap::new()));
+        let rings_for_task = Arc::clone(&rings);
         let join = tokio::spawn(run_resource_stats_loop(
             docker,
-            rings_clone,
+            rings_for_task,
             phase_receiver,
             configuration,
         ));
-        Self { join, rings }
+        let monitor = Self {
+            join,
+            rings: Arc::clone(&rings),
+        };
+        (monitor, rings)
     }
 
     pub(crate) async fn shutdown_and_drain(self, event_log: &mut crate::event::EventLog) {
         let ResourceStatsMonitor { join, rings } = self;
         join.abort();
         let _ = join.await;
-        let mut guard = rings.lock().await;
+        let mut guard = rings
+            .lock()
+            .expect("shakedown diagnostics: resource stats mutex poisoned");
         let mut collected: Vec<InfraEvent> = Vec::new();
         for ring in guard.values_mut() {
             collected.extend(ring.drain_ordered());
@@ -87,7 +98,7 @@ impl ResourceStatsMonitor {
 
 async fn run_resource_stats_loop(
     docker: Docker,
-    rings: Arc<Mutex<HashMap<String, RingBuffer<InfraEvent>>>>,
+    rings: SharedResourceStatsRings,
     phase_receiver: watch::Receiver<(Phase, String)>,
     configuration: StatsConfig,
 ) {
@@ -116,7 +127,9 @@ async fn run_resource_stats_loop(
                 .await
             {
                 Ok(Some(infra_event)) => {
-                    let mut guard = rings.lock().await;
+                    let mut guard = rings
+                        .lock()
+                        .expect("shakedown diagnostics: resource stats mutex poisoned");
                     let ring = guard
                         .entry(container_id)
                         .or_insert_with(|| RingBuffer::new(configuration.buffer_depth));

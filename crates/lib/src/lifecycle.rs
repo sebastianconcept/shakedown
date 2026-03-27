@@ -188,6 +188,18 @@ pub struct Context {
     sqlite_bindings: Option<SqliteBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
+    /// Per-container Docker stats rings (diagnostics); set by [`run_scenario`] when monitoring runs.
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        feature = "diagnostics",
+        not(feature = "no-diagnostics"),
+    ))]
+    stats_rings: Option<crate::diagnostics::SharedResourceStatsRings>,
 }
 
 impl Context {
@@ -207,6 +219,17 @@ impl Context {
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
+            #[cfg(all(
+                any(
+                    feature = "kafka",
+                    feature = "postgres",
+                    feature = "mariadb",
+                    feature = "mysql",
+                ),
+                feature = "diagnostics",
+                not(feature = "no-diagnostics"),
+            ))]
+            stats_rings: None,
         }
     }
 
@@ -226,6 +249,17 @@ impl Context {
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
+            #[cfg(all(
+                any(
+                    feature = "kafka",
+                    feature = "postgres",
+                    feature = "mariadb",
+                    feature = "mysql",
+                ),
+                feature = "diagnostics",
+                not(feature = "no-diagnostics"),
+            ))]
+            stats_rings: None,
         }
     }
 
@@ -245,6 +279,17 @@ impl Context {
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
+            #[cfg(all(
+                any(
+                    feature = "kafka",
+                    feature = "postgres",
+                    feature = "mariadb",
+                    feature = "mysql",
+                ),
+                feature = "diagnostics",
+                not(feature = "no-diagnostics"),
+            ))]
+            stats_rings: None,
         }
     }
 
@@ -374,6 +419,59 @@ impl Context {
     /// Set the scenario kind for this run.
     pub fn set_scenario_kind(&mut self, kind: ScenarioKind) {
         self.scenario_kind = kind;
+    }
+
+    /// Snapshot handle for per-container resource stats rings (diagnostics).
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        feature = "diagnostics",
+        not(feature = "no-diagnostics"),
+    ))]
+    pub(crate) fn resource_stats_rings(
+        &self,
+    ) -> Option<&crate::diagnostics::SharedResourceStatsRings> {
+        self.stats_rings.as_ref()
+    }
+
+    /// Install or clear the stats ring handle (used by [`run_scenario`] and tests).
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        feature = "diagnostics",
+        not(feature = "no-diagnostics"),
+    ))]
+    pub(crate) fn set_resource_stats_rings(
+        &mut self,
+        rings: Option<crate::diagnostics::SharedResourceStatsRings>,
+    ) {
+        self.stats_rings = rings;
+    }
+
+    /// Assert CPU and memory bounds using collected Docker stats for `container_name`.
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        feature = "diagnostics",
+        not(feature = "no-diagnostics"),
+    ))]
+    pub fn assert_resource<'a>(
+        &'a self,
+        container_name: &'a str,
+    ) -> crate::diagnostics::ResourceAssertBuilder<'a> {
+        crate::diagnostics::ResourceAssertBuilder::new(self, container_name)
     }
 }
 
@@ -680,6 +778,18 @@ where
             feature = "mariadb",
             feature = "mysql",
         ),
+        feature = "diagnostics",
+        not(feature = "no-diagnostics"),
+    ))]
+    ctx.set_resource_stats_rings(None);
+
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
         not(feature = "no-diagnostics"),
     ))]
     let (mut docker_events_monitor, mut resource_stats_monitor, docker_phase_sender) = {
@@ -694,11 +804,13 @@ where
                 docker.clone(),
                 phase_rx.clone(),
             ));
-            stats_monitor_slot = Some(crate::diagnostics::ResourceStatsMonitor::spawn(
+            let (stats_monitor, rings_handle) = crate::diagnostics::ResourceStatsMonitor::spawn(
                 docker,
                 phase_rx,
                 crate::diagnostics::StatsConfig::from_env(),
-            ));
+            );
+            stats_monitor_slot = Some(stats_monitor);
+            ctx.set_resource_stats_rings(Some(rings_handle));
             phase_sender_slot = Some(phase_tx);
         }
         (docker_monitor_slot, stats_monitor_slot, phase_sender_slot)
@@ -872,6 +984,18 @@ where
         not(feature = "no-diagnostics"),
     ))]
     shakedown_merge_diagnostics!(docker_events_monitor, resource_stats_monitor, event_log);
+
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        feature = "diagnostics",
+        not(feature = "no-diagnostics"),
+    ))]
+    ctx.set_resource_stats_rings(None);
 
     Ok(())
 }

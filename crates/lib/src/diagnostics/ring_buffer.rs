@@ -29,6 +29,10 @@ impl<T> RingBuffer<T> {
     pub(crate) fn drain_ordered(&mut self) -> Vec<T> {
         self.inner.drain(..).collect()
     }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
+        self.inner.iter()
+    }
 }
 
 #[cfg(test)]
