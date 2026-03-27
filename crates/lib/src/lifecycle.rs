@@ -630,6 +630,16 @@ where
     // Update scenario ID
     ctx.set_scenario_id(scenario_id);
 
+    #[cfg(any(
+        feature = "kafka",
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+    ))]
+    {
+        let _ = crate::diagnostics::suite_diagnostics_handle().await;
+    }
+
     // Provision phase (async)
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting provision phase");
 
