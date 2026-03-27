@@ -44,9 +44,12 @@ impl DockerEventsMonitor {
     }
 }
 
-pub(crate) fn push_lifecycle_phase(phase_sender: &watch::Sender<(Phase, String)>, phase: Phase) {
-    let scenario_id = phase_sender.borrow().1.clone();
-    let _ = phase_sender.send((phase, scenario_id));
+pub(crate) fn push_lifecycle_phase(
+    phase_sender: &watch::Sender<(Phase, String)>,
+    phase: Phase,
+    scenario_id: &str,
+) {
+    let _ = phase_sender.send((phase, scenario_id.to_string()));
 }
 
 fn events_options() -> bollard::query_parameters::EventsOptions {
