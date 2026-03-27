@@ -1,17 +1,25 @@
 //! Event logging for scenario orchestration.
 //!
-//! What: [`Event`] records and [`EventLog`] / [`EventSnapshot`] types for ordered timelines.
+//! What: [`Event`] records, [`InfraEvent`] infrastructure records, [`LogEntry`] union, and
+//! [`EventLog`] / [`EventSnapshot`] types for ordered timelines.
 //!
 //! Why: when a scenario fails, operators need level, source, and message without attaching a full
-//! logger to every test.
+//! logger to every test; infrastructure diagnostics use the same append-only log via
+//! [`LogEntry::Infrastructure`].
 //!
 //! How: the lifecycle appends phase transitions; tests and resources may append additional entries;
-//! inspect [`EventLog::events`] after [`crate::lifecycle::run_scenario`] completes.
+//! inspect [`EventLog::entries`] after [`crate::lifecycle::run_scenario`] completes for the full
+//! timeline, or [`EventLog::events`] for application-level [`Event`] records only.
 
+use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
+
+use crate::phase::Phase;
+
 /// Severity for a single [`Event`] (mirrors common log levels).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EventLevel {
     /// Debug-level events for detailed tracing
     Debug,
@@ -38,10 +46,10 @@ impl std::fmt::Display for EventLevel {
 ///
 /// Exists so callers log with a consistent shape (level, source, message, time) whether the
 /// emitter is the harness, a resource, or the scenario. Created via [`Event::new`] or helpers
-/// [`Event::info`], [`Event::debug`], etc., and stored in [`EventLog`].
-#[derive(Debug, Clone)]
+/// [`Event::info`], [`Event::debug`], etc., and stored in [`EventLog`] as [`LogEntry::Application`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
-    /// Timestamp when the event occurred
+    /// Timestamp when the event occurred (UNIX epoch seconds).
     pub timestamp: u64,
     /// Log level of this event
     pub level: EventLevel,
@@ -88,55 +96,211 @@ impl Event {
     }
 }
 
-/// Append-only in-memory collection of [`Event`] values for one scenario run.
+/// Severity for Docker-side infrastructure events (distinct from [`EventLevel`]).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum InfraSeverity {
+    /// Informational (e.g. container restart)
+    Info,
+    /// Warning (e.g. health check unhealthy)
+    Warning,
+    /// Critical (e.g. OOM, non-zero exit)
+    Critical,
+}
+
+/// Classified Docker engine / container event for [`InfraEvent::DockerEvent`].
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DockerEventKind {
+    /// Container was OOM-killed
+    OomKilled,
+    /// Container exited
+    Exit,
+    /// Health status became unhealthy
+    HealthUnhealthy,
+    /// Container restarted
+    Restart,
+    /// Other action (raw descriptor)
+    Other(String),
+}
+
+/// Infrastructure diagnostic record (container logs, Docker events, resource samples).
+#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum InfraEvent {
+    /// One line of container stdout/stderr
+    ContainerLog {
+        /// Container name or identifier
+        container: String,
+        /// Active lifecycle phase when the line was observed
+        phase: Phase,
+        /// UNIX epoch seconds when observed
+        timestamp: u64,
+        /// Log line text
+        line: String,
+        /// Stream name when known (`stdout` / `stderr`)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stream: Option<String>,
+    },
+    /// Docker engine event (OOM, exit, health, restart, …)
+    DockerEvent {
+        /// Container name or identifier
+        container: String,
+        /// Active lifecycle phase when the event was observed
+        phase: Phase,
+        /// UNIX epoch seconds when observed
+        timestamp: u64,
+        /// Classified event kind
+        kind: DockerEventKind,
+        /// Severity for timeline highlighting
+        severity: InfraSeverity,
+        /// Process exit code when applicable
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i64>,
+        /// Whether the kernel reported OOM kill
+        #[serde(skip_serializing_if = "Option::is_none")]
+        oom_killed: Option<bool>,
+        /// Extra detail (e.g. raw Docker action)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    /// Sample of CPU, memory, and network usage for a container
+    ResourceSample {
+        /// Container name or identifier
+        container: String,
+        /// Active lifecycle phase when the sample was taken
+        phase: Phase,
+        /// UNIX epoch seconds when sampled
+        timestamp: u64,
+        /// CPU usage as a percentage (host-relative)
+        cpu_pct: f64,
+        /// Resident memory usage in bytes
+        mem_bytes: u64,
+        /// Memory limit in bytes when known
+        mem_limit: u64,
+        /// Network bytes received
+        net_rx: u64,
+        /// Network bytes transmitted
+        net_tx: u64,
+    },
+}
+
+impl InfraEvent {
+    /// UNIX timestamp for this record (seconds).
+    pub fn timestamp_secs(&self) -> u64 {
+        match self {
+            InfraEvent::ContainerLog { timestamp, .. }
+            | InfraEvent::DockerEvent { timestamp, .. }
+            | InfraEvent::ResourceSample { timestamp, .. } => *timestamp,
+        }
+    }
+}
+
+/// Union of application-level and infrastructure events in one append-only log.
+#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LogEntry {
+    /// Harness / resource / scenario [`Event`]
+    Application(Event),
+    /// Docker-backed diagnostic record
+    Infrastructure(InfraEvent),
+}
+
+/// Common interface for entries stored in [`EventLog`].
+pub trait ScenarioLogEntry: Debug + Clone + Serialize {
+    /// UNIX timestamp (seconds) for ordering timelines.
+    fn timestamp_secs(&self) -> u64;
+}
+
+impl ScenarioLogEntry for Event {
+    fn timestamp_secs(&self) -> u64 {
+        self.timestamp
+    }
+}
+
+impl ScenarioLogEntry for InfraEvent {
+    fn timestamp_secs(&self) -> u64 {
+        InfraEvent::timestamp_secs(self)
+    }
+}
+
+impl ScenarioLogEntry for LogEntry {
+    fn timestamp_secs(&self) -> u64 {
+        match self {
+            LogEntry::Application(event) => event.timestamp_secs(),
+            LogEntry::Infrastructure(infra) => infra.timestamp_secs(),
+        }
+    }
+}
+
+/// Append-only in-memory collection of [`LogEntry`] values for one scenario run.
 ///
 /// Why in-memory: tests should stay hermetic and fast; this type is enough for assertions and
 /// debugging without configuring `tracing` or `log` in every crate.
 #[derive(Debug, Default, Clone)]
 pub struct EventLog {
-    /// The collected events
-    events: Vec<Event>,
+    entries: Vec<LogEntry>,
 }
 
 impl EventLog {
     /// Create a new empty event log.
     pub fn new() -> Self {
-        Self { events: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
-    /// Append an event to the log.
+    /// Append an application [`Event`].
     pub fn append(&mut self, event: Event) {
-        self.events.push(event);
+        self.entries.push(LogEntry::Application(event));
     }
 
-    /// Append an event with the given level, source, and message.
+    /// Append an infrastructure [`InfraEvent`].
+    pub fn append_infra(&mut self, event: InfraEvent) {
+        self.entries.push(LogEntry::Infrastructure(event));
+    }
+
+    /// Append an application event with the given level, source, and message.
     pub fn append_raw(
         &mut self,
         level: EventLevel,
         source: impl Into<String>,
         message: impl Into<String>,
     ) {
-        self.events.push(Event::new(level, source, message));
+        self.append(Event::new(level, source, message));
     }
 
-    /// Get a reference to all events in the log.
-    pub fn events(&self) -> &[Event] {
-        &self.events
+    /// Append any [`LogEntry`] (application or infrastructure).
+    pub fn append_entry(&mut self, entry: LogEntry) {
+        self.entries.push(entry);
     }
 
-    /// Get the number of events in the log.
+    /// Full chronological log (application and infrastructure).
+    pub fn entries(&self) -> &[LogEntry] {
+        &self.entries
+    }
+
+    /// Iterator over application [`Event`] records only (excludes [`LogEntry::Infrastructure`]).
+    pub fn events(&self) -> impl DoubleEndedIterator<Item = &Event> + '_ {
+        self.entries.iter().filter_map(|entry| match entry {
+            LogEntry::Application(event) => Some(event),
+            LogEntry::Infrastructure(_) => None,
+        })
+    }
+
+    /// Get the number of entries in the log (application and infrastructure).
     pub fn len(&self) -> usize {
-        self.events.len()
+        self.entries.len()
     }
 
     /// Check if the log is empty.
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
+        self.entries.is_empty()
     }
 
     /// Clear all events from the log.
     pub fn clear(&mut self) {
-        self.events.clear();
+        self.entries.clear();
     }
 }
 
@@ -146,37 +310,56 @@ impl EventLog {
 /// a cheap clone across threads after the run.
 #[derive(Debug, Clone)]
 pub struct EventSnapshot {
-    /// The events at the time of snapshot
-    events: Vec<Event>,
+    entries: Vec<LogEntry>,
 }
 
 impl EventSnapshot {
     /// Create a new snapshot from an event log.
     pub fn from_log(log: &EventLog) -> Self {
         Self {
-            events: log.events().to_vec(),
+            entries: log.entries().to_vec(),
         }
     }
 
-    /// Get a reference to the snapshot's events.
-    pub fn events(&self) -> &[Event] {
-        &self.events
+    /// Full chronological log at snapshot time.
+    pub fn entries(&self) -> &[LogEntry] {
+        &self.entries
     }
 
-    /// Get the number of events in the snapshot.
+    /// Application events only.
+    pub fn events(&self) -> impl DoubleEndedIterator<Item = &Event> + '_ {
+        self.entries.iter().filter_map(|entry| match entry {
+            LogEntry::Application(event) => Some(event),
+            LogEntry::Infrastructure(_) => None,
+        })
+    }
+
+    /// Get the number of entries in the snapshot.
     pub fn len(&self) -> usize {
-        self.events.len()
+        self.entries.len()
     }
 
     /// Check if the snapshot is empty.
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
+        self.entries.is_empty()
     }
 }
 
 impl From<EventLog> for Vec<Event> {
     fn from(log: EventLog) -> Self {
-        log.events
+        log.entries
+            .into_iter()
+            .filter_map(|entry| match entry {
+                LogEntry::Application(event) => Some(event),
+                LogEntry::Infrastructure(_) => None,
+            })
+            .collect()
+    }
+}
+
+impl From<EventLog> for Vec<LogEntry> {
+    fn from(log: EventLog) -> Self {
+        log.entries
     }
 }
 
@@ -250,7 +433,7 @@ mod tests {
         log.append_raw(EventLevel::Error, "resource:fake", "error occurred");
         // Then both messages are stored with the expected source and text
         assert_eq!(log.len(), 2);
-        let events = log.events();
+        let events: Vec<_> = log.events().collect();
         assert_eq!(events[0].message, "test message");
         assert_eq!(events[1].source, "resource:fake");
     }
@@ -260,7 +443,7 @@ mod tests {
         // Given a log with one event
         let mut log = EventLog::new();
         log.append(Event::info("scenario", "test event"));
-        // When we take a snapshot and then consume the log into a vector
+        // When we take a snapshot and then consume the log into a vector of application events
         let snapshot = EventSnapshot::from_log(&log);
         let events: Vec<Event> = log.into();
         // Then the snapshot mirrors the single event and the consumed vec matches
@@ -290,11 +473,66 @@ mod tests {
         }
         assert_eq!(log.len(), 5);
         // When we collect messages in order
-        let collected: Vec<_> = log.events().iter().map(|e| e.message.clone()).collect();
+        let collected: Vec<_> = log.events().map(|e| e.message.clone()).collect();
         // Then they are the sequence event 0 through event 4
         assert_eq!(
             collected,
             vec!["event 0", "event 1", "event 2", "event 3", "event 4"]
         );
+    }
+
+    #[test]
+    fn test_scenario_log_entry_trait() {
+        let app = Event::info("harness", "x");
+        assert_eq!(ScenarioLogEntry::timestamp_secs(&app), app.timestamp);
+
+        let infra = InfraEvent::ContainerLog {
+            container: "kafka".into(),
+            phase: Phase::Run,
+            timestamp: 42,
+            line: "ready".into(),
+            stream: Some("stdout".into()),
+        };
+        assert_eq!(ScenarioLogEntry::timestamp_secs(&infra), 42);
+
+        let combined = LogEntry::Infrastructure(infra.clone());
+        assert_eq!(ScenarioLogEntry::timestamp_secs(&combined), 42);
+    }
+
+    #[test]
+    fn test_append_infra_mixed_timeline() {
+        let mut log = EventLog::new();
+        log.append(Event::info("lifecycle", "seed"));
+        log.append_infra(InfraEvent::ResourceSample {
+            container: "pg".into(),
+            phase: Phase::Seed,
+            timestamp: 10,
+            cpu_pct: 1.0,
+            mem_bytes: 100,
+            mem_limit: 200,
+            net_rx: 0,
+            net_tx: 0,
+        });
+        assert_eq!(log.len(), 2);
+        assert_eq!(log.entries()[1].timestamp_secs(), 10);
+        let app_only: Vec<_> = log.events().collect();
+        assert_eq!(app_only.len(), 1);
+    }
+
+    #[test]
+    fn test_infra_event_serde_round_trip() {
+        let sample = InfraEvent::DockerEvent {
+            container: "c".into(),
+            phase: Phase::Assert,
+            timestamp: 99,
+            kind: DockerEventKind::OomKilled,
+            severity: InfraSeverity::Critical,
+            exit_code: Some(137),
+            oom_killed: Some(true),
+            detail: None,
+        };
+        let json = serde_json::to_string(&sample).expect("serialize");
+        let back: InfraEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.timestamp_secs(), 99);
     }
 }
