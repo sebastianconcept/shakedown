@@ -153,7 +153,10 @@ pub use crate::lifecycle::{
 };
 pub use crate::phase::Phase;
 pub use crate::timeline::{
-    emit_failure_timeline_to_stderr, render_failure_timeline, FailureTimelineOptions,
+    build_failure_timeline_document, emit_failure_timeline_to_stderr, render_failure_timeline,
+    resolve_target_timelines_dir, sanitize_scenario_id_for_filename, write_failure_timeline_json,
+    write_failure_timeline_json_to_path, FailureTimelineDocument, FailureTimelineOptions,
+    ResourceSnapshotJson, ResourceSnapshotsJson, ScenarioMetadataJson, TimelineEventJson,
 };
 
 #[cfg(any(

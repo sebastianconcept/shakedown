@@ -10,7 +10,7 @@ This library provides:
 - **Scenario orchestration** — lifecycle phases: provision → readiness → seed → run → assert → teardown
 - **Resource providers** — async [`Resource`] trait for databases, message queues, and other infrastructure
 - **Error classification** — structured errors distinguishing scenario vs infrastructure failures
-- **Event logging hooks** — structured event collection for failure timelines
+- **Event logging hooks** — structured event collection for failure timelines (human-readable stderr summary on infrastructure failure; pretty-printed JSON under `target/shakedown/timelines/{scenario_id}.json` for CI and tooling)
 
 ## Workspace layout
 
