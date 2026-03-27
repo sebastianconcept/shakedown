@@ -118,9 +118,48 @@ Integration tests that start Kafka or Postgres are `#[ignore]` unless Docker is 
 ```text
 cargo test -p shakedown --features kafka --test macro_kafka -- --ignored
 cargo test -p shakedown --features postgres --test postgres_vertical -- --ignored
+cargo test -p shakedown --features kafka --test diagnostics_integration -- --ignored
 ```
 
 Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
+
+## Infrastructure diagnostics (bollard)
+
+When you enable any **Docker-backed** resource feature (`kafka`, `postgres`, `mariadb`, `mysql`), the crate also enables the **`diagnostics`** feature unless you opt out with **`no-diagnostics`**.
+
+What it provides (read-only — never starts or stops containers; testcontainers owns lifecycle):
+
+- **Container log streaming** — stdout/stderr lines are recorded as [`InfraEvent::ContainerLog`](src/event.rs) entries in the same [`EventLog`](src/event.rs) used for failure timelines.
+- **Docker Engine events** — filtered to containers labeled `io.shakedown.framework=true` (applied by Shakedown resources), including `stop`, non-zero `die`, OOM, health transitions, and `restart`.
+- **Resource stats** — periodic CPU/memory/network samples in bounded per-container ring buffers, merged into the event log after the scenario; use [`Context::assert_resource`](src/lifecycle.rs) for `peak_memory_under` / `avg_cpu_under` when diagnostics are active.
+
+**Cargo features:**
+
+| Feature | Effect |
+|--------|--------|
+| `diagnostics` | Implied by Docker-backed resource features; compile in bollard and background monitors. |
+| `no-diagnostics` | Compile out bollard-backed diagnostics; use when you cannot depend on the Docker socket API. |
+
+**Resource assertion example** (requires Docker-backed resource + diagnostics, not `no-diagnostics`):
+
+```rust,ignore
+async fn scenario(ctx: &mut Context) -> Result<(), shakedown::ShakedownError> {
+    let container_name = "my-labeled-container"; // Docker name, as in `docker ps`
+    ctx.assert_resource(container_name)
+        .peak_memory_under(256 * 1024 * 1024)?;
+    ctx.assert_resource(container_name).avg_cpu_under(80.0)?;
+    Ok(())
+}
+```
+
+If the Docker socket is missing or unusable, [`try_connect`](src/diagnostics/connection.rs) returns `None`, diagnostics are skipped for that run, and scenarios **do not fail** because of observability alone.
+
+**Stats tuning** (optional): `SHAKEDOWN_STATS_INTERVAL_MS` (default `1000`) and `SHAKEDOWN_STATS_BUFFER_DEPTH` (default `60`, capped) control how often samples are taken and how many per container are retained for timelines and [`Context::assert_resource`](src/lifecycle.rs).
+
+**Integration tests** (`cargo test -p shakedown --features kafka`):
+
+- [`tests/diagnostics_graceful.rs`](tests/diagnostics_graceful.rs) — `FakeResource` only, invalid `DOCKER_HOST` pointing at a non-existent Unix socket; asserts the scenario succeeds and no infrastructure rows are recorded (no Docker daemon required).
+- [`tests/diagnostics_integration.rs`](tests/diagnostics_integration.rs) — log streaming, Docker `stop` events, and stats rings against a labeled Alpine container; run ignored tests with `--ignored` when Docker is available (see commands above).
 
 ## Outbox helpers
 

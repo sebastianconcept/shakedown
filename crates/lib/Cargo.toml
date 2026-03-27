@@ -52,6 +52,8 @@ tracing = "0.1"
 
 [dev-dependencies]
 async-trait = "0.1"
+bollard = { version = "0.20", default-features = false, features = ["ssl"] }
+serial_test = "3"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
@@ -131,3 +133,15 @@ required-features = ["mysql"]
 name = "sqlite_vertical"
 path = "tests/sqlite_vertical.rs"
 required-features = ["sqlite"]
+
+# Infrastructure diagnostics (bollard log stream, Docker events, stats rings); Docker required
+[[test]]
+name = "diagnostics_integration"
+path = "tests/diagnostics_integration.rs"
+required-features = ["kafka"]
+
+# Single-test process: run_scenario with Fake only + invalid DOCKER_HOST (no Docker needed)
+[[test]]
+name = "diagnostics_graceful"
+path = "tests/diagnostics_graceful.rs"
+required-features = ["kafka"]

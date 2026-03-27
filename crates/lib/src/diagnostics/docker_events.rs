@@ -104,6 +104,20 @@ fn classify_container_event(
     let timestamp = event_timestamp_secs(message);
     let container = container_name_from_actor(message);
 
+    if action == "stop" {
+        return Some(InfraEvent::DockerEvent {
+            container,
+            phase,
+            timestamp,
+            scenario_id: scenario_id.to_string(),
+            kind: DockerEventKind::Other("stop".to_string()),
+            severity: InfraSeverity::Info,
+            exit_code: None,
+            oom_killed: None,
+            detail: Some("stop".to_string()),
+        });
+    }
+
     if action == "restart" {
         return Some(InfraEvent::DockerEvent {
             container,
@@ -306,6 +320,34 @@ mod tests {
                 container,
                 ..
             } => assert_eq!(container, "fancy"),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_is_info_other() {
+        let message = EventMessage {
+            action: Some("stop".to_string()),
+            actor: Some(EventActor {
+                id: Some("abc".to_string()),
+                attributes: Some(HashMap::from([("name".to_string(), "/nice".to_string())])),
+            }),
+            time: Some(3),
+            time_nano: None,
+            typ: None,
+            scope: None,
+        };
+        let record = classify_container_event(&message, Phase::Run, "sid").expect("record");
+        match record {
+            InfraEvent::DockerEvent {
+                kind: DockerEventKind::Other(stop),
+                container,
+                severity: InfraSeverity::Info,
+                ..
+            } => {
+                assert_eq!(stop, "stop");
+                assert_eq!(container, "nice");
+            }
             other => panic!("unexpected {other:?}"),
         }
     }
