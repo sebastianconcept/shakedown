@@ -6,7 +6,10 @@
 //! container.
 //!
 //! A structured JSON artifact is written under `target/shakedown/timelines/` (see
-//! [`write_failure_timeline_json`]) for CI and tooling.
+//! [`write_failure_timeline_json`]) for CI and tooling. When infrastructure
+//! signals may explain the failure, [`build_failure_timeline_document`] fills
+//! [`FailureTimelineDocument::hints`] and [`render_failure_timeline`] appends a
+//! `HINT:` section (US-008).
 
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -22,6 +25,27 @@ use crate::event::{
 };
 use crate::phase::Phase;
 
+/// Suggestion emitted when an infrastructure event may explain a later failure (US-008).
+#[derive(Debug, Clone, Serialize)]
+pub struct RootCauseHint {
+    /// Machine hint class (`oom_before_failure`, `exit_before_failure`, `health_before_failure`).
+    #[serde(rename = "type")]
+    pub hint_type: String,
+    pub container: String,
+    /// Milliseconds since the first log timestamp when the infrastructure event occurred.
+    pub event_offset_ms: u64,
+    /// Milliseconds since the first log timestamp when the scenario failure was observed.
+    pub assertion_offset_ms: u64,
+    /// Wall-clock gap between the infrastructure event and the failure (`assertion_offset_ms - event_offset_ms`).
+    pub gap_ms: u64,
+    /// Human-readable explanation (terminal output prefixes this with `HINT:`).
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem_limit: Option<u64>,
+}
+
 /// JSON artifact for a failed scenario (machine-readable timeline).
 #[derive(Debug, Clone, Serialize)]
 pub struct FailureTimelineDocument {
@@ -31,7 +55,7 @@ pub struct FailureTimelineDocument {
     pub events: Vec<TimelineEventJson>,
     /// Latest resource sample per container at failure.
     pub resource_snapshots: ResourceSnapshotsJson,
-    /// Root-cause hints (empty until hint generation is wired; reserved for US-008).
+    /// Root-cause hints (US-008): infrastructure events that may explain the failure.
     pub hints: Vec<serde_json::Value>,
 }
 
@@ -135,6 +159,10 @@ pub struct FailureTimelineOptions {
     pub use_color: bool,
     /// Verdict for JSON metadata (e.g. `failed`, `infrastructure_error`).
     pub verdict: String,
+    /// Optional scenario timeout (seconds) for hint eligibility: events must fall in
+    /// `[scenario_start, scenario_start + timeout]`. When `None`, the observed span
+    /// from first to last log timestamp is used.
+    pub scenario_timeout_secs: Option<u64>,
 }
 
 impl FailureTimelineOptions {
@@ -145,7 +173,14 @@ impl FailureTimelineOptions {
             failure_summary: None,
             use_color: io::stderr().is_terminal(),
             verdict: "failed".to_string(),
+            scenario_timeout_secs: None,
         }
+    }
+
+    /// Sets an explicit scenario timeout (seconds) used when evaluating hint time windows.
+    pub fn with_scenario_timeout_secs(mut self, timeout_secs: u64) -> Self {
+        self.scenario_timeout_secs = Some(timeout_secs);
+        self
     }
 
     /// Sets the failure summary line (shown in the header).
@@ -159,6 +194,192 @@ impl FailureTimelineOptions {
         self.verdict = verdict.into();
         self
     }
+}
+
+fn log_timestamp_bounds(entries: &[(usize, &LogEntry)]) -> (u64, u64) {
+    let mut min_ts = u64::MAX;
+    let mut max_ts = 0_u64;
+    for (_, entry) in entries {
+        let ts = entry.timestamp_secs();
+        min_ts = min_ts.min(ts);
+        max_ts = max_ts.max(ts);
+    }
+    if min_ts == u64::MAX {
+        (0, 0)
+    } else {
+        (min_ts, max_ts)
+    }
+}
+
+fn docker_event_triggers_root_cause_hint(kind: &DockerEventKind, severity: InfraSeverity) -> bool {
+    match severity {
+        InfraSeverity::Critical => {
+            matches!(kind, DockerEventKind::OomKilled | DockerEventKind::Exit)
+        }
+        InfraSeverity::Warning => matches!(kind, DockerEventKind::HealthUnhealthy),
+        InfraSeverity::Info => false,
+    }
+}
+
+fn timeout_suggestion_phrase(options: &FailureTimelineOptions) -> &'static str {
+    let verdict_timeout = options.verdict == "timeout";
+    let summary_timeout = options
+        .failure_summary
+        .as_ref()
+        .is_some_and(|summary| summary.to_lowercase().contains("timeout"));
+    if verdict_timeout || summary_timeout {
+        "This may have caused the timeout."
+    } else {
+        "This may have contributed to this failure."
+    }
+}
+
+fn short_docker_event_description(
+    kind: &DockerEventKind,
+    exit_code: Option<i64>,
+    oom_killed: Option<bool>,
+) -> String {
+    match kind {
+        DockerEventKind::OomKilled => {
+            let mut s = "OOMKilled".to_string();
+            if let Some(code) = exit_code {
+                s.push_str(&format!(" (exit {code})"));
+            }
+            if oom_killed == Some(true) {
+                s.push_str(" [oom_killed=true]");
+            }
+            s
+        }
+        DockerEventKind::Exit => {
+            let mut s = "non-zero exit".to_string();
+            if let Some(code) = exit_code {
+                s.push_str(&format!(" (exit {code})"));
+            }
+            s
+        }
+        DockerEventKind::HealthUnhealthy => "health check failure (unhealthy)".to_string(),
+        DockerEventKind::Restart => "restart".to_string(),
+        DockerEventKind::Other(raw) => raw.clone(),
+    }
+}
+
+fn generate_root_cause_hints(
+    entries: &[(usize, &LogEntry)],
+    baseline_secs: u64,
+    failure_secs: u64,
+    options: &FailureTimelineOptions,
+    resource_at_failure: &HashMap<String, ResourceSnapshotJson>,
+) -> Vec<RootCauseHint> {
+    let observed_span = failure_secs.saturating_sub(baseline_secs).max(1);
+    let window_secs = options.scenario_timeout_secs.unwrap_or(observed_span);
+    let window_end_secs = baseline_secs.saturating_add(window_secs);
+    let suggestion = timeout_suggestion_phrase(options);
+
+    let mut out: Vec<RootCauseHint> = Vec::new();
+
+    for (_, entry) in entries {
+        let LogEntry::Infrastructure(InfraEvent::DockerEvent {
+            container,
+            timestamp,
+            kind,
+            severity,
+            exit_code,
+            oom_killed,
+            ..
+        }) = entry
+        else {
+            continue;
+        };
+
+        if !docker_event_triggers_root_cause_hint(kind, *severity) {
+            continue;
+        }
+
+        if *timestamp >= failure_secs {
+            continue;
+        }
+
+        if *timestamp < baseline_secs || *timestamp > window_end_secs {
+            continue;
+        }
+
+        let event_offset_ms = timestamp.saturating_sub(baseline_secs).saturating_mul(1000);
+        let assertion_offset_ms = failure_secs
+            .saturating_sub(baseline_secs)
+            .saturating_mul(1000);
+        let gap_ms = assertion_offset_ms.saturating_sub(event_offset_ms);
+
+        let event_sec = (*timestamp - baseline_secs) as f64;
+        let failure_sec = (failure_secs - baseline_secs) as f64;
+        let gap_sec = (failure_secs - *timestamp) as f64;
+
+        let snap = resource_at_failure.get(container);
+        let (mem_bytes, mem_limit) = snap
+            .map(|resource_snapshot| {
+                (
+                    Some(resource_snapshot.mem_bytes),
+                    Some(resource_snapshot.mem_limit),
+                )
+            })
+            .unwrap_or((None, None));
+
+        let metrics = match (snap, kind) {
+            (Some(resource_snapshot), DockerEventKind::OomKilled)
+                if resource_snapshot.mem_limit > 0 =>
+            {
+                Some(format!(
+                    "Memory limit {} / peak {}. ",
+                    format_bytes(resource_snapshot.mem_limit),
+                    format_bytes(resource_snapshot.mem_bytes),
+                ))
+            }
+            (Some(resource_snapshot), _) if resource_snapshot.mem_limit > 0 => Some(format!(
+                "Memory {} / limit {}. ",
+                format_bytes(resource_snapshot.mem_bytes),
+                format_bytes(resource_snapshot.mem_limit),
+            )),
+            _ => None,
+        };
+
+        let desc = short_docker_event_description(kind, *exit_code, *oom_killed);
+        let metrics = metrics.unwrap_or_default();
+        let message = format!(
+            "Container \"{container}\" reported {desc} at T+{event_sec:.1}s, {gap_sec:.1}s before failure at T+{failure_sec:.1}s. {metrics}{suggestion}",
+        );
+
+        let hint_type = match kind {
+            DockerEventKind::OomKilled => "oom_before_failure",
+            DockerEventKind::Exit => "exit_before_failure",
+            DockerEventKind::HealthUnhealthy => "health_before_failure",
+            DockerEventKind::Restart | DockerEventKind::Other(_) => "infra_before_failure",
+        }
+        .to_string();
+
+        out.push(RootCauseHint {
+            hint_type,
+            container: container.clone(),
+            event_offset_ms,
+            assertion_offset_ms,
+            gap_ms,
+            message,
+            mem_bytes,
+            mem_limit,
+        });
+    }
+
+    out.sort_by(|left, right| {
+        left.event_offset_ms
+            .cmp(&right.event_offset_ms)
+            .then_with(|| left.container.cmp(&right.container))
+    });
+    out
+}
+
+fn root_cause_hints_to_json_values(hints: &[RootCauseHint]) -> Vec<serde_json::Value> {
+    hints
+        .iter()
+        .filter_map(|hint| serde_json::to_value(hint).ok())
+        .collect()
 }
 
 type TimelineRowsAndSamples<'a> = (u64, Vec<(u64, usize, TimelineRow)>, Vec<&'a InfraEvent>);
@@ -292,6 +513,11 @@ pub fn build_failure_timeline_document(
         }
     }
 
+    let (_, failure_secs) = log_timestamp_bounds(&entries);
+    let root_cause_hints =
+        generate_root_cause_hints(&entries, baseline_secs, failure_secs, options, &at_failure);
+    let hints = root_cause_hints_to_json_values(&root_cause_hints);
+
     FailureTimelineDocument {
         scenario: ScenarioMetadataJson {
             id: options.scenario_name.clone(),
@@ -301,7 +527,7 @@ pub fn build_failure_timeline_document(
         },
         events,
         resource_snapshots: ResourceSnapshotsJson { at_failure },
-        hints: Vec::new(),
+        hints,
     }
 }
 
@@ -483,7 +709,7 @@ pub fn render_failure_timeline(event_log: &EventLog, options: &FailureTimelineOp
         return out;
     }
 
-    let (_baseline_secs, mut timeline_rows, samples) = collect_timeline_rows(&entries);
+    let (baseline_secs, mut timeline_rows, samples) = collect_timeline_rows(&entries);
 
     timeline_rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
@@ -534,6 +760,47 @@ pub fn render_failure_timeline(event_log: &EventLog, options: &FailureTimelineOp
         }
     }
 
+    let (_, failure_secs) = log_timestamp_bounds(&entries);
+    let snapshot_map = latest_resource_samples_by_container(&samples);
+    let mut at_failure_for_hints: HashMap<String, ResourceSnapshotJson> = HashMap::new();
+    for (name, sample) in snapshot_map {
+        if let InfraEvent::ResourceSample {
+            cpu_pct,
+            mem_bytes,
+            mem_limit,
+            net_rx,
+            net_tx,
+            ..
+        } = sample
+        {
+            at_failure_for_hints.insert(
+                name,
+                ResourceSnapshotJson {
+                    cpu_pct: *cpu_pct,
+                    mem_bytes: *mem_bytes,
+                    mem_limit: *mem_limit,
+                    net_rx: *net_rx,
+                    net_tx: *net_tx,
+                },
+            );
+        }
+    }
+    let root_cause_hints = generate_root_cause_hints(
+        &entries,
+        baseline_secs,
+        failure_secs,
+        options,
+        &at_failure_for_hints,
+    );
+    if !root_cause_hints.is_empty() {
+        out.push_str("\n--- HINTS ---\n");
+        for hint in &root_cause_hints {
+            out.push_str("HINT: ");
+            out.push_str(&hint.message);
+            out.push('\n');
+        }
+    }
+
     out.push('\n');
     out
 }
@@ -550,6 +817,7 @@ pub fn emit_failure_timeline_to_stderr(
         failure_summary: Some(failure_summary.to_string()),
         use_color: io::stderr().is_terminal(),
         verdict: "infrastructure_error".to_string(),
+        scenario_timeout_secs: None,
     };
     eprintln!("{}", render_failure_timeline(event_log, &options));
     if let Err(error) = write_failure_timeline_json(event_log, &options, scenario_id) {
@@ -756,6 +1024,7 @@ fn format_bytes(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::Event;
 
     #[test]
     fn sorts_mixed_entries_and_interleaves() {
@@ -780,6 +1049,7 @@ mod tests {
             failure_summary: None,
             use_color: false,
             verdict: "failed".into(),
+            scenario_timeout_secs: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         let early_pos = rendered.find("early").expect("early");
@@ -829,6 +1099,7 @@ mod tests {
             failure_summary: Some("readiness failed".into()),
             use_color: false,
             verdict: "failed".into(),
+            scenario_timeout_secs: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         assert!(rendered.contains("FAILURE TIMELINE — my_scenario"));
@@ -837,6 +1108,8 @@ mod tests {
         assert!(rendered.contains("CONTAINER EVENT:"));
         assert!(rendered.contains("RESOURCE SNAPSHOT"));
         assert!(rendered.contains("CPU:"));
+        assert!(rendered.contains("--- HINTS ---"));
+        assert!(rendered.contains("HINT:"));
     }
 
     #[test]
@@ -870,6 +1143,7 @@ mod tests {
             failure_summary: None,
             use_color: false,
             verdict: "failed".into(),
+            scenario_timeout_secs: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         assert!(rendered.contains("9.0%"));
@@ -923,5 +1197,149 @@ mod tests {
             sanitize_scenario_id_for_filename("suite/case:a"),
             "suite_case_a"
         );
+    }
+
+    #[test]
+    fn root_cause_hints_include_oom_and_metrics_in_terminal_and_json() {
+        let mut log = EventLog::new();
+        log.append(Event {
+            timestamp: 100,
+            level: EventLevel::Info,
+            source: "lifecycle".into(),
+            message: "Starting readiness phase".into(),
+        });
+        log.append_infra(InfraEvent::DockerEvent {
+            container: "kafka".into(),
+            phase: Phase::Readiness,
+            timestamp: 103,
+            scenario_id: "s".into(),
+            kind: DockerEventKind::OomKilled,
+            severity: InfraSeverity::Critical,
+            exit_code: Some(137),
+            oom_killed: Some(true),
+            detail: Some("die".into()),
+        });
+        log.append_infra(InfraEvent::ResourceSample {
+            container: "kafka".into(),
+            phase: Phase::Readiness,
+            timestamp: 103,
+            scenario_id: "s".into(),
+            cpu_pct: 1.0,
+            mem_bytes: 508 * 1024 * 1024,
+            mem_limit: 512 * 1024 * 1024,
+            net_rx: 0,
+            net_tx: 0,
+        });
+        log.append(Event {
+            timestamp: 110,
+            level: EventLevel::Error,
+            source: "lifecycle".into(),
+            message: "Readiness failed: broker not up".into(),
+        });
+
+        let options = FailureTimelineOptions {
+            scenario_name: "oom_scenario".into(),
+            failure_summary: Some("Readiness failed".into()),
+            use_color: false,
+            verdict: "infrastructure_error".into(),
+            scenario_timeout_secs: None,
+        };
+        let rendered = render_failure_timeline(&log, &options);
+        assert!(rendered.contains("--- HINTS ---"));
+        assert!(rendered.contains("HINT:"));
+        assert!(rendered.contains("This may have contributed to this failure."));
+        assert!(rendered.contains("OOMKilled"));
+
+        let document = build_failure_timeline_document(&log, &options);
+        assert_eq!(document.hints.len(), 1);
+        let hint = &document.hints[0];
+        assert_eq!(
+            hint.get("type").and_then(|v| v.as_str()),
+            Some("oom_before_failure")
+        );
+        assert_eq!(
+            hint.get("container").and_then(|v| v.as_str()),
+            Some("kafka")
+        );
+        assert!(hint.get("message").and_then(|v| v.as_str()).is_some());
+        assert_eq!(hint.get("gap_ms").and_then(|v| v.as_u64()), Some(7000));
+    }
+
+    #[test]
+    fn root_cause_hints_skips_infra_events_at_or_after_failure_time() {
+        let mut log = EventLog::new();
+        log.append(Event {
+            timestamp: 1,
+            level: EventLevel::Info,
+            source: "lifecycle".into(),
+            message: "start".into(),
+        });
+        log.append(Event {
+            timestamp: 5,
+            level: EventLevel::Error,
+            source: "lifecycle".into(),
+            message: "failed early".into(),
+        });
+        log.append_infra(InfraEvent::DockerEvent {
+            container: "late".into(),
+            phase: Phase::Run,
+            timestamp: 10,
+            scenario_id: "s".into(),
+            kind: DockerEventKind::OomKilled,
+            severity: InfraSeverity::Critical,
+            exit_code: Some(137),
+            oom_killed: Some(true),
+            detail: None,
+        });
+
+        let options = FailureTimelineOptions {
+            scenario_name: "x".into(),
+            failure_summary: None,
+            use_color: false,
+            verdict: "failed".into(),
+            scenario_timeout_secs: None,
+        };
+        let rendered = render_failure_timeline(&log, &options);
+        assert!(!rendered.contains("--- HINTS ---"));
+        let document = build_failure_timeline_document(&log, &options);
+        assert!(document.hints.is_empty());
+    }
+
+    #[test]
+    fn root_cause_hints_timeout_verdict_uses_suggested_timeout_phrase() {
+        let mut log = EventLog::new();
+        log.append(Event {
+            timestamp: 1,
+            level: EventLevel::Info,
+            source: "lifecycle".into(),
+            message: "Starting assert phase".into(),
+        });
+        log.append_infra(InfraEvent::DockerEvent {
+            container: "pg".into(),
+            phase: Phase::Assert,
+            timestamp: 2,
+            scenario_id: "s".into(),
+            kind: DockerEventKind::HealthUnhealthy,
+            severity: InfraSeverity::Warning,
+            exit_code: None,
+            oom_killed: None,
+            detail: None,
+        });
+        log.append(Event {
+            timestamp: 12,
+            level: EventLevel::Error,
+            source: "scenario".into(),
+            message: "await_until timed out".into(),
+        });
+
+        let options = FailureTimelineOptions {
+            scenario_name: "t".into(),
+            failure_summary: None,
+            use_color: false,
+            verdict: "timeout".into(),
+            scenario_timeout_secs: None,
+        };
+        let rendered = render_failure_timeline(&log, &options);
+        assert!(rendered.contains("This may have caused the timeout."));
     }
 }

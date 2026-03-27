@@ -156,7 +156,8 @@ pub use crate::timeline::{
     build_failure_timeline_document, emit_failure_timeline_to_stderr, render_failure_timeline,
     resolve_target_timelines_dir, sanitize_scenario_id_for_filename, write_failure_timeline_json,
     write_failure_timeline_json_to_path, FailureTimelineDocument, FailureTimelineOptions,
-    ResourceSnapshotJson, ResourceSnapshotsJson, ScenarioMetadataJson, TimelineEventJson,
+    ResourceSnapshotJson, ResourceSnapshotsJson, RootCauseHint, ScenarioMetadataJson,
+    TimelineEventJson,
 };
 
 #[cfg(any(
