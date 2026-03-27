@@ -629,9 +629,13 @@ macro_rules! shakedown_merge_docker_events {
     not(feature = "no-diagnostics"),
 ))]
 macro_rules! shakedown_docker_phase {
-    ($sender:expr, $phase:expr) => {
+    ($sender:expr, $ctx:expr, $phase:expr) => {
         if let Some(phase_sender) = $sender.as_ref() {
-            crate::diagnostics::push_lifecycle_phase(phase_sender, $phase);
+            crate::diagnostics::push_lifecycle_phase(
+                phase_sender,
+                $phase,
+                $ctx.scenario_id().as_str(),
+            );
         }
     };
 }
@@ -728,7 +732,7 @@ where
         ),
         not(feature = "no-diagnostics"),
     ))]
-    shakedown_docker_phase!(docker_phase_sender, Phase::Readiness);
+    shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Readiness);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting readiness phase");
     for resource in ctx.resources() {
         if let Err(e) = resource.check_ready().await {
@@ -762,7 +766,7 @@ where
         ),
         not(feature = "no-diagnostics"),
     ))]
-    shakedown_docker_phase!(docker_phase_sender, Phase::Seed);
+    shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Seed);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting seed phase");
     for resource in ctx.resources_mut() {
         if let Err(e) = resource.apply_default_seed().await {
@@ -792,7 +796,7 @@ where
         ),
         not(feature = "no-diagnostics"),
     ))]
-    shakedown_docker_phase!(docker_phase_sender, Phase::Run);
+    shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Run);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting run phase");
     // Execute the scenario function
     let _ = scenario_fn(ctx).await;
@@ -807,7 +811,7 @@ where
         ),
         not(feature = "no-diagnostics"),
     ))]
-    shakedown_docker_phase!(docker_phase_sender, Phase::Assert);
+    shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Assert);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting assert phase");
 
     // Teardown phase
@@ -820,7 +824,7 @@ where
         ),
         not(feature = "no-diagnostics"),
     ))]
-    shakedown_docker_phase!(docker_phase_sender, Phase::Teardown);
+    shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Teardown);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting teardown phase");
     teardown_all_resources(ctx).await;
 
