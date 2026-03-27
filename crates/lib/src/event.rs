@@ -150,6 +150,9 @@ pub enum InfraEvent {
         phase: Phase,
         /// UNIX epoch seconds when observed
         timestamp: u64,
+        /// Scenario id from the harness when the event was observed
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        scenario_id: String,
         /// Classified event kind
         kind: DockerEventKind,
         /// Severity for timeline highlighting
@@ -525,6 +528,7 @@ mod tests {
             container: "c".into(),
             phase: Phase::Assert,
             timestamp: 99,
+            scenario_id: "scenario_x".into(),
             kind: DockerEventKind::OomKilled,
             severity: InfraSeverity::Critical,
             exit_code: Some(137),

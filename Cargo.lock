@@ -2596,6 +2596,7 @@ dependencies = [
  "async-trait",
  "bollard",
  "displaydoc",
+ "futures-util",
  "mysql_async",
  "noxious-client",
  "rdkafka",
