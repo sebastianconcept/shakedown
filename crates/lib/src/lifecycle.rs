@@ -602,6 +602,40 @@ async fn teardown_all_resources(ctx: &mut Context) {
 ///     let _application_events: Vec<_> = event_log.events().collect();
 /// }
 /// ```
+#[cfg(all(
+    any(
+        feature = "kafka",
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+    ),
+    not(feature = "no-diagnostics"),
+))]
+macro_rules! shakedown_merge_docker_events {
+    ($monitor:ident, $log:expr) => {
+        if let Some(monitor) = $monitor.take() {
+            monitor.shutdown_and_drain($log).await;
+        }
+    };
+}
+
+#[cfg(all(
+    any(
+        feature = "kafka",
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+    ),
+    not(feature = "no-diagnostics"),
+))]
+macro_rules! shakedown_docker_phase {
+    ($sender:expr, $phase:expr) => {
+        if let Some(phase_sender) = $sender.as_ref() {
+            crate::diagnostics::push_lifecycle_phase(phase_sender, $phase);
+        }
+    };
+}
+
 pub async fn run_scenario<F>(
     ctx: &mut Context,
     scenario_id: impl Into<String>,
@@ -616,15 +650,28 @@ where
     // Update scenario ID
     ctx.set_scenario_id(scenario_id);
 
-    #[cfg(any(
-        feature = "kafka",
-        feature = "postgres",
-        feature = "mariadb",
-        feature = "mysql",
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        not(feature = "no-diagnostics"),
     ))]
-    {
-        let _ = crate::diagnostics::suite_diagnostics_handle().await;
-    }
+    let (mut docker_events_monitor, docker_phase_sender) = {
+        let mut monitor_slot = None;
+        let mut phase_sender_slot = None;
+        if let Some(diagnostics_handle) = crate::diagnostics::suite_diagnostics_handle().await {
+            let (monitor, phase_sender) = crate::diagnostics::DockerEventsMonitor::spawn(
+                diagnostics_handle.docker().clone(),
+                ctx.scenario_id().to_string(),
+            );
+            monitor_slot = Some(monitor);
+            phase_sender_slot = Some(phase_sender);
+        }
+        (monitor_slot, phase_sender_slot)
+    };
 
     // Provision phase (async)
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting provision phase");
@@ -656,12 +703,32 @@ where
                     format!("Provision failed: {e}"),
                 );
                 teardown_all_resources(ctx).await;
+                #[cfg(all(
+                    any(
+                        feature = "kafka",
+                        feature = "postgres",
+                        feature = "mariadb",
+                        feature = "mysql",
+                    ),
+                    not(feature = "no-diagnostics"),
+                ))]
+                shakedown_merge_docker_events!(docker_events_monitor, event_log);
                 return Err(e.into());
             }
         }
     }
 
     // Readiness phase (async)
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        not(feature = "no-diagnostics"),
+    ))]
+    shakedown_docker_phase!(docker_phase_sender, Phase::Readiness);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting readiness phase");
     for resource in ctx.resources() {
         if let Err(e) = resource.check_ready().await {
@@ -671,31 +738,102 @@ where
                 format!("Readiness failed: {e}"),
             );
             teardown_all_resources(ctx).await;
+            #[cfg(all(
+                any(
+                    feature = "kafka",
+                    feature = "postgres",
+                    feature = "mariadb",
+                    feature = "mysql",
+                ),
+                not(feature = "no-diagnostics"),
+            ))]
+            shakedown_merge_docker_events!(docker_events_monitor, event_log);
             return Err(e.into());
         }
     }
 
     // Seed phase (async)
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        not(feature = "no-diagnostics"),
+    ))]
+    shakedown_docker_phase!(docker_phase_sender, Phase::Seed);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting seed phase");
     for resource in ctx.resources_mut() {
         if let Err(e) = resource.apply_default_seed().await {
             event_log.append_raw(EventLevel::Error, "lifecycle", format!("Seed failed: {e}"));
             teardown_all_resources(ctx).await;
+            #[cfg(all(
+                any(
+                    feature = "kafka",
+                    feature = "postgres",
+                    feature = "mariadb",
+                    feature = "mysql",
+                ),
+                not(feature = "no-diagnostics"),
+            ))]
+            shakedown_merge_docker_events!(docker_events_monitor, event_log);
             return Err(e.into());
         }
     }
 
     // Run phase
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        not(feature = "no-diagnostics"),
+    ))]
+    shakedown_docker_phase!(docker_phase_sender, Phase::Run);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting run phase");
     // Execute the scenario function
     let _ = scenario_fn(ctx).await;
 
     // Assert phase (in a real implementation, this would run assertions)
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        not(feature = "no-diagnostics"),
+    ))]
+    shakedown_docker_phase!(docker_phase_sender, Phase::Assert);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting assert phase");
 
     // Teardown phase
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        not(feature = "no-diagnostics"),
+    ))]
+    shakedown_docker_phase!(docker_phase_sender, Phase::Teardown);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting teardown phase");
     teardown_all_resources(ctx).await;
+
+    #[cfg(all(
+        any(
+            feature = "kafka",
+            feature = "postgres",
+            feature = "mariadb",
+            feature = "mysql",
+        ),
+        not(feature = "no-diagnostics"),
+    ))]
+    shakedown_merge_docker_events!(docker_events_monitor, event_log);
 
     Ok(())
 }

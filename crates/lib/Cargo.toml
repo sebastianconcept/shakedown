@@ -43,6 +43,8 @@ noxious-client = "1.0"
 # Docker Engine API (read-only observability; feature `diagnostics`)
 # Align with testcontainers' bollard to avoid duplicate bollard-stubs versions in the lockfile.
 bollard = { version = "0.20", optional = true, default-features = false, features = ["ssl"] }
+# Stream combinators for bollard `/events` (diagnostics only)
+futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }
 
 # Structured logging for diagnostics connection and future ShakedownLayer (SPECS §1)
 tracing = "0.1"
@@ -56,7 +58,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Default: no heavy dependencies by default (unit tests work without Docker)
 default = []
 # Infrastructure diagnostics (bollard); implied by Docker-backed resource features unless `no-diagnostics` is set
-diagnostics = ["dep:bollard"]
+diagnostics = ["dep:bollard", "dep:futures-util"]
 # Disables Docker socket diagnostics at compile time (stub APIs; no bollard client)
 no-diagnostics = []
 # Kafka integration with real infrastructure (requires Docker)

@@ -7,4 +7,12 @@
 
 mod connection;
 
+pub mod labels;
+
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+mod docker_events;
+
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+pub(crate) use docker_events::{push_lifecycle_phase, DockerEventsMonitor};
+
 pub use connection::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};

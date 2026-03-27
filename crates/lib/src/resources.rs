@@ -418,11 +418,22 @@ mod kafka_impl {
                     let node = if let Some(ref tag) = self.image_tag {
                         image
                             .with_tag(tag.clone())
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
                             .start()
                             .await
                             .map_err(Self::map_tc_err)?
                     } else {
-                        image.start().await.map_err(Self::map_tc_err)?
+                        image
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
+                            .start()
+                            .await
+                            .map_err(Self::map_tc_err)?
                     };
 
                     let port = node
@@ -731,11 +742,22 @@ mod postgres_impl {
                     let node = if let Some(ref tag) = self.image_tag {
                         image
                             .with_tag(tag.clone())
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
                             .start()
                             .await
                             .map_err(Self::map_tc_err)?
                     } else {
-                        image.start().await.map_err(Self::map_tc_err)?
+                        image
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
+                            .start()
+                            .await
+                            .map_err(Self::map_tc_err)?
                     };
 
                     let mapped_port = node
@@ -1062,11 +1084,22 @@ mod mariadb_impl {
                     let node = if let Some(ref tag) = self.image_tag {
                         image
                             .with_tag(tag.clone())
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
                             .start()
                             .await
                             .map_err(Self::map_tc_err)?
                     } else {
-                        image.start().await.map_err(Self::map_tc_err)?
+                        image
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
+                            .start()
+                            .await
+                            .map_err(Self::map_tc_err)?
                     };
 
                     let mapped_port = node
@@ -1398,11 +1431,22 @@ mod mysql_impl {
                     let node = if let Some(ref tag) = self.image_tag {
                         image
                             .with_tag(tag.clone())
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
                             .start()
                             .await
                             .map_err(Self::map_tc_err)?
                     } else {
-                        image.start().await.map_err(Self::map_tc_err)?
+                        image
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
+                            .start()
+                            .await
+                            .map_err(Self::map_tc_err)?
                     };
 
                     let mapped_port = node
