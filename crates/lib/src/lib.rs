@@ -123,6 +123,8 @@ pub mod outbox;
 pub mod phase;
 /// [`resources::Resource`] implementations, registration, and Kafka bindings.
 pub mod resources;
+/// Failure timeline rendering (terminal) for [`EventLog`].
+pub mod timeline;
 
 #[cfg(all(
     feature = "outbox",
@@ -150,6 +152,9 @@ pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, ScenarioKind,
 };
 pub use crate::phase::Phase;
+pub use crate::timeline::{
+    emit_failure_timeline_to_stderr, render_failure_timeline, FailureTimelineOptions,
+};
 
 #[cfg(any(
     feature = "kafka",
