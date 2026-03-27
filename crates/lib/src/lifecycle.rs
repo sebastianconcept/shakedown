@@ -576,6 +576,10 @@ async fn teardown_all_resources(ctx: &mut Context) {
 /// Events emitted during the scenario run are appended to the provided [`EventLog`].
 /// After completion, callers can retrieve all events for debugging or analysis.
 ///
+/// If provision, readiness, or seed fails with an infrastructure error, diagnostics (when enabled)
+/// are merged into the log first, then a human-readable failure timeline is written to stderr
+/// (see [`crate::timeline::render_failure_timeline`]).
+///
 /// `scenario_fn` takes only `&mut Context` and must return a [`std::pin::Pin`]-boxed [`std::future::Future`]
 /// so the run phase can borrow `Context` across `.await` while the harness keeps using
 /// `event_log` after the scenario body completes.
@@ -641,6 +645,18 @@ macro_rules! shakedown_docker_phase {
             );
         }
     };
+}
+
+fn emit_failure_timeline_on_infra_err(
+    event_log: &EventLog,
+    scenario_id: &ScenarioId,
+    error: &InfrastructureError,
+) {
+    crate::timeline::emit_failure_timeline_to_stderr(
+        event_log,
+        scenario_id.as_str(),
+        &error.to_string(),
+    );
 }
 
 pub async fn run_scenario<F>(
@@ -732,6 +748,7 @@ where
                     resource_stats_monitor,
                     event_log
                 );
+                emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
                 return Err(e.into());
             }
         }
@@ -767,6 +784,7 @@ where
                 not(feature = "no-diagnostics"),
             ))]
             shakedown_merge_diagnostics!(docker_events_monitor, resource_stats_monitor, event_log);
+            emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
             return Err(e.into());
         }
     }
@@ -797,6 +815,7 @@ where
                 not(feature = "no-diagnostics"),
             ))]
             shakedown_merge_diagnostics!(docker_events_monitor, resource_stats_monitor, event_log);
+            emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
             return Err(e.into());
         }
     }
