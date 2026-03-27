@@ -19,9 +19,15 @@ mod ring_buffer;
 mod resource_stats;
 
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+mod assertions;
+
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+pub(crate) use resource_stats::{ResourceStatsMonitor, SharedResourceStatsRings, StatsConfig};
+
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
 pub(crate) use docker_events::{push_lifecycle_phase, DockerEventsMonitor};
 
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
-pub(crate) use resource_stats::{ResourceStatsMonitor, StatsConfig};
+pub use assertions::ResourceAssertBuilder;
 
 pub use connection::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};

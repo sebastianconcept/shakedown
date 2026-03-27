@@ -168,6 +168,18 @@ pub use crate::timeline::{
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
 
+#[cfg(all(
+    feature = "diagnostics",
+    not(feature = "no-diagnostics"),
+    any(
+        feature = "kafka",
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+    ),
+))]
+pub use crate::diagnostics::ResourceAssertBuilder;
+
 /// First-party resource implementations.
 #[doc(inline)]
 pub use crate::resources::{

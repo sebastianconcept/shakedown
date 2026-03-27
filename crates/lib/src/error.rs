@@ -10,6 +10,8 @@
 
 use std::error::Error;
 
+use crate::phase::Phase;
+
 /// Top-level error type for all Shakedown errors.
 ///
 /// Errors are categorized into three main types:
@@ -59,6 +61,19 @@ pub enum ShakedownError {
     PayloadAssertionFailed {
         aggregate_id: String,
         event_type: String,
+    },
+    /// Container resource budget assertion failed (diagnostics stats ring)
+    ResourceAssertionFailed {
+        /// Container name matched against [`crate::event::InfraEvent::ResourceSample`]
+        container: String,
+        /// Metric identifier (e.g. `peak_memory`, `avg_cpu`)
+        metric: String,
+        /// Observed value (human-readable)
+        measured: String,
+        /// Asserted bound (human-readable)
+        threshold: String,
+        /// Lifecycle phase where the peak applied, or best-effort phase for the metric
+        phase: Phase,
     },
 }
 
@@ -129,6 +144,17 @@ impl std::fmt::Display for ShakedownError {
                 "Outbox payload assertion failed for aggregate_id='{}', event_type='{}'",
                 aggregate_id, event_type
             ),
+            ShakedownError::ResourceAssertionFailed {
+                container,
+                metric,
+                measured,
+                threshold,
+                phase,
+            } => write!(
+                f,
+                "Resource assertion failed for container '{}', metric '{}': measured {} exceeds threshold {} (phase: {:?})",
+                container, metric, measured, threshold, phase
+            ),
         }
     }
 }
@@ -147,6 +173,7 @@ impl Error for ShakedownError {
             ShakedownError::OutboxKafkaRecordNotFound { .. } => None,
             ShakedownError::PayloadDeserialisation(_) => None,
             ShakedownError::PayloadAssertionFailed { .. } => None,
+            ShakedownError::ResourceAssertionFailed { .. } => None,
         }
     }
 }
