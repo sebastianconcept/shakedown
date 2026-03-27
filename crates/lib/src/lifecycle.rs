@@ -611,9 +611,12 @@ async fn teardown_all_resources(ctx: &mut Context) {
     ),
     not(feature = "no-diagnostics"),
 ))]
-macro_rules! shakedown_merge_docker_events {
-    ($monitor:ident, $log:expr) => {
-        if let Some(monitor) = $monitor.take() {
+macro_rules! shakedown_merge_diagnostics {
+    ($docker:ident, $stats:ident, $log:expr) => {
+        if let Some(monitor) = $stats.take() {
+            monitor.shutdown_and_drain($log).await;
+        }
+        if let Some(monitor) = $docker.take() {
             monitor.shutdown_and_drain($log).await;
         }
     };
@@ -663,18 +666,26 @@ where
         ),
         not(feature = "no-diagnostics"),
     ))]
-    let (mut docker_events_monitor, docker_phase_sender) = {
-        let mut monitor_slot = None;
+    let (mut docker_events_monitor, mut resource_stats_monitor, docker_phase_sender) = {
+        let mut docker_monitor_slot = None;
+        let mut stats_monitor_slot = None;
         let mut phase_sender_slot = None;
         if let Some(diagnostics_handle) = crate::diagnostics::suite_diagnostics_handle().await {
-            let (monitor, phase_sender) = crate::diagnostics::DockerEventsMonitor::spawn(
-                diagnostics_handle.docker().clone(),
-                ctx.scenario_id().to_string(),
-            );
-            monitor_slot = Some(monitor);
-            phase_sender_slot = Some(phase_sender);
+            let (phase_tx, phase_rx) =
+                tokio::sync::watch::channel((Phase::Provision, ctx.scenario_id().to_string()));
+            let docker = diagnostics_handle.docker().clone();
+            docker_monitor_slot = Some(crate::diagnostics::DockerEventsMonitor::spawn(
+                docker.clone(),
+                phase_rx.clone(),
+            ));
+            stats_monitor_slot = Some(crate::diagnostics::ResourceStatsMonitor::spawn(
+                docker,
+                phase_rx,
+                crate::diagnostics::StatsConfig::from_env(),
+            ));
+            phase_sender_slot = Some(phase_tx);
         }
-        (monitor_slot, phase_sender_slot)
+        (docker_monitor_slot, stats_monitor_slot, phase_sender_slot)
     };
 
     // Provision phase (async)
@@ -716,7 +727,11 @@ where
                     ),
                     not(feature = "no-diagnostics"),
                 ))]
-                shakedown_merge_docker_events!(docker_events_monitor, event_log);
+                shakedown_merge_diagnostics!(
+                    docker_events_monitor,
+                    resource_stats_monitor,
+                    event_log
+                );
                 return Err(e.into());
             }
         }
@@ -751,7 +766,7 @@ where
                 ),
                 not(feature = "no-diagnostics"),
             ))]
-            shakedown_merge_docker_events!(docker_events_monitor, event_log);
+            shakedown_merge_diagnostics!(docker_events_monitor, resource_stats_monitor, event_log);
             return Err(e.into());
         }
     }
@@ -781,7 +796,7 @@ where
                 ),
                 not(feature = "no-diagnostics"),
             ))]
-            shakedown_merge_docker_events!(docker_events_monitor, event_log);
+            shakedown_merge_diagnostics!(docker_events_monitor, resource_stats_monitor, event_log);
             return Err(e.into());
         }
     }
@@ -837,7 +852,7 @@ where
         ),
         not(feature = "no-diagnostics"),
     ))]
-    shakedown_merge_docker_events!(docker_events_monitor, event_log);
+    shakedown_merge_diagnostics!(docker_events_monitor, resource_stats_monitor, event_log);
 
     Ok(())
 }
