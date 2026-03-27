@@ -13,6 +13,50 @@ use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
 use async_trait::async_trait;
 use std::fmt;
 
+/// Derive a safe, unique namespace from a scenario id for any resource type.
+///
+/// If you're implementing [`Resource`] for your own infrastructure (Redis, Elasticsearch,
+/// RabbitMQ, etc.), call this in your `provision` method to get a scenario-scoped name you
+/// can use as a key prefix, database name, virtual host, index name — whatever your system
+/// uses for isolation. Every scenario gets its own namespace; teardown drops it.
+///
+/// The built-in resources (Kafka, Postgres, MariaDB, MySQL, SQLite) use specialised variants
+/// of this logic internally. This helper gives you the same safety guarantees without having
+/// to reimplement the sanitisation rules:
+///
+/// - Prefixed with `shakedown_` so names are greppable and won't collide with real data.
+/// - Only lowercase alphanumerics and `_` — safe for virtually any system identifier.
+/// - Truncated to `max_len` (or 63 by default, matching PostgreSQL's limit).
+/// - Falls back to `"scenario"` when the id is empty.
+///
+/// ```
+/// # use shakedown::resources::sanitize_resource_namespace;
+/// let ns = sanitize_resource_namespace("My Cool Scenario!", 63);
+/// assert_eq!(ns, "shakedown_my_cool_scenario_");
+/// assert!(ns.len() <= 63);
+/// ```
+pub fn sanitize_resource_namespace(scenario_id: &str, max_len: usize) -> String {
+    const PREFIX: &str = "shakedown_";
+    let mut rest = String::new();
+    for ch in scenario_id.chars().take(200) {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            rest.push(ch.to_ascii_lowercase());
+        } else {
+            rest.push('_');
+        }
+    }
+    if rest.is_empty() {
+        rest.push_str("scenario");
+    }
+    let mut out = String::with_capacity(max_len.min(PREFIX.len() + rest.len()));
+    out.push_str(PREFIX);
+    out.push_str(&rest);
+    if out.len() > max_len {
+        out.truncate(max_len);
+    }
+    out
+}
+
 /// Turn a scenario id into a safe Kafka topic prefix segment.
 ///
 /// Prefixes with `shakedown_`, replaces disallowed characters with `_`, and caps length so topic
@@ -2053,6 +2097,19 @@ mod tests {
         registry.clear();
         // Then the registry is empty again
         assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn sanitize_resource_namespace_general() {
+        assert_eq!(
+            sanitize_resource_namespace("My Cool Scenario!", 63),
+            "shakedown_my_cool_scenario_"
+        );
+        assert_eq!(sanitize_resource_namespace("", 63), "shakedown_scenario");
+        let long = "x".repeat(200);
+        let ns = sanitize_resource_namespace(&long, 40);
+        assert!(ns.len() <= 40);
+        assert!(ns.starts_with("shakedown_"));
     }
 
     #[test]
