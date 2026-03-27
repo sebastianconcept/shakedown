@@ -94,6 +94,14 @@
 //! }
 //! ```
 
+/// Docker Engine diagnostics (bollard) when a Docker-backed resource feature is enabled.
+#[cfg(any(
+    feature = "kafka",
+    feature = "postgres",
+    feature = "mariadb",
+    feature = "mysql",
+))]
+pub mod diagnostics;
 /// Structured errors: scenario vs infrastructure vs internal framework failures.
 pub mod error;
 /// Structured events and in-memory logs for timelines and diagnostics.
@@ -136,6 +144,14 @@ pub use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
 pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, ScenarioKind,
 };
+
+#[cfg(any(
+    feature = "kafka",
+    feature = "postgres",
+    feature = "mariadb",
+    feature = "mysql",
+))]
+pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
 
 /// First-party resource implementations.
 #[doc(inline)]

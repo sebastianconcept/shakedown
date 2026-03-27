@@ -40,6 +40,13 @@ rusqlite = { version = "0.32", optional = true, default-features = false, featur
 # Toxiproxy for fault injection (D-12 decision)
 noxious-client = "1.0"
 
+# Docker Engine API (read-only observability; feature `diagnostics`)
+# Align with testcontainers' bollard to avoid duplicate bollard-stubs versions in the lockfile.
+bollard = { version = "0.20", optional = true, default-features = false, features = ["ssl"] }
+
+# Structured logging for diagnostics connection and future ShakedownLayer (SPECS §1)
+tracing = "0.1"
+
 [dev-dependencies]
 async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
@@ -48,13 +55,18 @@ uuid = { version = "1", features = ["v4", "serde"] }
 [features]
 # Default: no heavy dependencies by default (unit tests work without Docker)
 default = []
+# Infrastructure diagnostics (bollard); implied by Docker-backed resource features unless `no-diagnostics` is set
+diagnostics = ["dep:bollard"]
+# Disables Docker socket diagnostics at compile time (stub APIs; no bollard client)
+no-diagnostics = []
 # Kafka integration with real infrastructure (requires Docker)
-# Includes: rdkafka, testcontainers
+# Includes: rdkafka, testcontainers, diagnostics (bollard)
 kafka = [
     "dep:rdkafka",
     "dep:testcontainers",
     "dep:testcontainers-modules",
     "testcontainers-modules/kafka",
+    "diagnostics",
 ]
 # Postgres integration with real infrastructure (requires Docker)
 postgres = [
@@ -62,6 +74,7 @@ postgres = [
     "dep:testcontainers",
     "dep:testcontainers-modules",
     "testcontainers-modules/postgres",
+    "diagnostics",
 ]
 # MariaDB integration with real infrastructure (requires Docker)
 mariadb = [
@@ -69,6 +82,7 @@ mariadb = [
     "dep:testcontainers",
     "dep:testcontainers-modules",
     "testcontainers-modules/mariadb",
+    "diagnostics",
 ]
 # Oracle MySQL integration with real infrastructure (requires Docker; distinct from MariaDB — R-8)
 mysql = [
@@ -76,6 +90,7 @@ mysql = [
     "dep:testcontainers",
     "dep:testcontainers-modules",
     "testcontainers-modules/mysql",
+    "diagnostics",
 ]
 # In-memory SQLite per scenario (no Docker)
 sqlite = ["dep:rusqlite"]
