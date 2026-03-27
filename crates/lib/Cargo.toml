@@ -16,7 +16,7 @@ serde_json = "1"
 displaydoc = "0.2"
 
 # Async runtime (public async lifecycle API)
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 async-trait = "0.1"
 
 # Kafka integration (behind feature gate per D-2)

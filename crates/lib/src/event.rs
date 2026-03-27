@@ -175,6 +175,9 @@ pub enum InfraEvent {
         phase: Phase,
         /// UNIX epoch seconds when sampled
         timestamp: u64,
+        /// Harness scenario id when the sample was taken
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        scenario_id: String,
         /// CPU usage as a percentage (host-relative)
         cpu_pct: f64,
         /// Resident memory usage in bytes
@@ -510,6 +513,7 @@ mod tests {
             container: "pg".into(),
             phase: Phase::Seed,
             timestamp: 10,
+            scenario_id: String::new(),
             cpu_pct: 1.0,
             mem_bytes: 100,
             mem_limit: 200,

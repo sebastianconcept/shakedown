@@ -13,6 +13,15 @@ pub mod labels;
 mod docker_events;
 
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+mod ring_buffer;
+
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+mod resource_stats;
+
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
 pub(crate) use docker_events::{push_lifecycle_phase, DockerEventsMonitor};
+
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+pub(crate) use resource_stats::{ResourceStatsMonitor, StatsConfig};
 
 pub use connection::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};

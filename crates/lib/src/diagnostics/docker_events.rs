@@ -22,15 +22,11 @@ pub(crate) struct DockerEventsMonitor {
 }
 
 impl DockerEventsMonitor {
-    pub(crate) fn spawn(
-        docker: Docker,
-        scenario_id: String,
-    ) -> (Self, watch::Sender<(Phase, String)>) {
-        let (phase_tx, phase_rx) = watch::channel((Phase::Provision, scenario_id));
+    pub(crate) fn spawn(docker: Docker, phase_receiver: watch::Receiver<(Phase, String)>) -> Self {
         let sink = Arc::new(Mutex::new(Vec::new()));
         let sink_clone = Arc::clone(&sink);
-        let join = tokio::spawn(run_docker_event_stream(docker, sink_clone, phase_rx));
-        (Self { join, sink }, phase_tx)
+        let join = tokio::spawn(run_docker_event_stream(docker, sink_clone, phase_receiver));
+        Self { join, sink }
     }
 
     pub(crate) async fn shutdown_and_drain(self, event_log: &mut crate::event::EventLog) {
