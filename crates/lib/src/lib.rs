@@ -140,7 +140,8 @@ pub use crate::lifecycle::{
 /// First-party resource implementations.
 #[doc(inline)]
 pub use crate::resources::{
-    BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
+    sanitize_resource_namespace, BuiltinResource, FakeResource, KafkaBindings, RegisteredResource,
+    Resource,
 };
 
 #[cfg(feature = "postgres")]
