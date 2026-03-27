@@ -10,6 +10,9 @@ mod connection;
 pub mod labels;
 
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+mod container_logs;
+
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
 mod docker_events;
 
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
@@ -23,6 +26,9 @@ mod assertions;
 
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
 pub(crate) use resource_stats::{ResourceStatsMonitor, SharedResourceStatsRings, StatsConfig};
+
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+pub(crate) use container_logs::ContainerLogsMonitor;
 
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
 pub(crate) use docker_events::{push_lifecycle_phase, DockerEventsMonitor};

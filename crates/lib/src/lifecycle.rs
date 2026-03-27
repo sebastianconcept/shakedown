@@ -714,8 +714,11 @@ async fn teardown_all_resources(ctx: &mut Context) {
     not(feature = "no-diagnostics"),
 ))]
 macro_rules! shakedown_merge_diagnostics {
-    ($docker:ident, $stats:ident, $log:expr) => {
+    ($docker:ident, $stats:ident, $logs:ident, $log:expr) => {
         if let Some(monitor) = $stats.take() {
+            monitor.shutdown_and_drain($log).await;
+        }
+        if let Some(monitor) = $logs.take() {
             monitor.shutdown_and_drain($log).await;
         }
         if let Some(monitor) = $docker.take() {
@@ -792,9 +795,15 @@ where
         ),
         not(feature = "no-diagnostics"),
     ))]
-    let (mut docker_events_monitor, mut resource_stats_monitor, docker_phase_sender) = {
+    let (
+        mut docker_events_monitor,
+        mut resource_stats_monitor,
+        mut container_logs_monitor,
+        docker_phase_sender,
+    ) = {
         let mut docker_monitor_slot = None;
         let mut stats_monitor_slot = None;
+        let mut logs_monitor_slot = None;
         let mut phase_sender_slot = None;
         if let Some(diagnostics_handle) = crate::diagnostics::suite_diagnostics_handle().await {
             let (phase_tx, phase_rx) =
@@ -805,15 +814,23 @@ where
                 phase_rx.clone(),
             ));
             let (stats_monitor, rings_handle) = crate::diagnostics::ResourceStatsMonitor::spawn(
-                docker,
-                phase_rx,
+                docker.clone(),
+                phase_rx.clone(),
                 crate::diagnostics::StatsConfig::from_env(),
             );
             stats_monitor_slot = Some(stats_monitor);
+            logs_monitor_slot = Some(crate::diagnostics::ContainerLogsMonitor::spawn(
+                docker, phase_rx,
+            ));
             ctx.set_resource_stats_rings(Some(rings_handle));
             phase_sender_slot = Some(phase_tx);
         }
-        (docker_monitor_slot, stats_monitor_slot, phase_sender_slot)
+        (
+            docker_monitor_slot,
+            stats_monitor_slot,
+            logs_monitor_slot,
+            phase_sender_slot,
+        )
     };
 
     // Provision phase (async)
@@ -858,6 +875,7 @@ where
                 shakedown_merge_diagnostics!(
                     docker_events_monitor,
                     resource_stats_monitor,
+                    container_logs_monitor,
                     event_log
                 );
                 emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
@@ -895,7 +913,12 @@ where
                 ),
                 not(feature = "no-diagnostics"),
             ))]
-            shakedown_merge_diagnostics!(docker_events_monitor, resource_stats_monitor, event_log);
+            shakedown_merge_diagnostics!(
+                docker_events_monitor,
+                resource_stats_monitor,
+                container_logs_monitor,
+                event_log
+            );
             emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
             return Err(e.into());
         }
@@ -926,7 +949,12 @@ where
                 ),
                 not(feature = "no-diagnostics"),
             ))]
-            shakedown_merge_diagnostics!(docker_events_monitor, resource_stats_monitor, event_log);
+            shakedown_merge_diagnostics!(
+                docker_events_monitor,
+                resource_stats_monitor,
+                container_logs_monitor,
+                event_log
+            );
             emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
             return Err(e.into());
         }
@@ -983,7 +1011,12 @@ where
         ),
         not(feature = "no-diagnostics"),
     ))]
-    shakedown_merge_diagnostics!(docker_events_monitor, resource_stats_monitor, event_log);
+    shakedown_merge_diagnostics!(
+        docker_events_monitor,
+        resource_stats_monitor,
+        container_logs_monitor,
+        event_log
+    );
 
     #[cfg(all(
         any(
