@@ -4,21 +4,31 @@
 //! [`crate::lifecycle::run_scenario`] installs it when a [`crate::resources::ToxiproxyResource`]
 //! provisions successfully.
 //!
-//! Toxic add/remove and proxy reset append [`crate::event::Event`] rows with
-//! [`FAULT_INJECTION_EVENT_SOURCE`] so failure timelines correlate faults with harness and infra
-//! signals.
+//! Toxic add/remove and proxy reset enqueue [`crate::event::Event`] values on an internal
+//! [`std::sync::mpsc::SyncSender`] (set by the harness before the scenario body). The harness
+//! drains the matching receiver into the caller-owned [`crate::event::EventLog`] after the scenario
+//! body so failure timelines correlate faults with harness and infra signals — without storing raw
+//! pointers to the log.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::mpsc::SyncSender;
 
 use displaydoc::Display;
 use noxious_client::Client as ToxiproxyClient;
 pub use noxious_client::{StreamDirection, Toxic, ToxicKind};
 
-use crate::event::{Event, EventLog};
+use crate::event::Event;
 
 /// `source` field on [`Event`] records emitted by [`FaultHandle`] for timeline filtering.
 pub const FAULT_INJECTION_EVENT_SOURCE: &str = "fault-injection";
+
+/// Capacity of the [`std::sync::mpsc::sync_channel`] between [`FaultHandle`] and
+/// [`crate::lifecycle::run_scenario`].
+///
+/// Fault-injection logging is low volume; this only bounds memory until the harness drains the
+/// receiver after the scenario body. When full, [`std::sync::mpsc::SyncSender::try_send`] fails and
+/// that event is skipped.
+pub(crate) const FAULT_EVENT_CHANNEL_CAPACITY: usize = 64;
 
 /// Fault-injection failures (Toxiproxy control API and proxy registry).
 #[derive(Display, Debug, thiserror::Error)]
@@ -36,6 +46,17 @@ pub enum Error {
 }
 
 /// Handle for controlling Toxiproxy proxies and toxics for one scenario run.
+///
+/// **What:** Wraps the Toxiproxy HTTP client, per-proxy listen/upstream bookkeeping, and an optional
+/// channel sender for fault [`Event`] rows.
+///
+/// **Why:** Scenarios call `add_toxic` / `remove_toxic` without touching raw HTTP; events must reach
+/// the scenario [`crate::event::EventLog`] without `unsafe` pointers to caller-owned memory.
+///
+/// **How:** Constructed by the harness with [`FaultHandle::new`]; before the run phase,
+/// [`FaultHandle::set_event_sender`] wires the sender half of an `mpsc` pair. The harness drains the
+/// receiver into the log after the scenario body. [`crate::lifecycle::Context::clear_fault_handle`]
+/// drops the handle at teardown.
 #[derive(Debug)]
 pub struct FaultHandle {
     client: ToxiproxyClient,
@@ -43,14 +64,8 @@ pub struct FaultHandle {
     proxy_listen_addresses: HashMap<String, String>,
     /// Upstream address per proxy (for event messages).
     proxy_upstreams: HashMap<String, String>,
-    /// Scenario log; only valid for the active [`crate::lifecycle::run_scenario`] call.
-    ///
-    /// Wrapped in [`Mutex`] so [`FaultHandle`] (and [`crate::lifecycle::Context`]) remain `Sync` while
-    /// still appending directly to the caller-owned [`EventLog`] for correct timeline ordering.
-    ///
-    /// Stored as [`usize`] (not `*mut EventLog`) so the mutex guard is `Send` for `#[tokio::test]` /
-    /// `Future: Send` scenarios.
-    event_log_bits: Mutex<Option<usize>>,
+    /// Sender for fault [`Event`] rows; set by [`crate::lifecycle::run_scenario`] before the scenario body.
+    event_sender: Option<SyncSender<Event>>,
 }
 
 impl FaultHandle {
@@ -63,7 +78,7 @@ impl FaultHandle {
             api_base_url,
             proxy_listen_addresses: HashMap::new(),
             proxy_upstreams: HashMap::new(),
-            event_log_bits: Mutex::new(None),
+            event_sender: None,
         }
     }
 
@@ -72,14 +87,11 @@ impl FaultHandle {
         self.api_base_url.as_str()
     }
 
-    /// Wire the scenario [`EventLog`] so toxic operations append [`Event`] rows (see [`FAULT_INJECTION_EVENT_SOURCE`]).
+    /// Wire the sender half of an `mpsc` pair so fault operations enqueue [`Event`] rows for the harness to drain.
     ///
-    /// [`crate::lifecycle::run_scenario`] calls this before the scenario body when a handle exists.
-    pub fn attach_event_log(&mut self, event_log: &mut EventLog) {
-        *self
-            .event_log_bits
-            .lock()
-            .expect("fault event log mutex poisoned") = Some(event_log as *mut EventLog as usize);
+    /// [`crate::lifecycle::run_scenario`] calls this immediately before the scenario body when a handle exists.
+    pub(crate) fn set_event_sender(&mut self, sender: SyncSender<Event>) {
+        self.event_sender = Some(sender);
     }
 
     /// Create a named proxy (`listen` / `upstream` in Toxiproxy address form, e.g. `127.0.0.1:0`).
@@ -190,20 +202,10 @@ impl FaultHandle {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
-    /// Append a fault-injection [`Event`] when an event log was attached.
+    /// Enqueue a fault-injection [`Event`] for the harness to append after the scenario body.
     fn push_fault_event(&self, message: String) {
-        let guard = self
-            .event_log_bits
-            .lock()
-            .expect("fault event log mutex poisoned");
-        let Some(bits) = *guard else {
-            return;
-        };
-        let ptr = bits as *mut EventLog;
-        // SAFETY: Bits set only via `attach_event_log` from a `&mut EventLog` that outlives the
-        // scenario body; `run_scenario` clears `FaultHandle` before the log is dropped.
-        unsafe {
-            (*ptr).append(Event::info(FAULT_INJECTION_EVENT_SOURCE, message));
+        if let Some(sender) = &self.event_sender {
+            let _ = sender.try_send(Event::info(FAULT_INJECTION_EVENT_SOURCE, message));
         }
     }
 }
