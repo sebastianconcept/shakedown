@@ -73,10 +73,10 @@ test-outbox-sqlite:
 # Every integration feature, every test target, including `#[ignore]` (needs Docker for ignored tests). Does not enable `no-diagnostics`, so bollard diagnostics tests run. Uses nextest when installed (same idea as `just test`).
 test-shakedown-all-include-ignored:
   if command -v cargo-nextest >/dev/null 2>&1; then \
-    cargo nextest run -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored; \
+    cargo nextest run -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite,fault-injection" -- --include-ignored; \
   else \
     echo "cargo-nextest not installed; falling back to cargo test." >&2; \
-    cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored; \
+    cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite,fault-injection" -- --include-ignored; \
   fi
 
 # ----------------------------
@@ -104,3 +104,9 @@ test-outbox-rabbit-ignored:
 # Bollard log stream / Docker events / stats rings (requires Docker; do not combine with `--all-features` on `shakedown`, which sets `no-diagnostics`).
 test-diagnostics-integration-ignored:
   cargo test -p shakedown --features kafka --test diagnostics_integration -- --ignored
+
+test-toxiproxy-ignored:
+  cargo test -p shakedown --features fault-injection --test toxiproxy_vertical -- --ignored
+
+test-fault-injection-kafka-ignored:
+  cargo test -p shakedown --features kafka,fault-injection --test fault_injection_kafka -- --ignored
