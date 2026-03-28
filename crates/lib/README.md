@@ -31,8 +31,9 @@ shakedown/
 ## Milestone status
 
 - **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka** and **RabbitMQ** publication proof (`assert_kafka_published`, `assert_rabbit_published`) on top of relational bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below).
+- **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
 - **Previous milestone:** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
-- **Next milestone:** `mvp-fault-injection` — Toxiproxy-backed fault scenarios on the `#[shakedown::faulty_test]` path.
+- **Next milestone (roadmap):** `mvp-bridges` — minimal HTTP/gRPC bridge story; see the MVP table in adopted docs (`MVP.md` under `~/docs/shakedown/`).
 
 Default `cargo test -p shakedown` does not require Docker.
 
@@ -102,6 +103,8 @@ These need a running Docker engine. They are **skipped** in a normal `cargo test
 | Outbox + Postgres + Kafka | `cargo test -p shakedown --features outbox,postgres,kafka --test outbox_postgres -- --ignored` | `just test-outbox-postgres-ignored` |
 | Outbox + Postgres + RabbitMQ | `cargo test -p shakedown --features outbox,postgres,rabbitmq --test outbox_rabbit -- --ignored` | `just test-outbox-rabbit-ignored` |
 | Diagnostics (bollard: logs, events, stats) | `cargo test -p shakedown --features kafka --test diagnostics_integration -- --ignored` | `just test-diagnostics-integration-ignored` |
+| Toxiproxy vertical (control API) | `cargo test -p shakedown --features fault-injection --test toxiproxy_vertical -- --ignored` | `just test-toxiproxy-ignored` |
+| Kafka + Toxiproxy (Faulty bootstrap / proxy) | `cargo test -p shakedown --features kafka,fault-injection --test fault_injection_kafka -- --ignored` | `just test-fault-injection-kafka-ignored` |
 
 **Note:** `tests/diagnostics_integration.rs` also has a **non-ignored** test (`try_connect_graceful_when_docker_unreachable`); it runs with `cargo test -p shakedown --features kafka` without `--ignored`.
 
@@ -129,6 +132,8 @@ just test-macros
 just test-cli
 just test-shakedown-all-include-ignored
 just test-outbox-sqlite
+just test-toxiproxy-ignored
+just test-fault-injection-kafka-ignored
 ```
 
 `just test` and `just qa` use `cargo nextest run` when `cargo-nextest` is installed, and fall back to `cargo test` otherwise. `just test-workspace` and `just qa-full` always use plain `cargo test --workspace` for parity with Cargo-only CI. `just test-shakedown-all-include-ignored` uses nextest the same way when available.
@@ -167,6 +172,57 @@ Docker-backed tests are opt-in; see [Running tests](#running-tests) for the full
 
 Topics are created in `apply_default_seed` phase under the scenario's isolated namespace.
 See [`KafkaResource::apply_default_seed`](src/resources.rs) and [DECISIONS.md D-4](../../DECISIONS.md) for details.
+
+### Fault injection (Toxiproxy) and the Kafka path
+
+Shakedown injects **TCP-level** faults on traffic that flows through **[Toxiproxy](https://github.com/Shopify/toxiproxy)** (latency, bandwidth, timeout toxics, and so on). This is **not** a general chaos layer: it does **not** simulate arbitrary failure modes (for example process crashes, disk exhaustion, or cloud-AZ loss). It answers “what happens when the **network path to a dependency** is degraded?” — aligned with *trusting the result* (see **MISSION.md** in adopted docs, mode 3): failures are classifiable as harness-level TCP faults vs application bugs.
+
+**Cargo feature:** enable the capability with **`fault-injection`** (kebab-case). It pulls in the Toxiproxy control-plane client and suite-level container wiring; it does **not** enable Kafka by itself — compose with **`kafka`** for the Kafka vertical:
+
+```toml
+[dev-dependencies]
+shakedown = { path = "../..", features = ["kafka", "fault-injection"] }
+```
+
+**Registration:** register both **Kafka** and **Toxiproxy** builtins (order: Kafka first, then Toxiproxy matches the harness proxy hook). From a test you can use the macro:
+
+```rust,ignore
+#[shakedown::faulty_test(resources = [Kafka, Toxiproxy])]
+async fn kafka_fault_example(ctx: &mut Context) -> Result<(), shakedown::ShakedownError> {
+    // KafkaBindings already point at the Toxiproxy listen address for Faulty + both resources.
+    let _bootstrap = &ctx.kafka_bindings().expect("kafka after provision").bootstrap_servers;
+
+    let faults = ctx
+        .fault_handle_mut()
+        .expect("enable `fault-injection` and register Toxiproxy; see FaultInjectionError::NotAvailable");
+
+    faults
+        .add_toxic(
+            "shakedown_kafka",
+            &shakedown::Toxic {
+                kind: shakedown::ToxicKind::Latency {
+                    latency: 250,
+                    jitter: 0,
+                },
+                name: "slow_path".to_string(),
+                toxicity: 1.0,
+                direction: shakedown::StreamDirection::Downstream,
+            },
+        )
+        .await?;
+
+    // Exercise your producer/consumer using the same bootstrap string (proxied path).
+
+    faults.reset_proxy("shakedown_kafka").await?;
+    Ok(())
+}
+```
+
+Use [`run_scenario`](src/lifecycle.rs) with [`ScenarioKind::Faulty`](src/lifecycle.rs) (via [`Context::set_scenario_kind`](src/lifecycle.rs)) and register [`KafkaResource`](src/resources.rs) / [`ToxiproxyResource`](src/resources.rs) manually if you are not using the macro — see [`tests/fault_injection_kafka.rs`](tests/fault_injection_kafka.rs).
+
+**`KafkaBindings` and host:port:** after provision, [`KafkaBindings::bootstrap_servers`](src/resources.rs) is the **single client-facing** address your code should use (`bootstrap.servers` for rdkafka, etc.). For **`ScenarioKind::Faulty`** with **`fault-injection`** enabled and **both** resources registered, the harness rewrites that field to the **Toxiproxy listen** address (pass-through proxy to the real broker) so toxics apply transparently. For **`ScenarioKind::Normal`**, or if Toxiproxy is not registered, **`bootstrap_servers` stays the direct broker** endpoint. Scenarios do not need separate “proxy vs direct” branches for binding selection — only for **when** you call [`FaultHandle`](src/fault_injection.rs) to add or remove toxics.
+
+**CI:** Docker-backed proof tests are `#[ignore]`; run them explicitly, e.g. `cargo test -p shakedown --features kafka,fault-injection --test fault_injection_kafka -- --ignored` or `just test-fault-injection-kafka-ignored`.
 
 **Postgres (`testcontainers-modules::postgres`, `postgres:16` default tag):**
 

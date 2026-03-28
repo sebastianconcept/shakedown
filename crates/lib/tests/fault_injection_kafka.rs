@@ -75,6 +75,9 @@ async fn faulty_kafka_bootstrap_matches_toxiproxy_listen_and_toxic_applies() {
                     .remove_toxic("shakedown_kafka", "proof_latency")
                     .await
                     .expect("remove toxic");
+
+                // Then the harness kept bootstrap aligned with the proxy and the control plane
+                // accepted add/remove (pass-through data path; full rdkafka timing checks are optional).
             })
         },
         &mut event_log,
@@ -110,6 +113,8 @@ async fn normal_kafka_bootstrap_stays_direct_with_toxiproxy_registered() {
                     !kafka_bindings.bootstrap_servers.is_empty(),
                     "direct broker bootstrap should be set"
                 );
+
+                // Then Normal runs use the real broker string; no automatic kafka proxy row exists.
             })
         },
         &mut event_log,
