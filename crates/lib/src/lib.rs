@@ -16,7 +16,7 @@
 //!
 //! The [`Resource`] trait is now **async and scenario-aware**:
 //!
-//! ```rust,ignore
+//! ```text
 //! #[async_trait]
 //! pub trait Resource: Send + Sync {
 //!     async fn provision(&mut self, scenario_id: &ScenarioId) -> Result<Vec<ResourceHandle>, InfrastructureError>;
@@ -47,8 +47,9 @@
 //!
 //! ## Milestone status
 //!
-//! - **Current**: `mvp-macros-system-test` — `#[shakedown::test]` / `#[shakedown::faulty_test]`, optional `resources = [...]`, trybuild UI tests in `shakedown-macros`
-//! - **In progress**: `mvp-postgres-mariadb` — PostgreSQL (`postgres`), MariaDB (`mariadb`), Oracle MySQL (`mysql`), SQLite (`sqlite`) `Resource` types + bindings
+//! - **Shipped:** `mvp-outbox` — first-party outbox helpers on relational + Kafka bindings (`ctx.outbox()`, row/payload/Kafka assertions).
+//! - **Prior:** `mvp-postgres-mariadb` — PostgreSQL, MariaDB, Oracle MySQL, and SQLite [`Resource`] types with suite-shared Docker containers and per-scenario isolation.
+//! - **Next:** `mvp-fault-injection` — Toxiproxy-backed fault scenarios on the [`#[shakedown::faulty_test]`](crate::faulty_test) path (see adopted docs `ideation/scoping-brief-mvp-fault-injection.md`).
 //!
 //! ## See also
 //!
@@ -57,7 +58,7 @@
 //!
 //! ## Example
 //!
-//! ```ignore
+//! ```text
 //! use shakedown::Context;
 //!
 //! #[async_trait]

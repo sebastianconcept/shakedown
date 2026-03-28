@@ -1942,6 +1942,8 @@ dependencies = [
  "bytes",
  "fallible-iterator 0.2.0",
  "postgres-protocol",
+ "time",
+ "uuid",
 ]
 
 [[package]]

@@ -13,7 +13,10 @@ use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 use shakedown::{
     run_scenario, BuiltinResource, Context, EventLog, KafkaResource, PostgresResource,
 };
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tokio_postgres::NoTls;
+use uuid::Uuid;
 
 #[derive(Debug, serde::Deserialize)]
 struct OrderPlacedPayload {
@@ -71,19 +74,25 @@ async fn outbox_postgres_to_kafka_flow_proves_sent_and_published() {
                     .await
                     .expect("insert pending outbox row");
 
+                let id_deterministic_base =
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+                let id_deterministic_latest =
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000999").unwrap();
+                let created_at =
+                    OffsetDateTime::parse("2026-01-01T00:00:00Z", &Rfc3339).expect("parse created_at");
                 postgres_client
                     .execute(
                         "INSERT INTO outbox_event (id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at)
                          VALUES ($1::uuid, $2, $3, $4, $5::text::jsonb, $6, $7, $8::timestamptz)",
                         &[
-                            &"00000000-0000-0000-0000-000000000001",
+                            &id_deterministic_base,
                             &"order",
                             &"order-2",
                             &"OrderPlaced",
                             &r#"{"aggregate_id":"order-2","total":10.0}"#,
                             &"sent",
                             &1_i32,
-                            &"2026-01-01T00:00:00Z",
+                            &created_at,
                         ],
                     )
                     .await
@@ -93,14 +102,14 @@ async fn outbox_postgres_to_kafka_flow_proves_sent_and_published() {
                         "INSERT INTO outbox_event (id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at)
                          VALUES ($1::uuid, $2, $3, $4, $5::text::jsonb, $6, $7, $8::timestamptz)",
                         &[
-                            &"00000000-0000-0000-0000-000000000999",
+                            &id_deterministic_latest,
                             &"order",
                             &"order-2",
                             &"OrderPlaced",
                             &r#"{"aggregate_id":"order-2","total":20.0}"#,
                             &"sent",
                             &4_i32,
-                            &"2026-01-01T00:00:00Z",
+                            &created_at,
                         ],
                     )
                     .await
