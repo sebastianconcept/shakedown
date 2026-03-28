@@ -1027,6 +1027,51 @@ mod tests {
     use crate::event::Event;
 
     #[test]
+    fn fault_injection_application_events_merge_with_infra_and_json_export() {
+        use crate::event::{EventLevel, LogEntry};
+
+        let mut log = EventLog::new();
+        log.append_entry(LogEntry::Application(Event {
+            timestamp: 1,
+            level: EventLevel::Info,
+            source: "fault-injection".into(),
+            message: "action=added proxy='p' upstream=127.0.0.1:9 toxic='t' kind=Latency(50, 0) direction=downstream".into(),
+        }));
+        log.append_infra(InfraEvent::ContainerLog {
+            container: "c".into(),
+            phase: Phase::Seed,
+            timestamp: 2,
+            line: "infra line".into(),
+            stream: None,
+        });
+        log.append_entry(LogEntry::Application(Event {
+            timestamp: 3,
+            level: EventLevel::Info,
+            source: "fault-injection".into(),
+            message: "action=removed proxy='p' upstream=127.0.0.1:9 toxic='t'".into(),
+        }));
+
+        let options = FailureTimelineOptions {
+            scenario_name: "faulty_case".into(),
+            failure_summary: Some("assertion failed".into()),
+            use_color: false,
+            verdict: "failed".into(),
+            scenario_timeout_secs: None,
+        };
+        let rendered = render_failure_timeline(&log, &options);
+        let first = rendered.find("action=added").expect("added");
+        let mid = rendered.find("infra line").expect("infra");
+        let last = rendered.find("action=removed").expect("removed");
+        assert!(first < mid && mid < last);
+
+        let document = build_failure_timeline_document(&log, &options);
+        let json = serde_json::to_string(&document).expect("json");
+        assert!(json.contains("\"source\":\"fault-injection\""));
+        assert!(json.contains("action=added"));
+        assert!(json.contains("action=removed"));
+    }
+
+    #[test]
     fn sorts_mixed_entries_and_interleaves() {
         let mut log = EventLog::new();
         log.append_infra(InfraEvent::ContainerLog {

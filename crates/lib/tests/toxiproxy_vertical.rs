@@ -11,7 +11,7 @@
 
 use shakedown::{
     run_scenario, BuiltinResource, Context, EventLog, RegisteredResource, StreamDirection, Toxic,
-    ToxicKind, ToxiproxyResource,
+    ToxicKind, ToxiproxyResource, FAULT_INJECTION_EVENT_SOURCE,
 };
 
 #[tokio::test]
@@ -73,4 +73,23 @@ async fn toxiproxy_provisions_version_ready_and_teardown_clears_proxies() {
     )
     .await
     .expect("run_scenario should succeed");
+
+    let fault_events: Vec<_> = event_log
+        .events()
+        .filter(|event| event.source == FAULT_INJECTION_EVENT_SOURCE)
+        .collect();
+    assert_eq!(
+        fault_events.len(),
+        3,
+        "add_toxic, remove_toxic, and reset_proxy each emit one Application event"
+    );
+    assert!(fault_events
+        .iter()
+        .any(|event| event.message.contains("action=added")));
+    assert!(fault_events
+        .iter()
+        .any(|event| event.message.contains("action=removed")));
+    assert!(fault_events
+        .iter()
+        .any(|event| event.message.contains("action=reset")));
 }

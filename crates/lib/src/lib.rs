@@ -214,6 +214,8 @@ pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResour
 pub use crate::resources::KafkaResource;
 
 #[cfg(feature = "fault-injection")]
+pub use crate::fault_injection::FAULT_INJECTION_EVENT_SOURCE;
+#[cfg(feature = "fault-injection")]
 pub use crate::fault_injection::{Error as FaultInjectionError, FaultHandle};
 #[cfg(feature = "fault-injection")]
 pub use crate::fault_injection::{StreamDirection, Toxic, ToxicKind};
