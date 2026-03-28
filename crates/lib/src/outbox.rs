@@ -408,8 +408,9 @@ impl<'ctx> Outbox<'ctx> {
             }
         }
 
-        Err(ShakedownError::OutboxKafkaRecordNotFound {
-            topic,
+        Err(ShakedownError::OutboxPublicationNotFound {
+            transport: "kafka",
+            channel: topic,
             aggregate_id: aggregate_id.to_string(),
         })
     }

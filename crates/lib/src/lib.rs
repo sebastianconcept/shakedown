@@ -109,7 +109,7 @@ pub mod error;
 pub mod event;
 /// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
-/// Outbox table setup and assertions (`outbox` + relational features).
+/// Outbox table setup and assertions (`outbox` + at least one relational feature).
 #[cfg(all(
     feature = "outbox",
     any(
@@ -122,23 +122,15 @@ pub mod lifecycle;
 pub mod outbox;
 /// Lifecycle phase labels (shared with infrastructure event records).
 pub mod phase;
+/// Publication observation spec and [`publication::PublicationVerifier`] (`outbox` feature).
+///
+/// Does not require `kafka` or `rabbitmq`; transport implementations are added by those features.
+#[cfg(feature = "outbox")]
+pub mod publication;
 /// [`resources::Resource`] implementations, registration, and Kafka bindings.
 pub mod resources;
 /// Failure timeline rendering (terminal) for [`EventLog`].
 pub mod timeline;
-
-#[cfg(all(
-    feature = "outbox",
-    not(any(
-        feature = "postgres",
-        feature = "mariadb",
-        feature = "mysql",
-        feature = "sqlite"
-    ))
-))]
-compile_error!(
-    "Feature `outbox` requires at least one relational feature: `postgres`, `mariadb`, `mysql`, or `sqlite`."
-);
 
 #[doc(inline)]
 pub use crate::error::{
@@ -153,6 +145,11 @@ pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, ScenarioKind,
 };
 pub use crate::phase::Phase;
+
+#[cfg(feature = "outbox")]
+pub use crate::publication::{
+    PublicationObserveSpec, PublicationVerifier, DEFAULT_PUBLICATION_OBSERVE_TIMEOUT,
+};
 pub use crate::timeline::{
     build_failure_timeline_document, emit_failure_timeline_to_stderr, render_failure_timeline,
     resolve_target_timelines_dir, sanitize_scenario_id_for_filename, write_failure_timeline_json,

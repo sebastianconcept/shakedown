@@ -102,6 +102,8 @@ mysql = [
 sqlite = ["dep:rusqlite"]
 # Outbox helpers (requires at least one relational feature)
 outbox = []
+# RabbitMQ integration (lapin + testcontainers; expanded in US-003)
+rabbitmq = []
 # MCP server support (post-MVP, optional)
 mcp = []
 
