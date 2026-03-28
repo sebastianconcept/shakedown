@@ -155,6 +155,12 @@ name = "toxiproxy_vertical"
 path = "tests/toxiproxy_vertical.rs"
 required-features = ["fault-injection"]
 
+# Kafka + Toxiproxy Faulty bootstrap / latency proof (Docker); ignored unless --ignored
+[[test]]
+name = "fault_injection_kafka"
+path = "tests/fault_injection_kafka.rs"
+required-features = ["kafka", "fault-injection"]
+
 # SQLite bindings + in-memory proof (no Docker)
 [[test]]
 name = "sqlite_vertical"
