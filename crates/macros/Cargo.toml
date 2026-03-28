@@ -23,6 +23,8 @@ shakedown = { path = "../lib" }
 [features]
 # Kafka integration feature (propagates to generated code in macros)
 kafka = []
+# Toxiproxy / fault-injection (propagates to generated code in macros)
+fault-injection = []
 # RabbitMQ integration feature (propagates to generated code in macros)
 rabbitmq = []
 # SQLite in-memory resource (propagates to generated code in macros)

@@ -476,10 +476,24 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Toxiproxy" => Ok(quote! {
+            #[cfg(feature = "fault-injection")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Toxiproxy(
+                    ::shakedown::ToxiproxyResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "fault-injection"))]
+            {
+                ::core::compile_error!(
+                    "Toxiproxy in #[shakedown::test(resources = [...])] requires `fault-injection` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, and `Sqlite`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, and `Toxiproxy`"
             ),
         )),
     }
