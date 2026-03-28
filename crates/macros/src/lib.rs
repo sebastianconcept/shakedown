@@ -93,38 +93,66 @@ fn parse_test_attr(attr: TokenStream) -> syn::Result<Option<Vec<Ident>>> {
     Ok(args.resources)
 }
 
-/// `#[shakedown::faulty_test]` attribute: `resources = [...]` plus any `name = <expr>` pairs
-/// reserved for `mvp-fault-injection` are accepted and ignored in this milestone.
-struct FaultyTestAttrParser {
+/// Parsed `#[shakedown::faulty_test(...)]` arguments.
+struct FaultyTestAttr {
     resources: Option<Vec<Ident>>,
+    fault_profile: Option<String>,
 }
 
-impl Parse for FaultyTestAttrParser {
+impl Parse for FaultyTestAttr {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut resources = None;
+        let mut fault_profile = None;
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             input.parse::<Token![=]>()?;
             if key == "resources" {
                 resources = Some(parse_ident_list_bracketed(input)?);
+            } else if key == "fault_profile" {
+                let expr: Expr = input.parse()?;
+                let span = expr.span();
+                let value = match expr {
+                    Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(s),
+                        ..
+                    }) => s.value(),
+                    _ => {
+                        return Err(syn::Error::new(
+                            span,
+                            "`fault_profile` must be a string literal, e.g. fault_profile = \"latency\"",
+                        ));
+                    }
+                };
+                if fault_profile.is_some() {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        "duplicate `fault_profile` attribute argument",
+                    ));
+                }
+                fault_profile = Some(value);
             } else {
-                let _ = Expr::parse(input)?;
+                let _: Expr = input.parse()?;
             }
             if !input.is_empty() {
                 input.parse::<Token![,]>()?;
             }
         }
-        Ok(Self { resources })
+        Ok(Self {
+            resources,
+            fault_profile,
+        })
     }
 }
 
-/// Parse `#[shakedown::faulty_test]` arguments, extracting `resources = [..]` when present.
-fn parse_faulty_test_attr(attr: TokenStream) -> syn::Result<Option<Vec<Ident>>> {
+/// Parse `#[shakedown::faulty_test]` arguments.
+fn parse_faulty_test_attr(attr: TokenStream) -> syn::Result<FaultyTestAttr> {
     if attr.is_empty() {
-        return Ok(None);
+        return Ok(FaultyTestAttr {
+            resources: None,
+            fault_profile: None,
+        });
     }
-    let parsed: FaultyTestAttrParser = syn::parse(attr)?;
-    Ok(parsed.resources)
+    syn::parse(attr)
 }
 
 /// Returns `true` when the first parameter is `ctx: &mut …::Context`.
@@ -278,8 +306,9 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - **Fault-injection signalling** — code under `ScenarioKind::Faulty` can branch (now or in future
 ///   milestones) to simulate failures, chaos, or degraded infrastructure without changing the macro
 ///   shape.
-/// - **Forward-compatible attributes** — `faulty_test` parses extra `name = <expr>` pairs and
-///   ignores them until fault-injection wiring lands; [`test`] does not accept those yet.
+/// - **`fault_profile = "..."`** — expands to `ctx.set_fault_profile(...)` before the scenario runs.
+/// - **Other `name = <expr>` pairs** — reserved for future wiring; parsed and ignored (no silent
+///   failure for unknown keys beyond `resources` / `fault_profile`).
 ///
 /// Use for scenarios that explicitly opt into fault injection or degraded-mode behaviour. Resource
 /// lists match [`test`].
@@ -289,9 +318,19 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Panics if `shakedown::run_scenario` returns `Err`, same as [`test`].
 #[proc_macro_attribute]
 pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let resources_list = match parse_faulty_test_attr(attr) {
-        Ok(list) => list,
+    let parsed = match parse_faulty_test_attr(attr) {
+        Ok(p) => p,
         Err(e) => return e.to_compile_error().into(),
+    };
+    let resources_list = parsed.resources;
+    let fault_profile_stmt = match &parsed.fault_profile {
+        None => quote! {},
+        Some(s) => {
+            let lit = syn::LitStr::new(s, proc_macro2::Span::call_site());
+            quote! {
+                ctx.set_fault_profile(#lit);
+            }
+        }
     };
 
     let func = match syn::parse::<ItemFn>(item.clone()) {
@@ -360,6 +399,7 @@ pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
             #resources_registration
 
             ctx.set_scenario_kind(::shakedown::ScenarioKind::Faulty);
+            #fault_profile_stmt
 
             let result = ::shakedown::run_scenario(
                 &mut ctx,

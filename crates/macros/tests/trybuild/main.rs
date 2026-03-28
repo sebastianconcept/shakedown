@@ -11,6 +11,7 @@ fn macros_ui() {
     t.pass("tests/trybuild/pass/basic_test.rs");
     t.pass("tests/trybuild/pass/faulty_test.rs");
     t.pass("tests/trybuild/pass/faulty_test_deferred_args.rs");
+    t.pass("tests/trybuild/pass/faulty_test_fault_profile.rs");
     t.pass("tests/trybuild/pass/resources_arg.rs");
     t.compile_fail("tests/trybuild/fail/sync_function.rs");
     t.compile_fail("tests/trybuild/fail/wrong_signature.rs");
