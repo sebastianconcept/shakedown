@@ -8,20 +8,24 @@
 //! cargo test -p shakedown --features kafka --test diagnostics_integration -- --ignored
 //! ```
 
-use async_trait::async_trait;
-use bollard::query_parameters::{ListContainersOptionsBuilder, StopContainerOptionsBuilder};
 use serial_test::serial;
-use testcontainers::core::WaitFor;
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{GenericImage, ImageExt};
 
-use shakedown::diagnostics::labels::{SHAKEDOWN_DOCKER_LABEL_KEY, SHAKEDOWN_DOCKER_LABEL_VALUE};
-use shakedown::error::{InfrastructureError, ResourceHandle, ScenarioId};
-use shakedown::event::{DockerEventKind, InfraEvent, LogEntry};
-use shakedown::resources::Resource;
-use shakedown::{run_scenario, Context, EventLog};
+#[cfg(not(feature = "no-diagnostics"))]
+mod bollard_diagnostics_tests {
+    use async_trait::async_trait;
+    use bollard::query_parameters::{ListContainersOptionsBuilder, StopContainerOptionsBuilder};
+    use serial_test::serial;
+    use testcontainers::core::WaitFor;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers::{GenericImage, ImageExt};
 
-const STDOUT_MARKER: &str = "SHAKEDOWN_DIAG_STDOUT";
+    use shakedown::diagnostics::labels::{SHAKEDOWN_DOCKER_LABEL_KEY, SHAKEDOWN_DOCKER_LABEL_VALUE};
+    use shakedown::error::{InfrastructureError, ResourceHandle, ScenarioId};
+    use shakedown::event::{DockerEventKind, InfraEvent, LogEntry};
+    use shakedown::resources::Resource;
+    use shakedown::{run_scenario, Context, EventLog};
+
+    const STDOUT_MARKER: &str = "SHAKEDOWN_DIAG_STDOUT";
 
 /// Alpine container with Shakedown labels; prints [`STDOUT_MARKER`] then sleeps.
 #[derive(Default)]
@@ -249,6 +253,7 @@ async fn resource_stats_collected_and_accessible_via_ring_buffer() {
         "expected at least one ResourceSample with memory, got {:?}",
         infra_events(&event_log)
     );
+}
 }
 
 #[tokio::test]

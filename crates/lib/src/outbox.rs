@@ -108,7 +108,8 @@ pub struct OutboxAssertBuilder {
 }
 
 #[cfg(feature = "kafka")]
-const DEFAULT_KAFKA_ASSERT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Docker-backed Kafka (e.g. testcontainers) often needs >5s for consumer subscribe/rebalance.
+const DEFAULT_KAFKA_ASSERT_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl OutboxAssertBuilder {
     /// Return the asserted outbox entry for additional ad-hoc checks.
@@ -382,11 +383,26 @@ LIMIT 1
                     sent_at: row.get(8),
                 });
             }
-            return Err(ShakedownError::OutboxRowNotFound {
-                aggregate_id: aggregate_id.to_string(),
-                event_type: event_type.to_string(),
-                expected_status: expected_status.to_string(),
-            });
+            let latest_status_row = client
+                .query_opt(
+                    r#"
+SELECT status::text
+FROM outbox_event
+WHERE aggregate_id = $1 AND type = $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#,
+                    &[&aggregate_id, &event_type],
+                )
+                .await
+                .map_err(as_backend_error)?;
+            let latest = latest_status_row.map(|row| row.get::<_, String>(0));
+            return Err(outbox_expected_status_miss_error(
+                aggregate_id,
+                event_type,
+                expected_status,
+                latest,
+            ));
         }
 
         #[cfg(feature = "mariadb")]
@@ -409,26 +425,43 @@ LIMIT 1
                 )
                 .await
                 .map_err(as_backend_error)?;
-            connection.disconnect().await.map_err(as_backend_error)?;
             if let Some(row) = maybe_row {
+                connection.disconnect().await.map_err(as_backend_error)?;
                 let payload = parse_payload_json(row.4.as_str())?;
+                let status =
+                    parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?;
                 return Ok(OutboxEntry {
                     id: row.0,
                     aggregate_type: row.1,
                     aggregate_id: row.2,
                     event_type: row.3,
                     payload,
-                    status: parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?,
+                    status,
                     attempts: row.6,
                     created_at: row.7,
                     sent_at: row.8,
                 });
             }
-            return Err(ShakedownError::OutboxRowNotFound {
-                aggregate_id: aggregate_id.to_string(),
-                event_type: event_type.to_string(),
-                expected_status: expected_status.to_string(),
-            });
+            let latest_status: Option<String> = connection
+                .exec_first(
+                    r#"
+SELECT status
+FROM outbox_event
+WHERE aggregate_id = ? AND type = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#,
+                    (aggregate_id, event_type),
+                )
+                .await
+                .map_err(as_backend_error)?;
+            connection.disconnect().await.map_err(as_backend_error)?;
+            return Err(outbox_expected_status_miss_error(
+                aggregate_id,
+                event_type,
+                expected_status,
+                latest_status,
+            ));
         }
 
         #[cfg(feature = "mysql")]
@@ -451,26 +484,43 @@ LIMIT 1
                 )
                 .await
                 .map_err(as_backend_error)?;
-            connection.disconnect().await.map_err(as_backend_error)?;
             if let Some(row) = maybe_row {
+                connection.disconnect().await.map_err(as_backend_error)?;
                 let payload = parse_payload_json(row.4.as_str())?;
+                let status =
+                    parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?;
                 return Ok(OutboxEntry {
                     id: row.0,
                     aggregate_type: row.1,
                     aggregate_id: row.2,
                     event_type: row.3,
                     payload,
-                    status: parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?,
+                    status,
                     attempts: row.6,
                     created_at: row.7,
                     sent_at: row.8,
                 });
             }
-            return Err(ShakedownError::OutboxRowNotFound {
-                aggregate_id: aggregate_id.to_string(),
-                event_type: event_type.to_string(),
-                expected_status: expected_status.to_string(),
-            });
+            let latest_status: Option<String> = connection
+                .exec_first(
+                    r#"
+SELECT status
+FROM outbox_event
+WHERE aggregate_id = ? AND type = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#,
+                    (aggregate_id, event_type),
+                )
+                .await
+                .map_err(as_backend_error)?;
+            connection.disconnect().await.map_err(as_backend_error)?;
+            return Err(outbox_expected_status_miss_error(
+                aggregate_id,
+                event_type,
+                expected_status,
+                latest_status,
+            ));
         }
 
         #[cfg(feature = "sqlite")]
@@ -545,11 +595,42 @@ LIMIT 1
                     sent_at: row.8,
                 });
             }
-            return Err(ShakedownError::OutboxRowNotFound {
-                aggregate_id: aggregate_id.to_string(),
-                event_type: event_type.to_string(),
-                expected_status: expected_status.to_string(),
-            });
+            let sqlite_url2 = sqlite_bindings.database_url.clone();
+            let aggregate_id_latest = aggregate_id.to_string();
+            let event_type_latest = event_type.to_string();
+            let latest_status: Option<String> = tokio::task::spawn_blocking(move || {
+                use rusqlite::OpenFlags;
+                let connection = rusqlite::Connection::open_with_flags(
+                    sqlite_url2.as_str(),
+                    OpenFlags::SQLITE_OPEN_URI
+                        | OpenFlags::SQLITE_OPEN_READ_WRITE
+                        | OpenFlags::SQLITE_OPEN_CREATE,
+                )?;
+                let mut statement = connection.prepare(
+                    r#"
+SELECT status
+FROM outbox_event
+WHERE aggregate_id = ?1 AND type = ?2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#,
+                )?;
+                let mut rows = statement.query([aggregate_id_latest, event_type_latest])?;
+                if let Some(row) = rows.next()? {
+                    Ok::<_, rusqlite::Error>(Some(row.get(0)?))
+                } else {
+                    Ok(None)
+                }
+            })
+            .await
+            .map_err(as_backend_error)?
+            .map_err(as_backend_error)?;
+            return Err(outbox_expected_status_miss_error(
+                aggregate_id,
+                event_type,
+                expected_status,
+                latest_status,
+            ));
         }
 
         Err(ShakedownError::NoRelationalBindings)
@@ -807,6 +888,28 @@ fn outbox_row_state_label(state: OutboxRowState) -> &'static str {
         OutboxRowState::Pending => "pending",
         OutboxRowState::Sent => "sent",
         OutboxRowState::Failed => "failed",
+    }
+}
+
+/// No row with `expected_status`: either missing entirely, or present under a different status.
+fn outbox_expected_status_miss_error(
+    aggregate_id: &str,
+    event_type: &str,
+    expected_status: &str,
+    latest_row_status: Option<String>,
+) -> ShakedownError {
+    match latest_row_status {
+        Some(actual) => ShakedownError::OutboxWrongState {
+            aggregate_id: aggregate_id.to_string(),
+            event_type: event_type.to_string(),
+            expected: expected_status.to_string(),
+            actual,
+        },
+        None => ShakedownError::OutboxRowNotFound {
+            aggregate_id: aggregate_id.to_string(),
+            event_type: event_type.to_string(),
+            expected_status: expected_status.to_string(),
+        },
     }
 }
 
