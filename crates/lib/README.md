@@ -30,7 +30,7 @@ shakedown/
 
 ## Milestone status
 
-- **Current (shipped in repo):** `mvp-outbox` — first-party outbox helpers are available on top of relational + Kafka bindings (`ctx.outbox().setup()`, row-state assertions, payload assertions, and Kafka publish assertions).
+- **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka** and **RabbitMQ** publication proof (`assert_kafka_published`, `assert_rabbit_published`) on top of relational bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below).
 - **Previous milestone:** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
 - **Next milestone:** `mvp-fault-injection` — Toxiproxy-backed fault scenarios on the `#[shakedown::faulty_test]` path.
 
@@ -163,20 +163,49 @@ If the Docker socket is missing or unusable, [`try_connect`](src/diagnostics/con
 
 ## Outbox helpers
 
-**Publication errors:** Kafka-specific `OutboxKafkaRecordNotFound` was replaced by transport-neutral
-[`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) and
-[`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) (see `Display`
-for a `kafka` / `rabbitmq` prefix). Match on those variants or on
-[`ShakedownError`](crate::error::ShakedownError) generally instead of matching on removed names.
+The outbox API has **two layers**. You can use row assertions **without** any message bus; publication proof is **optional** and gated on **`kafka`** and/or **`rabbitmq`**.
 
-Enable outbox assertions with relational + Kafka features:
+1. **Row assertions** — SQL against the canonical `outbox_event` table (`assert_pending`, `assert_sent`, `assert_failed`, `assert_retry`, payload checks). These require `outbox` plus a **relational** feature (`postgres`, `mariadb`, `mysql`, or `sqlite`). They do **not** require Kafka or RabbitMQ.
+2. **Publication proof** — observe a message for your aggregate on a bus via [`PublicationVerifier`](src/publication/verifier.rs). First-party implementations: **Kafka** ([`KafkaPublicationVerifier`](src/publication/kafka_verifier.rs)) and **RabbitMQ** ([`RabbitMqPublicationVerifier`](src/publication/rabbit_verifier.rs)), exposed as [`Outbox::assert_kafka_published`](src/outbox.rs) and [`Outbox::assert_rabbit_published`](src/outbox.rs). Enable the matching Cargo feature; `outbox` alone does **not** pull in either transport.
+
+**Publication errors** are transport-neutral: [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) and [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) carry a `transport` field (`"kafka"`, `"rabbitmq"`, …) and are distinct from row errors such as `OutboxRowNotFound`. Prefer matching on these variants (or [`ShakedownError`](crate::error::ShakedownError) generally) for publication failures.
+
+### Supported combinations (matrix)
+
+| What you need | Cargo features | Typical CI / local command (Docker where marked) |
+|---------------|----------------|---------------------------------------------------|
+| Relational outbox **rows only** (fast, no Docker) | `outbox`, `sqlite` | `cargo test -p shakedown --features outbox,sqlite` |
+| Postgres outbox + **Kafka** publication proof | `outbox`, `postgres`, `kafka` | `cargo test -p shakedown --features outbox,postgres,kafka --test outbox_postgres -- --ignored` |
+| Postgres outbox + **RabbitMQ** publication proof (no Kafka) | `outbox`, `postgres`, `rabbitmq` | `cargo test -p shakedown --features outbox,postgres,rabbitmq --test outbox_rabbit -- --ignored` |
+| Rabbit verifier **unit tests** without Docker DB | `outbox`, `sqlite`, `rabbitmq` | `cargo test -p shakedown --features outbox,rabbitmq,sqlite` |
+| **Custom bus** (SQS, NATS, …) | `outbox` (+ your client crates) | Implement [`PublicationVerifier`](#implementing-publicationverifier) in your crate or test module; no first-party feature required |
+
+Full quality gates for this crate often include: `cargo check --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, `cargo test -p shakedown --features outbox,postgres,kafka`, and `cargo test -p shakedown --features outbox,postgres,rabbitmq -- --ignored`.
+
+### Feature flags (examples)
+
+**Postgres + Kafka** — row assertions and Kafka publication proof:
 
 ```toml
 [dependencies]
 shakedown = { version = "...", features = ["outbox", "postgres", "kafka"] }
 ```
 
-Minimal scenario template:
+**Postgres + RabbitMQ** — same row APIs; use `assert_rabbit_published` instead of Kafka (declare/bind queue in seed per Option A topology — exchange + queue + routing key; see `SPECS.md` under `~/docs/shakedown/feature/publication-verifier-rabbitmq/`):
+
+```toml
+[dependencies]
+shakedown = { version = "...", features = ["outbox", "postgres", "rabbitmq"] }
+```
+
+**SQLite** — row assertions only in-process (no Docker):
+
+```toml
+[dependencies]
+shakedown = { version = "...", features = ["outbox", "sqlite"] }
+```
+
+### Example: Postgres + Kafka
 
 ```rust
 #[shakedown::default_seed(resources = [Postgres, Kafka])]
@@ -206,14 +235,36 @@ async fn outbox_order_published(ctx: &mut Context) -> Result<(), ShakedownError>
 }
 ```
 
-For fast offline checks, `features = ["outbox", "sqlite"]` supports row-state assertions in the
-scenario-isolated in-memory SQLite database (`assert_pending`, `assert_sent`, `assert_failed`,
-`assert_retry`).
+### Example: Postgres + RabbitMQ
 
-SQLite limitation: `SELECT FOR UPDATE SKIP LOCKED` is unavailable, so claim-locking/publisher
-concurrency semantics are not validated on the SQLite path. Use Postgres/MariaDB/MySQL paths when
-you need lock semantics coverage.
+Use `#[shakedown::test(resources = [Postgres, Rabbit])]`, declare a direct or topic exchange and a durable queue in seed, bind with routing key equal to your aggregate id, publish from the test, then assert:
+
+```rust
+// After outbox row assertions, publication proof consumes from the namespaced queue:
+ctx.outbox()
+    .assert_rabbit_published("orders_ex", "proof_q", "order-42")
+    .await?;
+```
+
+See [`tests/outbox_rabbit.rs`](tests/outbox_rabbit.rs) for a full Docker-backed flow.
+
+### Implementing `PublicationVerifier`
+
+Use this when your team’s bus is not Kafka or RabbitMQ (e.g. **AWS SQS** is not implemented first-party, but the trait is shaped so you can add an impl without a breaking API change).
+
+1. **Trait** — Implement [`PublicationVerifier`](src/publication/verifier.rs) for your type with an associated `Options` struct (exchange, queue URL, region, etc.).
+2. **`assert_observed`** — Take [`Context`](src/lifecycle.rs), a [`PublicationObserveSpec`](src/publication/spec.rs) (`aggregate_id`, `logical_channel`, optional `timeout`), and `&Self::Options`. Poll or consume until [`message_matches_aggregate_id`](src/publication/matching.rs) succeeds or the resolved deadline is exceeded ([`DEFAULT_PUBLICATION_OBSERVE_TIMEOUT`](src/publication/spec.rs): 20s when `timeout` is `None`).
+3. **Bindings** — Read connection details from [`Context::kafka_bindings()`](src/resources.rs), [`Context::rabbit_bindings()`](src/resources.rs), or fields you attach via your own resources; keep scenario isolation consistent with how your publisher names topics/queues.
+4. **Errors** — Return [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) or [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) with `transport` set to a stable label (e.g. `"sqs"`) so failure timelines classify publication failures correctly.
+
+To use your verifier from tests, call `PublicationVerifier::assert_observed(&your_verifier, &ctx, &spec, &options)` (or wrap it in a small helper on `Outbox` in your codebase).
+
+### SQLite limitations
+
+`SELECT FOR UPDATE SKIP LOCKED` is unavailable on SQLite, so claim-locking / publisher concurrency semantics are not validated on that path. Use Postgres/MariaDB/MySQL when you need lock semantics coverage.
 
 ## See also
 
-Product docs (PRD, SPECS, TECH-STACK) live in the adopted documentation root — workspace [`docs/README.md`](../../docs/README.md) points at **`~/docs/shakedown/`**.
+- **Adopted product docs** (PRD, SPECS, decisions) — workspace [`docs/README.md`](../../docs/README.md) points at **`~/docs/shakedown/`**.
+- **Pluggable outbox + queue** — design background: **`~/docs/shakedown/ideation/scoping-brief-pluggable-outbox-queue.md`**
+- **Verifier naming decision** — *Verifier traits for custom resource assertions* in **`~/docs/shakedown/DECISIONS.md`**
