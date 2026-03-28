@@ -21,6 +21,8 @@ pub enum Error {
     NotAvailable,
     /// Proxy not found: {proxy_name}
     ProxyNotFound { proxy_name: String },
+    /// Kafka fault proxy was deferred but Toxiproxy did not provision (register Toxiproxy in the same scenario).
+    KafkaFaultProxyIncomplete,
 }
 
 /// Handle for controlling Toxiproxy proxies and toxics for one scenario run.

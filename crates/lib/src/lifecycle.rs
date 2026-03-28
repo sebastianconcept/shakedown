@@ -197,6 +197,15 @@ pub struct Context {
     /// Toxiproxy control handle when the `fault-injection` feature is on and Toxiproxy provisioned.
     #[cfg(feature = "fault-injection")]
     fault_handle: Option<crate::fault_injection::FaultHandle>,
+    /// Toxiproxy HTTP API base URL once seen in provision handles (Kafka fault path; `fault-injection` + `kafka`).
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    toxiproxy_control_api_base_url: Option<String>,
+    /// When Kafka provisioned before Toxiproxy: topic prefix + direct bootstrap until the proxy is created.
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    kafka_fault_proxy_pending: Option<(String, String)>,
+    /// Skip applying Kafka bindings from handles until the proxied bootstrap is known.
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    kafka_bindings_apply_deferred: bool,
     /// Per-container Docker stats rings (diagnostics); set by [`run_scenario`] when monitoring runs.
     #[cfg(all(
         any(
@@ -233,6 +242,12 @@ impl Context {
             scenario_kind: ScenarioKind::Normal,
             #[cfg(feature = "fault-injection")]
             fault_handle: None,
+            #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+            toxiproxy_control_api_base_url: None,
+            #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+            kafka_fault_proxy_pending: None,
+            #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+            kafka_bindings_apply_deferred: false,
             #[cfg(all(
                 any(
                     feature = "kafka",
@@ -268,6 +283,12 @@ impl Context {
             scenario_kind: ScenarioKind::Normal,
             #[cfg(feature = "fault-injection")]
             fault_handle: None,
+            #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+            toxiproxy_control_api_base_url: None,
+            #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+            kafka_fault_proxy_pending: None,
+            #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+            kafka_bindings_apply_deferred: false,
             #[cfg(all(
                 any(
                     feature = "kafka",
@@ -303,6 +324,12 @@ impl Context {
             scenario_kind: ScenarioKind::Normal,
             #[cfg(feature = "fault-injection")]
             fault_handle: None,
+            #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+            toxiproxy_control_api_base_url: None,
+            #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+            kafka_fault_proxy_pending: None,
+            #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+            kafka_bindings_apply_deferred: false,
             #[cfg(all(
                 any(
                     feature = "kafka",
@@ -481,6 +508,48 @@ impl Context {
     #[cfg(feature = "fault-injection")]
     pub(crate) fn clear_fault_handle(&mut self) {
         self.fault_handle = None;
+        #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+        {
+            self.toxiproxy_control_api_base_url = None;
+            self.kafka_fault_proxy_pending = None;
+            self.kafka_bindings_apply_deferred = false;
+        }
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    pub(crate) fn set_toxiproxy_control_api_base_url(&mut self, url: Option<String>) {
+        self.toxiproxy_control_api_base_url = url;
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    pub(crate) fn toxiproxy_control_api_base_url(&self) -> Option<&str> {
+        self.toxiproxy_control_api_base_url.as_deref()
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    pub(crate) fn set_kafka_fault_proxy_pending(&mut self, pending: Option<(String, String)>) {
+        self.kafka_fault_proxy_pending = pending;
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    pub(crate) fn take_kafka_fault_proxy_pending(&mut self) -> Option<(String, String)> {
+        self.kafka_fault_proxy_pending.take()
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    pub(crate) fn set_kafka_bindings_apply_deferred(&mut self, deferred: bool) {
+        self.kafka_bindings_apply_deferred = deferred;
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    pub(crate) fn kafka_bindings_apply_deferred(&self) -> bool {
+        self.kafka_bindings_apply_deferred
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    pub(crate) fn clear_kafka_fault_injection_deferred_state(&mut self) {
+        self.kafka_fault_proxy_pending = None;
+        self.kafka_bindings_apply_deferred = false;
     }
 
     /// Snapshot handle for per-container resource stats rings (diagnostics).
@@ -569,7 +638,166 @@ fn install_fault_handle_if_toxiproxy_provisioned(ctx: &mut Context, handles: &[R
     let Some(api_url) = toxiproxy_api_url_from_handles(handles) else {
         return;
     };
-    ctx.set_fault_handle(Some(crate::fault_injection::FaultHandle::new(api_url)));
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    ctx.set_toxiproxy_control_api_base_url(Some(api_url.clone()));
+    if ctx.fault_handle().is_none() {
+        ctx.set_fault_handle(Some(crate::fault_injection::FaultHandle::new(api_url)));
+    }
+}
+
+/// Stable Toxiproxy proxy name for the suite Kafka broker (SPECS D-MVP-6).
+#[cfg(all(feature = "fault-injection", feature = "kafka"))]
+const KAFKA_FAULT_PROXY_NAME: &str = "shakedown_kafka";
+
+#[cfg(all(feature = "fault-injection", feature = "kafka"))]
+fn is_kafka_provision_metadata(meta: &serde_json::Value) -> bool {
+    meta.get("bootstrap_servers")
+        .and_then(|v| v.as_str())
+        .is_some()
+        && meta.get("topic_prefix").and_then(|v| v.as_str()).is_some()
+}
+
+#[cfg(all(feature = "fault-injection", feature = "kafka"))]
+fn context_registers_kafka_and_toxiproxy(ctx: &Context) -> bool {
+    let mut has_kafka = false;
+    let mut has_toxiproxy = false;
+    for registered in ctx.resources() {
+        match registered {
+            RegisteredResource::Builtin(BuiltinResource::Kafka(_)) => has_kafka = true,
+            RegisteredResource::Builtin(BuiltinResource::Toxiproxy(_)) => has_toxiproxy = true,
+            _ => {}
+        }
+    }
+    has_kafka && has_toxiproxy
+}
+
+#[cfg(all(feature = "fault-injection", feature = "kafka"))]
+fn update_kafka_handle_bootstrap(handle: &mut ResourceHandle, proxied_bootstrap: &str) {
+    handle.connection_string = proxied_bootstrap.to_string();
+    if let Some(meta) = handle.metadata.as_mut() {
+        if let Some(map) = meta.as_object_mut() {
+            map.insert(
+                "bootstrap_servers".to_string(),
+                serde_json::Value::String(proxied_bootstrap.to_string()),
+            );
+        }
+    }
+}
+
+/// When [`ScenarioKind::Faulty`] and both Kafka and Toxiproxy are registered, rewrites Kafka
+/// bootstrap metadata to the Toxiproxy listen address (pass-through proxy) before bindings apply.
+#[cfg(all(feature = "fault-injection", feature = "kafka"))]
+async fn apply_fault_injection_proxy_rewrites(
+    ctx: &mut Context,
+    handles: &mut [ResourceHandle],
+) -> Result<(), InfrastructureError> {
+    if let Some(url) = toxiproxy_api_url_from_handles(handles) {
+        ctx.set_toxiproxy_control_api_base_url(Some(url));
+    }
+
+    let api_url = ctx
+        .toxiproxy_control_api_base_url()
+        .map(std::string::ToString::to_string)
+        .or_else(|| toxiproxy_api_url_from_handles(handles));
+
+    if ctx.scenario_kind() != ScenarioKind::Faulty || !context_registers_kafka_and_toxiproxy(ctx) {
+        ctx.clear_kafka_fault_injection_deferred_state();
+        return Ok(());
+    }
+
+    let Some(api_url) = api_url else {
+        for handle in handles.iter_mut() {
+            let Some(meta) = handle.metadata.as_ref() else {
+                continue;
+            };
+            if !is_kafka_provision_metadata(meta) {
+                continue;
+            }
+            let topic_prefix = meta
+                .get("topic_prefix")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let direct_bootstrap = meta
+                .get("bootstrap_servers")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            if let (Some(tp), Some(bs)) = (topic_prefix, direct_bootstrap) {
+                ctx.set_kafka_fault_proxy_pending(Some((tp, bs)));
+                ctx.set_kafka_bindings_apply_deferred(true);
+            }
+        }
+        return Ok(());
+    };
+
+    if ctx.fault_handle().is_none() {
+        ctx.set_fault_handle(Some(crate::fault_injection::FaultHandle::new(
+            api_url.clone(),
+        )));
+    }
+
+    if let Some((topic_prefix, direct_bootstrap)) = ctx.take_kafka_fault_proxy_pending() {
+        ctx.set_kafka_bindings_apply_deferred(false);
+        let fault_handle = ctx.fault_handle_mut().ok_or_else(|| {
+            InfrastructureError::FaultInjection(crate::fault_injection::Error::NotAvailable)
+        })?;
+        if fault_handle
+            .proxy_listen_address(KAFKA_FAULT_PROXY_NAME)
+            .is_none()
+        {
+            fault_handle
+                .create_proxy(
+                    KAFKA_FAULT_PROXY_NAME,
+                    "127.0.0.1:0",
+                    direct_bootstrap.as_str(),
+                )
+                .await
+                .map_err(InfrastructureError::FaultInjection)?;
+        }
+        let listen = fault_handle
+            .proxy_listen_address(KAFKA_FAULT_PROXY_NAME)
+            .expect("listen after kafka fault proxy create")
+            .to_string();
+        ctx.set_kafka_bindings(KafkaBindings::new(listen.as_str(), topic_prefix.as_str()));
+    }
+
+    for handle in handles.iter_mut() {
+        let Some(meta) = handle.metadata.as_ref() else {
+            continue;
+        };
+        if !is_kafka_provision_metadata(meta) {
+            continue;
+        }
+        let direct_bootstrap = meta
+            .get("bootstrap_servers")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let Some(direct_bootstrap) = direct_bootstrap else {
+            continue;
+        };
+        let fault_handle = ctx.fault_handle_mut().ok_or_else(|| {
+            InfrastructureError::FaultInjection(crate::fault_injection::Error::NotAvailable)
+        })?;
+        if fault_handle
+            .proxy_listen_address(KAFKA_FAULT_PROXY_NAME)
+            .is_none()
+        {
+            fault_handle
+                .create_proxy(
+                    KAFKA_FAULT_PROXY_NAME,
+                    "127.0.0.1:0",
+                    direct_bootstrap.as_str(),
+                )
+                .await
+                .map_err(InfrastructureError::FaultInjection)?;
+        }
+        let listen = fault_handle
+            .proxy_listen_address(KAFKA_FAULT_PROXY_NAME)
+            .expect("listen after kafka fault proxy create")
+            .to_string();
+        update_kafka_handle_bootstrap(handle, listen.as_str());
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "postgres")]
@@ -716,6 +944,10 @@ fn apply_resource_handles_to_mysql_bindings(ctx: &mut Context, handles: &[Resour
 
 /// If any handle metadata carries `bootstrap_servers` and `topic_prefix`, set [`Context::set_kafka_bindings`].
 fn apply_resource_handles_to_kafka_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    if ctx.kafka_bindings_apply_deferred() {
+        return;
+    }
     for h in handles {
         let Some(meta) = &h.metadata else {
             continue;
@@ -994,7 +1226,39 @@ where
             resource.provision(&scenario_id).await
         };
         match result {
-            Ok(handles) => {
+            // `mut` only needed when `apply_fault_injection_proxy_rewrites` is compiled.
+            #[cfg_attr(
+                not(all(feature = "fault-injection", feature = "kafka")),
+                allow(unused_mut)
+            )]
+            Ok(mut handles) => {
+                #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+                if let Err(e) = apply_fault_injection_proxy_rewrites(ctx, &mut handles).await {
+                    event_log.append_raw(
+                        EventLevel::Error,
+                        "lifecycle",
+                        format!("Provision failed (fault injection rewrite): {e}"),
+                    );
+                    teardown_all_resources(ctx).await;
+                    #[cfg(all(
+                        any(
+                            feature = "kafka",
+                            feature = "rabbitmq",
+                            feature = "postgres",
+                            feature = "mariadb",
+                            feature = "mysql",
+                        ),
+                        not(feature = "no-diagnostics"),
+                    ))]
+                    shakedown_merge_diagnostics!(
+                        docker_events_monitor,
+                        resource_stats_monitor,
+                        container_logs_monitor,
+                        event_log
+                    );
+                    emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
+                    return Err(e.into());
+                }
                 apply_resource_handles_to_kafka_bindings(ctx, &handles);
                 #[cfg(feature = "rabbitmq")]
                 apply_resource_handles_to_rabbit_bindings(ctx, &handles);
@@ -1037,6 +1301,37 @@ where
                 return Err(e.into());
             }
         }
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "kafka"))]
+    if ctx.kafka_bindings_apply_deferred() {
+        let error = InfrastructureError::FaultInjection(
+            crate::fault_injection::Error::KafkaFaultProxyIncomplete,
+        );
+        event_log.append_raw(
+            EventLevel::Error,
+            "lifecycle",
+            format!("Provision incomplete: {error}"),
+        );
+        teardown_all_resources(ctx).await;
+        #[cfg(all(
+            any(
+                feature = "kafka",
+                feature = "rabbitmq",
+                feature = "postgres",
+                feature = "mariadb",
+                feature = "mysql",
+            ),
+            not(feature = "no-diagnostics"),
+        ))]
+        shakedown_merge_diagnostics!(
+            docker_events_monitor,
+            resource_stats_monitor,
+            container_logs_monitor,
+            event_log
+        );
+        emit_failure_timeline_on_infra_err(event_log, &scenario_id, &error);
+        return Err(error.into());
     }
 
     // Readiness phase (async)
