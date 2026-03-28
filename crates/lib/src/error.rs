@@ -53,8 +53,20 @@ pub enum ShakedownError {
         attempts: i32,
         min_attempts: i32,
     },
-    /// Outbox Kafka assertion did not find a matching record before timeout
-    OutboxKafkaRecordNotFound { topic: String, aggregate_id: String },
+    /// Publication proof did not observe a matching message on the bus (distinct from row assertions)
+    OutboxPublicationNotFound {
+        /// Transport label for timelines (`"kafka"`, `"rabbitmq"`, custom).
+        transport: &'static str,
+        /// Logical channel (topic, queue, exchange, …).
+        channel: String,
+        aggregate_id: String,
+    },
+    /// Publication proof exceeded the observation window without a match
+    OutboxPublicationTimeout {
+        transport: &'static str,
+        channel: String,
+        aggregate_id: String,
+    },
     /// Outbox payload deserialisation failed
     PayloadDeserialisation(String),
     /// Outbox payload assertion predicate returned false
@@ -126,10 +138,23 @@ impl std::fmt::Display for ShakedownError {
                 "Outbox retry below threshold for aggregate_id='{}': attempts={} min_attempts={}",
                 aggregate_id, attempts, min_attempts
             ),
-            ShakedownError::OutboxKafkaRecordNotFound { topic, aggregate_id } => write!(
+            ShakedownError::OutboxPublicationNotFound {
+                transport,
+                channel,
+                aggregate_id,
+            } => write!(
                 f,
-                "Outbox Kafka record not found for aggregate_id='{}' in topic='{}' before timeout",
-                aggregate_id, topic
+                "[{}] Outbox publication not found for aggregate_id='{}' (channel='{}')",
+                transport, aggregate_id, channel
+            ),
+            ShakedownError::OutboxPublicationTimeout {
+                transport,
+                channel,
+                aggregate_id,
+            } => write!(
+                f,
+                "[{}] Outbox publication observation timed out for aggregate_id='{}' (channel='{}')",
+                transport, aggregate_id, channel
             ),
             ShakedownError::PayloadDeserialisation(error_message) => write!(
                 f,
@@ -170,7 +195,8 @@ impl Error for ShakedownError {
             ShakedownError::OutboxWrongState { .. } => None,
             ShakedownError::OutboxUnknownState { .. } => None,
             ShakedownError::OutboxRetryBelowThreshold { .. } => None,
-            ShakedownError::OutboxKafkaRecordNotFound { .. } => None,
+            ShakedownError::OutboxPublicationNotFound { .. } => None,
+            ShakedownError::OutboxPublicationTimeout { .. } => None,
             ShakedownError::PayloadDeserialisation(_) => None,
             ShakedownError::PayloadAssertionFailed { .. } => None,
             ShakedownError::ResourceAssertionFailed { .. } => None,
@@ -590,6 +616,32 @@ mod tests {
         // Then the non-empty id round-trips and the empty id prints as nothing
         assert_eq!(id.to_string(), "sc_001");
         assert_eq!(empty_id.to_string(), "");
+    }
+
+    #[test]
+    fn outbox_publication_not_found_display_includes_transport() {
+        let err = ShakedownError::OutboxPublicationNotFound {
+            transport: "kafka",
+            channel: "orders.events".to_string(),
+            aggregate_id: "a-1".to_string(),
+        };
+        let displayed = format!("{}", err);
+        assert!(displayed.contains("[kafka]"));
+        assert!(displayed.contains("aggregate_id='a-1'"));
+        assert!(displayed.contains("channel='orders.events'"));
+    }
+
+    #[test]
+    fn outbox_publication_timeout_display_includes_transport() {
+        let err = ShakedownError::OutboxPublicationTimeout {
+            transport: "rabbitmq",
+            channel: "orders.q".to_string(),
+            aggregate_id: "a-2".to_string(),
+        };
+        let displayed = format!("{}", err);
+        assert!(displayed.contains("[rabbitmq]"));
+        assert!(displayed.contains("timed out"));
+        assert!(displayed.contains("aggregate_id='a-2'"));
     }
 
     #[test]
