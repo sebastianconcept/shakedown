@@ -36,30 +36,104 @@ shakedown/
 
 Default `cargo test -p shakedown` does not require Docker.
 
+## Running tests
+
+Use [`just help`](../../justfile) to list recipes from the repo root [`justfile`](../../justfile). Below, **cargo** commands are shown explicitly so CI and copy-paste work without `just`.
+
+### Workspace (all crates)
+
+| Command | What it runs | Docker |
+|---------|----------------|--------|
+| `cargo test --workspace` | `shakedown`, `shakedown-macros` (incl. trybuild), CLI; **default features** per crate | Only where tests are not `#[ignore]` |
+| `just test` | Same targets as `cargo test --workspace`, but uses **`cargo nextest run`** when `cargo-nextest` is installed (faster); falls back to plain Cargo otherwise | Same |
+| `just test-workspace` | Same as `cargo test --workspace` (always plain Cargo; use when you want parity with CI that does not use nextest) | Same |
+| `cargo test --workspace --all-features` | Same targets with **every** optional feature enabled | Ignored Docker tests are still **skipped** unless you pass `-- --include-ignored` |
+| `just test-workspace-all-features` | Same as `cargo test --workspace --all-features` | Same |
+
+`cargo test --workspace --all-features` enables `shakedown`’s `no-diagnostics` feature, which **excludes** the **bollard** diagnostics integration tests from compilation. To exercise those, use a Docker-backed feature set **without** `no-diagnostics` (see below).
+
+### CI recommendations
+
+Align automation with the same commands as in this section:
+
+1. **Fast gate (no Docker):** `cargo test --workspace` (or `just test-workspace` / `just qa-full` for Cargo-only parity).
+2. **Optional compile-all:** `cargo test --workspace --all-features` — remember this enables `no-diagnostics`, so it does **not** compile bollard diagnostics tests.
+3. **Docker runner:** `just test-shakedown-all-include-ignored` (or the equivalent `cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored`) with a working Docker socket — covers ignored integration tests and diagnostics. Uses **nextest** when installed, same as `just test`.
+4. **Macros only:** `cargo test -p shakedown-macros` when you need trybuild without rebuilding the full workspace.
+5. **CLI:** `cargo test -p shakedown-cli` (or `just test-cli`) — currently the binary crate has no test targets; the recipe is reserved for future tests.
+
+### `shakedown` library crate
+
+| Command | What it runs | Docker |
+|---------|----------------|--------|
+| `cargo test -p shakedown` | Unit + integration tests for default (minimal) features | Not required for the default set |
+| `cargo test -p shakedown --features outbox,sqlite` | Outbox helpers + SQLite vertical tests | Not required |
+| `cargo test -p shakedown --features outbox,rabbitmq,sqlite` | Adds Rabbit publication helpers’ unit coverage | Not required for SQLite-only tests |
+| `cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored` | **All** tests: normal + **`#[ignore]`** + doc tests; compiles diagnostics (bollard) | **Required** for ignored integration tests |
+| `just test-lib` | `cargo test -p shakedown` | Same as column above |
+| `just test-shakedown-all-include-ignored` | Same as the long `--include-ignored` row; uses **nextest** when installed, else `cargo test` | **Required** for ignored tests |
+
+`--include-ignored` runs both non-ignored and ignored tests in one pass. To run **only** ignored tests, use `-- --ignored` on a matching feature set (see per-target recipes below).
+
+### `shakedown-macros` (incl. trybuild)
+
+| Command | What it runs | Docker |
+|---------|----------------|--------|
+| `cargo test -p shakedown-macros` | Macro unit tests + **trybuild** compile-pass / compile-fail UI tests | No |
+| `just test-macros` | Same | No |
+
+### `shakedown-cli` binary crate
+
+| Command | What it runs | Docker |
+|---------|----------------|--------|
+| `cargo test -p shakedown-cli` | Tests for the CLI package (none yet; target exists for future `[[test]]` binaries) | No |
+| `just test-cli` | Same | No |
+
+### Docker-backed `#[ignore]` tests (one binary each)
+
+These need a running Docker engine. They are **skipped** in a normal `cargo test` unless you pass `-- --ignored` or use `--include-ignored` with a feature set that builds the test binary.
+
+| Integration test | Cargo command | `just` recipe |
+|------------------|---------------|----------------|
+| Kafka macro provisioning | `cargo test -p shakedown --features kafka --test macro_kafka -- --ignored` | `just test-kafka-ignored` |
+| Postgres vertical | `cargo test -p shakedown --features postgres --test postgres_vertical -- --ignored` | `just test-postgres-ignored` |
+| MariaDB vertical | `cargo test -p shakedown --features mariadb --test mariadb_vertical -- --ignored` | `just test-mariadb-ignored` |
+| MySQL vertical | `cargo test -p shakedown --features mysql --test mysql_vertical -- --ignored` | `just test-mysql-ignored` |
+| Outbox + Postgres + Kafka | `cargo test -p shakedown --features outbox,postgres,kafka --test outbox_postgres -- --ignored` | `just test-outbox-postgres-ignored` |
+| Outbox + Postgres + RabbitMQ | `cargo test -p shakedown --features outbox,postgres,rabbitmq --test outbox_rabbit -- --ignored` | `just test-outbox-rabbit-ignored` |
+| Diagnostics (bollard: logs, events, stats) | `cargo test -p shakedown --features kafka --test diagnostics_integration -- --ignored` | `just test-diagnostics-integration-ignored` |
+
+**Note:** `tests/diagnostics_integration.rs` also has a **non-ignored** test (`try_connect_graceful_when_docker_unreachable`); it runs with `cargo test -p shakedown --features kafka` without `--ignored`.
+
+### Quality / formatting (not tests, but common before merge)
+
+| Command | Purpose |
+|---------|---------|
+| `just qa` | `fmt-check`, `check`, `clippy`, then workspace tests (uses **nextest** if installed) |
+| `just qa-full` | Same checks, then `cargo test --workspace` (no nextest) |
+| `just fmt` / `just fmt-check` / `just check` / `just clippy` | See [`justfile`](../../justfile) |
+
 ## Common workflows with `just`
 
-This repository includes a root [`justfile`](../../justfile) with common commands:
+This repository includes a root [`justfile`](../../justfile). Quick entry points:
 
 ```text
 just help
 just qa
 just qa-full
+just test
+just test-workspace
+just test-workspace-all-features
 just test-lib
 just test-macros
+just test-cli
+just test-shakedown-all-include-ignored
 just test-outbox-sqlite
 ```
 
-`just qa` uses `cargo nextest run --workspace` for faster feedback loops when
-`cargo-nextest` is installed, and falls back to `cargo test --workspace` otherwise.
-`just qa-full` always runs `cargo test --workspace` for full parity checks.
+`just test` and `just qa` use `cargo nextest run` when `cargo-nextest` is installed, and fall back to `cargo test` otherwise. `just test-workspace` and `just qa-full` always use plain `cargo test --workspace` for parity with Cargo-only CI. `just test-shakedown-all-include-ignored` uses nextest the same way when available.
 
-Docker-backed ignored tests are opt-in:
-
-```text
-just test-kafka-ignored
-just test-postgres-ignored
-just test-outbox-postgres-ignored
-```
+Docker-backed tests are opt-in; see [Running tests](#running-tests) for the full matrix and individual `just test-*-ignored` recipes.
 
 **Kafka (KRaft, `testcontainers-modules::kafka::apache`):**
 
@@ -113,13 +187,7 @@ See [`KafkaResource::apply_default_seed`](src/resources.rs) and [DECISIONS.md D-
 - **Image tag:** [`MysqlResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_MYSQL_IMAGE_TAG` via [`MysqlResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`8.4`** (adopted SPECS).
 - [`MysqlBindings`](src/resources.rs) is applied after provision (`engine: mysql` in handle metadata).
 
-Integration tests that start Kafka or Postgres are `#[ignore]` unless Docker is available:
-
-```text
-cargo test -p shakedown --features kafka --test macro_kafka -- --ignored
-cargo test -p shakedown --features postgres --test postgres_vertical -- --ignored
-cargo test -p shakedown --features kafka --test diagnostics_integration -- --ignored
-```
+Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
 
 Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
 
@@ -156,10 +224,10 @@ If the Docker socket is missing or unusable, [`try_connect`](src/diagnostics/con
 
 **Stats tuning** (optional): `SHAKEDOWN_STATS_INTERVAL_MS` (default `1000`) and `SHAKEDOWN_STATS_BUFFER_DEPTH` (default `60`, capped) control how often samples are taken and how many per container are retained for timelines and [`Context::assert_resource`](src/lifecycle.rs).
 
-**Integration tests** (`cargo test -p shakedown --features kafka`):
+**Integration tests** (`cargo test -p shakedown --features kafka`; see [Running tests](#running-tests) for `just` recipes):
 
 - [`tests/diagnostics_graceful.rs`](tests/diagnostics_graceful.rs) — `FakeResource` only, invalid `DOCKER_HOST` pointing at a non-existent Unix socket; asserts the scenario succeeds and no infrastructure rows are recorded (no Docker daemon required).
-- [`tests/diagnostics_integration.rs`](tests/diagnostics_integration.rs) — log streaming, Docker `stop` events, and stats rings against a labeled Alpine container; run ignored tests with `--ignored` when Docker is available (see commands above).
+- [`tests/diagnostics_integration.rs`](tests/diagnostics_integration.rs) — log streaming, Docker `stop` events, and stats rings against a labeled Alpine container; Docker-backed cases use `just test-diagnostics-integration-ignored` or the matching `cargo` line in [Running tests](#running-tests).
 
 ## Outbox helpers
 
@@ -168,7 +236,7 @@ The outbox API has **two layers**. You can use row assertions **without** any me
 1. **Row assertions** — SQL against the canonical `outbox_event` table (`assert_pending`, `assert_sent`, `assert_failed`, `assert_retry`, payload checks). These require `outbox` plus a **relational** feature (`postgres`, `mariadb`, `mysql`, or `sqlite`). They do **not** require Kafka or RabbitMQ.
 2. **Publication proof** — observe a message for your aggregate on a bus via [`PublicationVerifier`](src/publication/verifier.rs). First-party implementations: **Kafka** ([`KafkaPublicationVerifier`](src/publication/kafka_verifier.rs)) and **RabbitMQ** ([`RabbitMqPublicationVerifier`](src/publication/rabbit_verifier.rs)), exposed as [`Outbox::assert_kafka_published`](src/outbox.rs) and [`Outbox::assert_rabbit_published`](src/outbox.rs). Enable the matching Cargo feature; `outbox` alone does **not** pull in either transport.
 
-**Publication errors** are transport-neutral: [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) and [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) carry a `transport` field (`"kafka"`, `"rabbitmq"`, …) and are distinct from row errors such as `OutboxRowNotFound`. Prefer matching on these variants (or [`ShakedownError`](crate::error::ShakedownError) generally) for publication failures.
+**Publication errors** are transport-neutral and distinct from row errors such as `OutboxRowNotFound`. **First-party Kafka and Rabbit** verifiers return [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) when the observation window expires without a matching message (`transport`: `"kafka"` or `"rabbitmq"`). [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) is available for **custom** [`PublicationVerifier`](#implementing-publicationverifier) implementations that need a separate “time-bounded infrastructure failure” classification (first-party code does not emit it today). Both variants carry `transport`, `channel`, and `aggregate_id`; prefer matching on these variants (or [`ShakedownError`](crate::error::ShakedownError) generally) for publication failures.
 
 ### Supported combinations (matrix)
 
@@ -255,7 +323,7 @@ Use this when your team’s bus is not Kafka or RabbitMQ (e.g. **AWS SQS** is no
 1. **Trait** — Implement [`PublicationVerifier`](src/publication/verifier.rs) for your type with an associated `Options` struct (exchange, queue URL, region, etc.).
 2. **`assert_observed`** — Take [`Context`](src/lifecycle.rs), a [`PublicationObserveSpec`](src/publication/spec.rs) (`aggregate_id`, `logical_channel`, optional `timeout`), and `&Self::Options`. Poll or consume until [`message_matches_aggregate_id`](src/publication/matching.rs) succeeds or the resolved deadline is exceeded ([`DEFAULT_PUBLICATION_OBSERVE_TIMEOUT`](src/publication/spec.rs): 20s when `timeout` is `None`).
 3. **Bindings** — Read connection details from [`Context::kafka_bindings()`](src/resources.rs), [`Context::rabbit_bindings()`](src/resources.rs), or fields you attach via your own resources; keep scenario isolation consistent with how your publisher names topics/queues.
-4. **Errors** — Return [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) or [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) with `transport` set to a stable label (e.g. `"sqs"`) so failure timelines classify publication failures correctly.
+4. **Errors** — When the resolved deadline passes without a matching message, return [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) with `transport` set to a stable label (e.g. `"sqs"`), matching first-party Kafka/Rabbit. Optionally return [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) if your verifier distinguishes an infrastructure/connectivity time limit from “no matching publication observed.”
 
 To use your verifier from tests, call `PublicationVerifier::assert_observed(&your_verifier, &ctx, &spec, &options)` (or wrap it in a small helper on `Outbox` in your codebase).
 

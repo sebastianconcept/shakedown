@@ -38,6 +38,9 @@ mod tests {
 
     #[test]
     fn matches_utf8_key_equal_to_aggregate_id() {
+        // Given a UTF-8 message key equal to the aggregate id
+        // When we match against that aggregate id
+        // Then the helper returns true, and a different key returns false
         assert!(message_matches_aggregate_id(
             Some(b"order-1".as_ref()),
             None,
@@ -52,7 +55,10 @@ mod tests {
 
     #[test]
     fn matches_json_payload_aggregate_id_field() {
+        // Given a JSON payload whose aggregate_id field matches the target aggregate
         let payload = br#"{"aggregate_id":"order-1","total":1}"#;
+        // When we match with no message key
+        // Then the helper returns true for the same aggregate and false for a different one
         assert!(message_matches_aggregate_id(None, Some(payload), "order-1"));
         assert!(!message_matches_aggregate_id(
             None,
@@ -63,6 +69,9 @@ mod tests {
 
     #[test]
     fn key_takes_precedence_over_payload() {
+        // Given a key that matches the aggregate and a JSON payload whose aggregate_id differs
+        // When we match on that aggregate id
+        // Then the key wins and the helper returns true
         assert!(message_matches_aggregate_id(
             Some(b"order-1".as_ref()),
             Some(br#"{"aggregate_id":"other"}"#),
@@ -72,6 +81,9 @@ mod tests {
 
     #[test]
     fn invalid_utf8_key_skipped_json_payload_still_matches() {
+        // Given a non-UTF-8 key and a JSON payload whose aggregate_id matches
+        // When we match on that aggregate id
+        // Then the key is ignored and the payload still satisfies the match
         assert!(message_matches_aggregate_id(
             Some(&[0xff, 0xfe]),
             Some(br#"{"aggregate_id":"x"}"#),

@@ -119,6 +119,10 @@ async fn faulty_scenario(ctx: &mut Context) {
 }
 ```
 
+## Testing
+
+From the repo root: `cargo test -p shakedown-macros` (unit tests + trybuild UI tests), or `just test-macros`. Full workspace and Docker-backed `shakedown` integration tests are documented in [`crates/lib/README.md` § Running tests](../lib/README.md#running-tests).
+
 ## Implementation Notes
 
 - Macros are defined in `crates/macros/src/lib.rs` and re-exported by `shakedown` lib crate.

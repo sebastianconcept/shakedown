@@ -26,6 +26,8 @@ check:
 clippy:
   cargo clippy --workspace --all-targets -- -D warnings
 
+# Workspace tests: uses **nextest** when `cargo-nextest` is on PATH; otherwise plain `cargo test`.
+# For Cargo parity without nextest, use `just test-workspace`.
 test:
   if command -v cargo-nextest >/dev/null 2>&1; then \
     cargo nextest run --workspace; \
@@ -40,7 +42,19 @@ qa-full: fmt-check check clippy
   cargo test --workspace
 
 # ----------------------------
-# Fast local loop
+# Workspace test runs (all crates: lib, macros, CLI)
+# ----------------------------
+
+# Same as `cargo test --workspace` (always plain Cargo). Use `just test` if you want nextest when installed.
+test-workspace:
+  cargo test --workspace
+
+# Every optional `shakedown` module at once. Enables `no-diagnostics`, so bollard diagnostics tests are not compiled.
+test-workspace-all-features:
+  cargo test --workspace --all-features
+
+# ----------------------------
+# `shakedown` library — fast local loop
 # ----------------------------
 
 test-lib:
@@ -49,11 +63,24 @@ test-lib:
 test-macros:
   cargo test -p shakedown-macros
 
+# Thin CLI crate; add `[[test]]` targets here as the binary grows.
+test-cli:
+  cargo test -p shakedown-cli
+
 test-outbox-sqlite:
   cargo test -p shakedown --features outbox,sqlite --test outbox_sqlite
 
+# Every integration feature, every test target, including `#[ignore]` (needs Docker for ignored tests). Does not enable `no-diagnostics`, so bollard diagnostics tests run. Uses nextest when installed (same idea as `just test`).
+test-shakedown-all-include-ignored:
+  if command -v cargo-nextest >/dev/null 2>&1; then \
+    cargo nextest run -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored; \
+  else \
+    echo "cargo-nextest not installed; falling back to cargo test." >&2; \
+    cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored; \
+  fi
+
 # ----------------------------
-# Docker-backed ignored tests
+# Docker-backed `#[ignore]` tests (one recipe per integration binary)
 # ----------------------------
 
 test-kafka-ignored:
@@ -62,5 +89,18 @@ test-kafka-ignored:
 test-postgres-ignored:
   cargo test -p shakedown --features postgres --test postgres_vertical -- --ignored
 
+test-mariadb-ignored:
+  cargo test -p shakedown --features mariadb --test mariadb_vertical -- --ignored
+
+test-mysql-ignored:
+  cargo test -p shakedown --features mysql --test mysql_vertical -- --ignored
+
 test-outbox-postgres-ignored:
   cargo test -p shakedown --features outbox,postgres,kafka --test outbox_postgres -- --ignored
+
+test-outbox-rabbit-ignored:
+  cargo test -p shakedown --features outbox,postgres,rabbitmq --test outbox_rabbit -- --ignored
+
+# Bollard log stream / Docker events / stats rings (requires Docker; do not combine with `--all-features` on `shakedown`, which sets `no-diagnostics`).
+test-diagnostics-integration-ignored:
+  cargo test -p shakedown --features kafka --test diagnostics_integration -- --ignored
