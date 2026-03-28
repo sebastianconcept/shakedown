@@ -125,6 +125,12 @@ pub enum DockerEventKind {
 }
 
 /// Infrastructure diagnostic record (container logs, Docker events, resource samples).
+///
+/// Exists so the harness stores Docker-side observations in the same [`EventLog`] as scenario
+/// messages without conflating them with [`Event`] (application-level) entries.
+///
+/// Emitted by [`crate::diagnostics`] (stats, logs, engine events) and merged via [`LogEntry::Infrastructure`];
+/// serde-stable for failure timeline JSON and snapshots.
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum InfraEvent {

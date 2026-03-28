@@ -1,13 +1,19 @@
 //! Procedural macros for the `shakedown` test harness.
 //!
-//! What: attributes that wrap async tests with `shakedown::Context::new`, optional builtin
-//! registration, and `shakedown::run_scenario`.
+//! **What:** attributes and helpers that expand into `#[tokio::test]` async tests wired to
+//! [`shakedown::run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html),
+//! plus optional compile-time resource registration.
 //!
-//! Why: callers should not hand-roll lifecycle wiring in every test module.
+//! **Why:** tests should not duplicate `Context::new`, `EventLog::new`, and scenario wiring in every
+//! function.
 //!
-//! How: depend on `shakedown`; use `#[shakedown::test]` or `#[shakedown::faulty_test]` on
-//! `async fn name(ctx: &mut shakedown::Context)`; enable crate features (e.g. `kafka`) on
-//! `shakedown` to unlock matching builtins in `resources = [...]`.
+//! **Macros (public API):**
+//! - [`test`] — standard scenario tests; optional `resources = [...]` registers builtins when the
+//!   matching `shakedown` crate features are enabled.
+//! - [`faulty_test`] — same as [`test`], but sets [`shakedown::ScenarioKind::Faulty`](https://docs.rs/shakedown/latest/shakedown/enum.ScenarioKind.html)
+//!   for fault-injection / degraded-mode scenarios.
+//! - [`register_resource`] — reserved pass-through (no expansion yet); future: resource self-registration.
+//! - [`default_greeting`] — tiny proc-macro demo for crate smoke tests.
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -132,7 +138,25 @@ fn first_parameter_is_ctx_mut_context(func: &ItemFn) -> bool {
     is_ctx_mut_context_type(pat_type.ty.as_ref())
 }
 
-/// Wrap an async test in the full shakedown lifecycle (provision → teardown).
+/// Declarative entry point for a **normal** Shakedown scenario test.
+///
+/// **What:** An attribute you place on an `async fn` so the macro expands it into a `#[tokio::test]`
+/// that constructs [`shakedown::Context`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html),
+/// an [`shakedown::EventLog`](https://docs.rs/shakedown/latest/shakedown/event/struct.EventLog.html),
+/// optionally pre-registers builtin resources, then runs your body inside
+/// [`shakedown::run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
+/// (full lifecycle: provision → readiness → seed → run → assert → teardown).
+///
+/// **Unlocks when used:**
+/// - **No wiring boilerplate** — you write only the scenario body; the harness supplies `ctx` and
+///   drives the lifecycle.
+/// - **Scenario identity** — the Rust function name becomes the scenario id string passed to
+///   `run_scenario` (for logs, isolation keys, diagnostics).
+/// - **`resources = [ ... ]`** — compile-time registration of builtins (`Fake`, `Kafka`, `Postgres`,
+///   …) on `ctx` before your code runs; each name requires the matching feature on the `shakedown`
+///   dependency (e.g. `kafka` for `Kafka`).
+/// - **Integration with the rest of the harness** — same path as manual `run_scenario` callers:
+///   outbox assertions, Kafka/DB bindings, Docker diagnostics when features are on, etc.
 ///
 /// The attributed function must be `async` and take `ctx: &mut shakedown::Context` as the first parameter.
 ///
@@ -242,10 +266,23 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
     expanded
 }
 
-/// Like [`test`], but sets `shakedown::ScenarioKind::Faulty` before running.
+/// Declarative entry point for a **fault-oriented** Shakedown scenario test.
 ///
-/// Use for scenarios that opt into fault injection or degraded-mode behaviour. Resource attributes
-/// match [`test`].
+/// **What:** Same expansion as [`test`] — `#[tokio::test]`, fresh `Context` and `EventLog`, optional
+/// `resources = [ ... ]`, then `run_scenario` — except the harness sets
+/// [`shakedown::ScenarioKind::Faulty`](https://docs.rs/shakedown/latest/shakedown/enum.ScenarioKind.html)
+/// on the context **before** the scenario runs.
+///
+/// **Unlocks when used:**
+/// - **Everything [`test`] unlocks** (lifecycle, builtins, scenario id, integrations).
+/// - **Fault-injection signalling** — code under `ScenarioKind::Faulty` can branch (now or in future
+///   milestones) to simulate failures, chaos, or degraded infrastructure without changing the macro
+///   shape.
+/// - **Forward-compatible attributes** — `faulty_test` parses extra `name = <expr>` pairs and
+///   ignores them until fault-injection wiring lands; [`test`] does not accept those yet.
+///
+/// Use for scenarios that explicitly opt into fault injection or degraded-mode behaviour. Resource
+/// lists match [`test`].
 ///
 /// # Panics
 ///
@@ -434,10 +471,16 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
     }
 }
 
-/// Placeholder attribute: currently passes the item through unchanged.
+/// Placeholder attribute for **resource self-registration** (not implemented yet).
 ///
-/// Reserved for a future milestone where resources declare themselves to the harness; safe to ignore
-/// for now.
+/// **What:** A no-op attribute that expands to its input item unchanged. It exists so API shape can be
+/// reserved early.
+///
+/// **Unlocks when used (today):** nothing — the item is emitted as-is. Use only if you want to
+/// annotate types or modules in preparation for future harness integration.
+///
+/// **Will unlock (planned):** attaching metadata to `Resource` implementations so the harness can
+/// discover and register them without listing every type in `resources = [...]` at the test site.
 #[proc_macro_attribute]
 pub fn register_resource(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let _input = match syn::parse2::<syn::Item>(item.clone().into()) {
@@ -448,7 +491,12 @@ pub fn register_resource(_attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! { #_input }.into()
 }
 
-/// Expands to a fixed demo string (`"Hello, shakedown!"`) for crate smoke tests.
+/// Minimal **function-like** proc-macro used for crate smoke tests and examples.
+///
+/// **What:** Expands to the string literal `"Hello, shakedown!"` (no configurable input).
+///
+/// **Unlocks when used:** a quick compile-time check that the `shakedown-macros` crate is linked
+/// and procedural macros resolve correctly; not intended for production scenario code.
 #[proc_macro]
 pub fn default_greeting(_input: TokenStream) -> TokenStream {
     use syn::LitStr;

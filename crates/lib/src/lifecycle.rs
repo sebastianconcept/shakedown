@@ -716,13 +716,13 @@ async fn teardown_all_resources(ctx: &mut Context) {
 macro_rules! shakedown_merge_diagnostics {
     ($docker:ident, $stats:ident, $logs:ident, $log:expr) => {
         if let Some(monitor) = $stats.take() {
-            monitor.shutdown_and_drain($log).await;
+            monitor.shutdown_and_drain($log).await?;
         }
         if let Some(monitor) = $logs.take() {
-            monitor.shutdown_and_drain($log).await;
+            monitor.shutdown_and_drain($log).await?;
         }
         if let Some(monitor) = $docker.take() {
-            monitor.shutdown_and_drain($log).await;
+            monitor.shutdown_and_drain($log).await?;
         }
     };
 }

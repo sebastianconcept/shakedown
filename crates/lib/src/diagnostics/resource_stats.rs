@@ -1,4 +1,14 @@
-//! Poll `/containers/{id}/stats` via bollard and store bounded [`InfraEvent::ResourceSample`] rings.
+//! Periodic container stats polling into bounded [`crate::event::InfraEvent::ResourceSample`] rings.
+//!
+//! **What:** lists Shakedown-labeled running containers, calls `/containers/{id}/stats`, and stores
+//! recent CPU, memory, and network samples per container id in a [`super::ring_buffer::RingBuffer`].
+//!
+//! **Why:** fixed memory while still supporting resource assertions and failure snapshots (see
+//! [`super::assertions::ResourceAssertBuilder`]).
+//!
+//! **How:** [`ResourceStatsMonitor::spawn`] runs for the scenario; [`SharedResourceStatsRings`] is
+//! installed on [`crate::lifecycle::Context`] for assertions; [`ResourceStatsMonitor::shutdown_and_drain`]
+//! flushes rings into [`crate::event::EventLog`]. Tune interval and depth via [`StatsConfig::from_env`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,19 +21,30 @@ use futures_util::StreamExt;
 use std::sync::Mutex;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::time::{interval, sleep, MissedTickBehavior};
 
+use crate::error::{InternalError, ShakedownError};
 use crate::event::InfraEvent;
 use crate::phase::Phase;
 
 use super::labels::shakedown_docker_label_filter;
 use super::ring_buffer::RingBuffer;
 
-/// Shared per-container rings keyed by Docker container id (see [`ResourceStatsMonitor`]).
+/// Shared map from Docker container id → bounded sample ring, shared by the stats task and [`crate::lifecycle::Context`].
+///
+/// Exists so [`ResourceStatsMonitor`] and [`super::assertions::ResourceAssertBuilder`] observe the same
+/// samples without copying full history.
+///
+/// Installed when diagnostics start; cleared when the scenario completes.
 pub(crate) type SharedResourceStatsRings =
     std::sync::Arc<Mutex<HashMap<String, RingBuffer<InfraEvent>>>>;
 
-/// Polling interval and per-container ring depth (defaults: 1s, 60 samples).
+/// Tunables for the resource stats polling loop (interval and per-container ring depth).
+///
+/// Exists so CI and local runs can trade off timeliness vs overhead without recompiling.
+///
+/// Loaded via [`StatsConfig::from_env`] (`SHAKEDOWN_STATS_INTERVAL_MS`, `SHAKEDOWN_STATS_BUFFER_DEPTH`);
+/// passed into [`ResourceStatsMonitor::spawn`].
 #[derive(Debug, Clone)]
 pub(crate) struct StatsConfig {
     pub poll_interval: Duration,
@@ -52,6 +73,13 @@ impl StatsConfig {
     }
 }
 
+/// Background task polling container stats into [`SharedResourceStatsRings`].
+///
+/// Exists to isolate periodic stats work from the main lifecycle while exposing the same ring map for
+/// assertions and shutdown draining.
+///
+/// Start with [`ResourceStatsMonitor::spawn`]; the harness holds the handle and calls
+/// [`ResourceStatsMonitor::shutdown_and_drain`] when merging diagnostics.
 pub(crate) struct ResourceStatsMonitor {
     join: JoinHandle<()>,
     rings: SharedResourceStatsRings,
@@ -78,13 +106,18 @@ impl ResourceStatsMonitor {
         (monitor, rings)
     }
 
-    pub(crate) async fn shutdown_and_drain(self, event_log: &mut crate::event::EventLog) {
+    pub(crate) async fn shutdown_and_drain(
+        self,
+        event_log: &mut crate::event::EventLog,
+    ) -> Result<(), ShakedownError> {
         let ResourceStatsMonitor { join, rings } = self;
         join.abort();
         let _ = join.await;
-        let mut guard = rings
-            .lock()
-            .expect("shakedown diagnostics: resource stats mutex poisoned");
+        let mut guard = rings.lock().map_err(|_| {
+            ShakedownError::Internal(InternalError::PoisonedMutex(
+                "resource stats rings (shutdown drain)".to_string(),
+            ))
+        })?;
         let mut collected: Vec<InfraEvent> = Vec::new();
         for ring in guard.values_mut() {
             collected.extend(ring.drain_ordered());
@@ -93,6 +126,7 @@ impl ResourceStatsMonitor {
         for event in collected {
             event_log.append_infra(event);
         }
+        Ok(())
     }
 }
 
@@ -127,9 +161,16 @@ async fn run_resource_stats_loop(
                 .await
             {
                 Ok(Some(infra_event)) => {
-                    let mut guard = rings
-                        .lock()
-                        .expect("shakedown diagnostics: resource stats mutex poisoned");
+                    let mut guard = match rings.lock() {
+                        Ok(guard) => guard,
+                        Err(_) => {
+                            tracing::error!(
+                                target: "shakedown::harness",
+                                "shakedown diagnostics: resource stats mutex poisoned; skipping sample"
+                            );
+                            continue;
+                        }
+                    };
                     let ring = guard
                         .entry(container_id)
                         .or_insert_with(|| RingBuffer::new(configuration.buffer_depth));
@@ -173,6 +214,10 @@ async fn list_shakedown_running_containers(
     docker.list_containers(Some(options)).await
 }
 
+/// Docker's one-shot stats stream sometimes yields no chunk on the first read; retry with backoff.
+const STATS_SAMPLE_ATTEMPTS: u32 = 10;
+const STATS_SAMPLE_BACKOFF: Duration = Duration::from_millis(200);
+
 async fn sample_container_stats(
     docker: &Docker,
     container_id: &str,
@@ -180,15 +225,41 @@ async fn sample_container_stats(
     phase: Phase,
     scenario_id: &str,
 ) -> Result<Option<InfraEvent>, bollard::errors::Error> {
-    let options = StatsOptionsBuilder::default().stream(false).build();
-    let mut stream = docker.stats(container_id, Some(options));
-    let Some(result) = stream.next().await else {
-        return Ok(None);
-    };
-    let stats_response = match result {
-        Ok(response) => response,
-        Err(error) => return Err(error),
-    };
+    for attempt in 0..STATS_SAMPLE_ATTEMPTS {
+        let options = StatsOptionsBuilder::default().stream(false).build();
+        let mut stream = docker.stats(container_id, Some(options));
+        match stream.next().await {
+            Some(Ok(stats_response)) => {
+                return Ok(Some(infra_event_from_stats_response(
+                    &stats_response,
+                    display_name,
+                    phase,
+                    scenario_id,
+                )));
+            }
+            Some(Err(error)) => {
+                if attempt + 1 == STATS_SAMPLE_ATTEMPTS {
+                    return Err(error);
+                }
+                sleep(STATS_SAMPLE_BACKOFF).await;
+            }
+            None => {
+                if attempt + 1 == STATS_SAMPLE_ATTEMPTS {
+                    return Ok(None);
+                }
+                sleep(STATS_SAMPLE_BACKOFF).await;
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn infra_event_from_stats_response(
+    stats_response: &ContainerStatsResponse,
+    display_name: &str,
+    phase: Phase,
+    scenario_id: &str,
+) -> InfraEvent {
     let timestamp = unix_timestamp_secs();
     let (net_rx, net_tx) = network_totals(stats_response.networks.as_ref());
     let mem_bytes = stats_response
@@ -201,8 +272,8 @@ async fn sample_container_stats(
         .as_ref()
         .and_then(|memory| memory.limit)
         .unwrap_or(0);
-    let cpu_pct = cpu_usage_percent(&stats_response);
-    Ok(Some(InfraEvent::ResourceSample {
+    let cpu_pct = cpu_usage_percent(stats_response);
+    InfraEvent::ResourceSample {
         container: display_name.to_string(),
         phase,
         timestamp,
@@ -212,7 +283,7 @@ async fn sample_container_stats(
         mem_limit,
         net_rx,
         net_tx,
-    }))
+    }
 }
 
 fn unix_timestamp_secs() -> u64 {

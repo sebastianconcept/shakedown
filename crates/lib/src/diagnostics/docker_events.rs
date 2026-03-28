@@ -1,4 +1,14 @@
-//! Docker Engine `/events` stream → [`crate::event::InfraEvent`] records.
+//! Docker Engine `/events` stream classification into [`crate::event::InfraEvent`] records.
+//!
+//! **What:** a filtered subscription to container-scoped engine events (stop, die, health, OOM,
+//! restart, …) mapped into Shakedown’s [`crate::event::DockerEventKind`] and [`crate::event::InfraSeverity`].
+//!
+//! **Why:** correlates daemon-level signals with scenario phases for timelines and root-cause hints
+//! without polling `docker events` manually.
+//!
+//! **How:** [`DockerEventsMonitor::spawn`] runs alongside stats and logs; [`push_lifecycle_phase`]
+//! updates phase/scenario on the watch channel; [`DockerEventsMonitor::shutdown_and_drain`] appends
+//! buffered records to [`crate::event::EventLog`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,12 +20,19 @@ use futures_util::StreamExt;
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 
+use crate::error::ShakedownError;
 use crate::event::{DockerEventKind, InfraEvent, InfraSeverity};
 use crate::phase::Phase;
 
 use super::labels::shakedown_docker_label_filter;
 
-/// Background task: stream filtered container events into `sink`.
+/// Background task streaming filtered Docker Engine container events into an in-memory sink.
+///
+/// Exists so the `/events` long poll runs independently of the lifecycle while still feeding a single
+/// ordered merge into the [`crate::event::EventLog`].
+///
+/// Constructed via [`DockerEventsMonitor::spawn`]; shutdown aborts the stream task and drains the sink
+/// through [`DockerEventsMonitor::shutdown_and_drain`].
 pub(crate) struct DockerEventsMonitor {
     join: JoinHandle<()>,
     sink: Arc<Mutex<Vec<InfraEvent>>>,
@@ -29,7 +46,10 @@ impl DockerEventsMonitor {
         Self { join, sink }
     }
 
-    pub(crate) async fn shutdown_and_drain(self, event_log: &mut crate::event::EventLog) {
+    pub(crate) async fn shutdown_and_drain(
+        self,
+        event_log: &mut crate::event::EventLog,
+    ) -> Result<(), ShakedownError> {
         let DockerEventsMonitor { join, sink } = self;
         join.abort();
         let _ = join.await;
@@ -37,9 +57,14 @@ impl DockerEventsMonitor {
         for record in guard.drain(..) {
             event_log.append_infra(record);
         }
+        Ok(())
     }
 }
 
+/// Publish the current lifecycle [`Phase`] and scenario id to diagnostics background tasks.
+///
+/// Watch receivers read the latest value when stamping [`crate::event::InfraEvent`] records so logs,
+/// events, and stats correlate with provision, readiness, seed, run, assert, or teardown.
 pub(crate) fn push_lifecycle_phase(
     phase_sender: &watch::Sender<(Phase, String)>,
     phase: Phase,

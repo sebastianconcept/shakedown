@@ -1,4 +1,14 @@
-//! Docker socket connection for infrastructure diagnostics.
+//! Docker socket connection and process-wide handle for infrastructure diagnostics.
+//!
+//! **What:** [`try_connect`] probes the local Engine, [`suite_diagnostics_handle`] caches a
+//! successful [`DiagnosticsHandle`] for the rest of the process, and [`DiagnosticsHandle`] exposes the
+//! underlying [`bollard::Docker`] client for stats, logs, and events.
+//!
+//! **Why:** diagnostics must degrade gracefully when Docker is missing or unreachable (CI without
+//! Docker, wrong `DOCKER_HOST`); a single client avoids connection storms across parallel tests.
+//!
+//! **How:** the lifecycle and integration tests call [`suite_diagnostics_handle`] before spawning
+//! monitors; failures log a warning and yield [`None`] so scenarios still run without infra enrichment.
 
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
 use std::sync::LazyLock;
@@ -9,10 +19,13 @@ use tokio::sync::Mutex;
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
 use bollard::Docker;
 
-/// Handle wrapping a connected Docker Engine client (bollard).
+/// Connected Docker Engine client used for read-only diagnostics (stats, logs, events).
 ///
-/// When diagnostics are disabled via the `no-diagnostics` feature, this type is a placeholder and
-/// is never constructed by [`try_connect`].
+/// Exists so the harness reuses one [`bollard::Docker`] per process when the socket is available,
+/// instead of reconnecting for every list or stream call.
+///
+/// Obtained from [`try_connect`] or the cached [`suite_diagnostics_handle`]. With `no-diagnostics`,
+/// this type is a zero-sized placeholder and is never constructed with a real client.
 pub struct DiagnosticsHandle {
     #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
     docker: bollard::Docker,
@@ -70,7 +83,9 @@ impl DiagnosticsHandle {
 static SUITE_DIAGNOSTICS: LazyLock<Mutex<Option<Option<DiagnosticsHandle>>>> =
     LazyLock::new(|| Mutex::new(None));
 
-/// Connect to the local Docker socket and verify the daemon responds.
+/// Connect to the local Docker socket and verify the daemon responds (`ping`).
+///
+/// Exists as the narrow entry point so callers distinguish “no Docker” from provision failures.
 ///
 /// On failure (missing socket, permission error, ping failure), logs a one-line warning and returns
 /// [`None`] — callers must not treat this as a hard error.
@@ -107,7 +122,11 @@ pub async fn try_connect() -> Option<DiagnosticsHandle> {
 
 /// Lazily initialized suite-level diagnostics handle (one Docker client per process when enabled).
 ///
-/// The result is stored for the lifetime of the process so later US can attach background tasks.
+/// Exists so every scenario and background monitor shares the same connection pool settings and
+/// avoids repeating socket setup.
+///
+/// First call runs [`try_connect`] and caches the result for the process lifetime; subsequent calls
+/// return the cached [`DiagnosticsHandle`] or [`None`].
 pub async fn suite_diagnostics_handle() -> Option<DiagnosticsHandle> {
     #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
     {

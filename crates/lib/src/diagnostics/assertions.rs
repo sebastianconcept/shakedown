@@ -1,13 +1,26 @@
-//! Resource consumption assertions against per-container stats rings.
+//! Resource budget assertions using diagnostics stats rings on [`crate::lifecycle::Context`].
+//!
+//! **What:** [`ResourceAssertBuilder`] evaluates peak memory and average CPU from collected
+//! [`crate::event::InfraEvent::ResourceSample`] values for a container name.
+//!
+//! **Why:** scenarios get a typed, fail-fast way to assert infra stayed within bounds without parsing
+//! `docker stats` or raw cgroup output.
+//!
+//! **How:** call [`crate::lifecycle::Context::assert_resource`] during run or assert phase when
+//! diagnostics attached rings; failures return [`crate::error::ShakedownError::ResourceAssertionFailed`].
 
-use crate::error::ShakedownError;
+use crate::error::{InternalError, ShakedownError};
 use crate::event::InfraEvent;
 use crate::lifecycle::Context;
 use crate::phase::Phase;
 
-/// Builder for asserting CPU and memory bounds from collected [`InfraEvent::ResourceSample`] data.
+/// Fluent assertions for CPU and memory bounds using per-container resource samples.
 ///
-/// Obtained via [`Context::assert_resource`] when diagnostics are enabled.
+/// Exists to chain budget checks (`peak_memory_under`, `avg_cpu_under`) after diagnostics have
+/// populated [`crate::event::InfraEvent::ResourceSample`] rings for the scenario.
+///
+/// Obtained via [`Context::assert_resource`] when diagnostics enabled the stats rings; each method
+/// consumes `self` and returns `Result<(), ShakedownError>` so callers compose checks in order.
 pub struct ResourceAssertBuilder<'a> {
     context: &'a Context,
     container_name: &'a str,
@@ -95,9 +108,11 @@ fn gather_samples(
             phase: Phase::Run,
         });
     };
-    let guard = rings
-        .lock()
-        .expect("shakedown diagnostics: resource stats mutex poisoned");
+    let guard = rings.lock().map_err(|_| {
+        ShakedownError::Internal(InternalError::PoisonedMutex(
+            "resource stats rings (assertion)".to_string(),
+        ))
+    })?;
     let scenario_id = context.scenario_id().as_str();
     let mut out = Vec::new();
     for ring in guard.values() {

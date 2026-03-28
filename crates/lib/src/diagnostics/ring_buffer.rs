@@ -1,8 +1,20 @@
 //! Bounded FIFO ring buffer for per-container resource samples.
+//!
+//! [`ResourceStatsMonitor`](super::ResourceStatsMonitor) keeps one [`RingBuffer`] per container so
+//! repeated stats polling does not grow memory unbounded over a long scenario.
 
 use std::collections::VecDeque;
 
-/// Fixed-capacity queue: oldest entries are dropped when full.
+/// Bounded FIFO queue holding the most recent `capacity` items of type `T`.
+///
+/// Exists so diagnostics can retain a sliding window of values (e.g. [`crate::event::InfraEvent::ResourceSample`])
+/// with fixed upper bound: when the queue is full, [`RingBuffer::push`] drops the oldest entry.
+/// That keeps memory predictable during long scenarios while still exposing recent peaks and trends for
+/// assertions and failure timelines.
+///
+/// One ring is stored per Docker container id in the diagnostics stats map; at shutdown the harness
+/// drains rings in order and merges them into the [`crate::event::EventLog`]. Assertions read the same
+/// rings via [`crate::lifecycle::Context::resource_stats_rings`] during the run/assert phases.
 #[derive(Debug)]
 pub(crate) struct RingBuffer<T> {
     inner: VecDeque<T>,
