@@ -210,6 +210,9 @@ pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResour
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
 
+#[cfg(feature = "fault-injection")]
+pub use crate::resources::ToxiproxyResource;
+
 #[cfg(feature = "rabbitmq")]
 pub use crate::resources::{RabbitBindings, RabbitResource};
 

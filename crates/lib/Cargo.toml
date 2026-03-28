@@ -43,6 +43,8 @@ lapin = { version = "4.3", optional = true }
 
 # Toxiproxy control API for fault injection (D-12); enable via `fault-injection` (D-MVP-5)
 noxious-client = { version = "1.0", optional = true }
+# GET /version readiness for Toxiproxy (same major as noxious-client’s reqwest)
+reqwest = { version = "0.11", optional = true, default-features = false, features = ["json", "rustls-tls"] }
 
 # Docker Engine API (read-only observability; feature `diagnostics`)
 # Align with testcontainers' bollard to avoid duplicate bollard-stubs versions in the lockfile.
@@ -114,8 +116,12 @@ rabbitmq = [
     "testcontainers-modules/rabbitmq",
     "diagnostics",
 ]
-# Fault injection (noxious-client); composable with `kafka` etc. — does not imply other backends
-fault-injection = ["dep:noxious-client"]
+# Fault injection (Toxiproxy via testcontainers + noxious-client); composable with `kafka` etc.
+fault-injection = [
+    "dep:noxious-client",
+    "dep:reqwest",
+    "dep:testcontainers",
+]
 # MCP server support (post-MVP, optional)
 mcp = []
 
@@ -142,6 +148,12 @@ required-features = ["mariadb"]
 name = "mysql_vertical"
 path = "tests/mysql_vertical.rs"
 required-features = ["mysql"]
+
+# Toxiproxy suite container + API readiness (Docker); ignored unless --ignored
+[[test]]
+name = "toxiproxy_vertical"
+path = "tests/toxiproxy_vertical.rs"
+required-features = ["fault-injection"]
 
 # SQLite bindings + in-memory proof (no Docker)
 [[test]]
