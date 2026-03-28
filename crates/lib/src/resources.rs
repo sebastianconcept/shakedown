@@ -1642,20 +1642,11 @@ mod sqlite_impl {
     /// `rusqlite::Connection` is not [`Sync`]; it is wrapped in [`Arc`] [`Mutex`] so [`BuiltinResource`]
     /// remains [`Sync`] and readiness can use [`tokio::task::spawn_blocking`] (works on the default
     /// single-threaded `#[tokio::test]` runtime).
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub struct SqliteResource {
         connection: Option<Arc<Mutex<Connection>>>,
         /// Retained for debugging; matches metadata `database_url`.
         database_url: String,
-    }
-
-    impl Default for SqliteResource {
-        fn default() -> Self {
-            Self {
-                connection: None,
-                database_url: String::new(),
-            }
-        }
     }
 
     impl SqliteResource {

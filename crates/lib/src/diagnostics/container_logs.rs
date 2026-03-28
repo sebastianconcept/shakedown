@@ -1,4 +1,14 @@
-//! Stream container stdout/stderr via bollard [`Docker::logs`] into [`InfraEvent::ContainerLog`] records.
+//! Container stdout/stderr streaming into [`crate::event::InfraEvent::ContainerLog`] records.
+//!
+//! **What:** a background supervisor that discovers Shakedown-labeled running containers and tails
+//! their logs via [`Docker::logs`] into an in-memory sink.
+//!
+//! **Why:** captures application output for debugging and failure timelines without shelling out to
+//! `docker logs`.
+//!
+//! **How:** spawned from [`crate::lifecycle`] when diagnostics connect; each new container id gets a
+//! follow task; [`ContainerLogsMonitor::shutdown_and_drain`] merges buffered lines into
+//! [`crate::event::EventLog`] at teardown, ordered by timestamp.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -12,12 +22,19 @@ use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
+use crate::error::ShakedownError;
 use crate::event::InfraEvent;
 use crate::phase::Phase;
 
 use super::labels::shakedown_docker_label_filter;
 
-/// Background task: follow logs for Shakedown-labeled running containers; drain into [`EventLog`] at shutdown.
+/// Background task following logs for Shakedown-labeled running containers.
+///
+/// Exists to decouple long-lived `logs --follow` streams from the main lifecycle while keeping a
+/// single merge point into the scenario [`crate::event::EventLog`].
+///
+/// Created with [`ContainerLogsMonitor::spawn`]; the harness aborts the task and calls
+/// [`ContainerLogsMonitor::shutdown_and_drain`] when merging diagnostics (success or early error exit).
 pub(crate) struct ContainerLogsMonitor {
     join: JoinHandle<()>,
     sink: Arc<Mutex<Vec<InfraEvent>>>,
@@ -31,7 +48,10 @@ impl ContainerLogsMonitor {
         Self { join, sink }
     }
 
-    pub(crate) async fn shutdown_and_drain(self, event_log: &mut crate::event::EventLog) {
+    pub(crate) async fn shutdown_and_drain(
+        self,
+        event_log: &mut crate::event::EventLog,
+    ) -> Result<(), ShakedownError> {
         let ContainerLogsMonitor { join, sink } = self;
         join.abort();
         let _ = join.await;
@@ -41,6 +61,7 @@ impl ContainerLogsMonitor {
         for event in collected {
             event_log.append_infra(event);
         }
+        Ok(())
     }
 }
 

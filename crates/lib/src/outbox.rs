@@ -48,6 +48,102 @@ pub struct OutboxEntry {
     pub sent_at: Option<String>,
 }
 
+/// Row tuple returned by outbox `SELECT` helpers (relational backends + SQLite blocking path).
+type OutboxAssertRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i32,
+    String,
+    Option<String>,
+);
+
+// --- Outbox row queries (one definition per engine family; WHERE differs by use case) ---
+
+#[cfg(feature = "postgres")]
+const POSTGRES_OUTBOX_FETCH_WITH_STATUS: &str = r#"
+SELECT id::text, aggregate_type, aggregate_id, type, payload::text, status, attempts, created_at::text, sent_at::text
+FROM outbox_event
+WHERE aggregate_id = $1 AND type = $2 AND status = $3
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(feature = "postgres")]
+const POSTGRES_OUTBOX_FETCH_LATEST: &str = r#"
+SELECT id::text, aggregate_type, aggregate_id, type, payload::text, status, attempts, created_at::text, sent_at::text
+FROM outbox_event
+WHERE aggregate_id = $1 AND type = $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(feature = "postgres")]
+const POSTGRES_OUTBOX_SELECT_LATEST_STATUS: &str = r#"
+SELECT status::text
+FROM outbox_event
+WHERE aggregate_id = $1 AND type = $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(any(feature = "mariadb", feature = "mysql"))]
+const MYSQL_FAMILY_OUTBOX_FETCH_WITH_STATUS: &str = r#"
+SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
+FROM outbox_event
+WHERE aggregate_id = ? AND type = ? AND status = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(any(feature = "mariadb", feature = "mysql"))]
+const MYSQL_FAMILY_OUTBOX_FETCH_LATEST: &str = r#"
+SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
+FROM outbox_event
+WHERE aggregate_id = ? AND type = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(any(feature = "mariadb", feature = "mysql"))]
+const MYSQL_FAMILY_OUTBOX_SELECT_LATEST_STATUS: &str = r#"
+SELECT status
+FROM outbox_event
+WHERE aggregate_id = ? AND type = ?
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(feature = "sqlite")]
+const SQLITE_OUTBOX_FETCH_WITH_STATUS: &str = r#"
+SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at, sent_at
+FROM outbox_event
+WHERE aggregate_id = ?1 AND type = ?2 AND status = ?3
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(feature = "sqlite")]
+const SQLITE_OUTBOX_FETCH_LATEST: &str = r#"
+SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at, sent_at
+FROM outbox_event
+WHERE aggregate_id = ?1 AND type = ?2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(feature = "sqlite")]
+const SQLITE_OUTBOX_SELECT_LATEST_STATUS: &str = r#"
+SELECT status
+FROM outbox_event
+WHERE aggregate_id = ?1 AND type = ?2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
 #[cfg(feature = "postgres")]
 const POSTGRES_SETUP_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS outbox_event (
@@ -350,13 +446,7 @@ impl<'ctx> Outbox<'ctx> {
             });
             let maybe_row = client
                 .query_opt(
-                    r#"
-SELECT id::text, aggregate_type, aggregate_id, type, payload::text, status, attempts, created_at::text, sent_at::text
-FROM outbox_event
-WHERE aggregate_id = $1 AND type = $2 AND status = $3
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
+                    POSTGRES_OUTBOX_FETCH_WITH_STATUS,
                     &[&aggregate_id, &event_type, &expected_status],
                 )
                 .await
@@ -385,13 +475,7 @@ LIMIT 1
             }
             let latest_status_row = client
                 .query_opt(
-                    r#"
-SELECT status::text
-FROM outbox_event
-WHERE aggregate_id = $1 AND type = $2
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
+                    POSTGRES_OUTBOX_SELECT_LATEST_STATUS,
                     &[&aggregate_id, &event_type],
                 )
                 .await
@@ -412,15 +496,9 @@ LIMIT 1
                 .map_err(as_backend_error)?;
             let pool = mysql_async::Pool::new(options);
             let mut connection = pool.get_conn().await.map_err(as_backend_error)?;
-            let maybe_row: Option<(String, String, String, String, String, String, i32, String, Option<String>)> = connection
+            let maybe_row: Option<OutboxAssertRow> = connection
                 .exec_first(
-                    r#"
-SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
-FROM outbox_event
-WHERE aggregate_id = ? AND type = ? AND status = ?
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
+                    MYSQL_FAMILY_OUTBOX_FETCH_WITH_STATUS,
                     (aggregate_id, event_type, expected_status),
                 )
                 .await
@@ -444,13 +522,7 @@ LIMIT 1
             }
             let latest_status: Option<String> = connection
                 .exec_first(
-                    r#"
-SELECT status
-FROM outbox_event
-WHERE aggregate_id = ? AND type = ?
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
+                    MYSQL_FAMILY_OUTBOX_SELECT_LATEST_STATUS,
                     (aggregate_id, event_type),
                 )
                 .await
@@ -471,15 +543,9 @@ LIMIT 1
                 .map_err(as_backend_error)?;
             let pool = mysql_async::Pool::new(options);
             let mut connection = pool.get_conn().await.map_err(as_backend_error)?;
-            let maybe_row: Option<(String, String, String, String, String, String, i32, String, Option<String>)> = connection
+            let maybe_row: Option<OutboxAssertRow> = connection
                 .exec_first(
-                    r#"
-SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
-FROM outbox_event
-WHERE aggregate_id = ? AND type = ? AND status = ?
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
+                    MYSQL_FAMILY_OUTBOX_FETCH_WITH_STATUS,
                     (aggregate_id, event_type, expected_status),
                 )
                 .await
@@ -503,13 +569,7 @@ LIMIT 1
             }
             let latest_status: Option<String> = connection
                 .exec_first(
-                    r#"
-SELECT status
-FROM outbox_event
-WHERE aggregate_id = ? AND type = ?
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
+                    MYSQL_FAMILY_OUTBOX_SELECT_LATEST_STATUS,
                     (aggregate_id, event_type),
                 )
                 .await
@@ -528,17 +588,7 @@ LIMIT 1
             let sqlite_url = sqlite_bindings.database_url.clone();
             let aggregate_id_value = aggregate_id.to_string();
             let event_type_value = event_type.to_string();
-            let maybe_row: Option<(
-                String,
-                String,
-                String,
-                String,
-                String,
-                String,
-                i32,
-                String,
-                Option<String>,
-            )> = tokio::task::spawn_blocking(move || {
+            let maybe_row: Option<OutboxAssertRow> = tokio::task::spawn_blocking(move || {
                 use rusqlite::OpenFlags;
                 let connection = rusqlite::Connection::open_with_flags(
                     sqlite_url.as_str(),
@@ -546,15 +596,7 @@ LIMIT 1
                         | OpenFlags::SQLITE_OPEN_READ_WRITE
                         | OpenFlags::SQLITE_OPEN_CREATE,
                 )?;
-                let mut statement = connection.prepare(
-                    r#"
-SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at, sent_at
-FROM outbox_event
-WHERE aggregate_id = ?1 AND type = ?2 AND status = ?3
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
-                )?;
+                let mut statement = connection.prepare(SQLITE_OUTBOX_FETCH_WITH_STATUS)?;
                 let mut rows = statement.query([
                     aggregate_id_value,
                     event_type_value,
@@ -606,15 +648,7 @@ LIMIT 1
                         | OpenFlags::SQLITE_OPEN_READ_WRITE
                         | OpenFlags::SQLITE_OPEN_CREATE,
                 )?;
-                let mut statement = connection.prepare(
-                    r#"
-SELECT status
-FROM outbox_event
-WHERE aggregate_id = ?1 AND type = ?2
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
-                )?;
+                let mut statement = connection.prepare(SQLITE_OUTBOX_SELECT_LATEST_STATUS)?;
                 let mut rows = statement.query([aggregate_id_latest, event_type_latest])?;
                 if let Some(row) = rows.next()? {
                     Ok::<_, rusqlite::Error>(Some(row.get(0)?))
@@ -653,16 +687,7 @@ LIMIT 1
                 let _ = connection.await;
             });
             let maybe_row = client
-                .query_opt(
-                    r#"
-SELECT id::text, aggregate_type, aggregate_id, type, payload::text, status, attempts, created_at::text, sent_at::text
-FROM outbox_event
-WHERE aggregate_id = $1 AND type = $2
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
-                    &[&aggregate_id, &event_type],
-                )
+                .query_opt(POSTGRES_OUTBOX_FETCH_LATEST, &[&aggregate_id, &event_type])
                 .await
                 .map_err(as_backend_error)?;
             if let Some(row) = maybe_row {
@@ -701,17 +726,8 @@ LIMIT 1
                 .map_err(as_backend_error)?;
             let pool = mysql_async::Pool::new(options);
             let mut connection = pool.get_conn().await.map_err(as_backend_error)?;
-            let maybe_row: Option<(String, String, String, String, String, String, i32, String, Option<String>)> = connection
-                .exec_first(
-                    r#"
-SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
-FROM outbox_event
-WHERE aggregate_id = ? AND type = ?
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
-                    (aggregate_id, event_type),
-                )
+            let maybe_row: Option<OutboxAssertRow> = connection
+                .exec_first(MYSQL_FAMILY_OUTBOX_FETCH_LATEST, (aggregate_id, event_type))
                 .await
                 .map_err(as_backend_error)?;
             connection.disconnect().await.map_err(as_backend_error)?;
@@ -743,17 +759,8 @@ LIMIT 1
                 .map_err(as_backend_error)?;
             let pool = mysql_async::Pool::new(options);
             let mut connection = pool.get_conn().await.map_err(as_backend_error)?;
-            let maybe_row: Option<(String, String, String, String, String, String, i32, String, Option<String>)> = connection
-                .exec_first(
-                    r#"
-SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, CAST(created_at AS CHAR), CAST(sent_at AS CHAR)
-FROM outbox_event
-WHERE aggregate_id = ? AND type = ?
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
-                    (aggregate_id, event_type),
-                )
+            let maybe_row: Option<OutboxAssertRow> = connection
+                .exec_first(MYSQL_FAMILY_OUTBOX_FETCH_LATEST, (aggregate_id, event_type))
                 .await
                 .map_err(as_backend_error)?;
             connection.disconnect().await.map_err(as_backend_error)?;
@@ -783,17 +790,7 @@ LIMIT 1
             let sqlite_url = sqlite_bindings.database_url.clone();
             let aggregate_id_value = aggregate_id.to_string();
             let event_type_value = event_type.to_string();
-            let maybe_row: Option<(
-                String,
-                String,
-                String,
-                String,
-                String,
-                String,
-                i32,
-                String,
-                Option<String>,
-            )> = tokio::task::spawn_blocking(move || {
+            let maybe_row: Option<OutboxAssertRow> = tokio::task::spawn_blocking(move || {
                 use rusqlite::OpenFlags;
                 let connection = rusqlite::Connection::open_with_flags(
                     sqlite_url.as_str(),
@@ -801,15 +798,7 @@ LIMIT 1
                         | OpenFlags::SQLITE_OPEN_READ_WRITE
                         | OpenFlags::SQLITE_OPEN_CREATE,
                 )?;
-                let mut statement = connection.prepare(
-                    r#"
-SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at, sent_at
-FROM outbox_event
-WHERE aggregate_id = ?1 AND type = ?2
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-"#,
-                )?;
+                let mut statement = connection.prepare(SQLITE_OUTBOX_FETCH_LATEST)?;
                 let mut rows = statement.query([aggregate_id_value, event_type_value])?;
                 if let Some(row) = rows.next()? {
                     Ok::<_, rusqlite::Error>(Some((

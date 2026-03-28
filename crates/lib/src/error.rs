@@ -400,6 +400,8 @@ pub enum InternalError {
         #[doc(hidden)]
         backtrace: std::backtrace::Backtrace,
     },
+    /// A `std::sync::Mutex` protecting harness state was poisoned (another thread panicked while holding the lock).
+    PoisonedMutex(String),
 }
 
 impl std::fmt::Display for InternalError {
@@ -416,6 +418,11 @@ impl std::fmt::Display for InternalError {
             }
             InternalError::Bug(msg) => write!(f, "Internal error: Framework bug: {}", msg),
             InternalError::WithBacktrace { msg, .. } => write!(f, "Internal error: {}", msg),
+            InternalError::PoisonedMutex(context) => write!(
+                f,
+                "Internal error: Poisoned mutex ({}): another thread panicked while holding the lock",
+                context
+            ),
         }
     }
 }
@@ -428,6 +435,7 @@ impl Error for InternalError {
             InternalError::UnexpectedState(_) => None,
             InternalError::Bug(_) => None,
             InternalError::WithBacktrace { .. } => None,
+            InternalError::PoisonedMutex(_) => None,
         }
     }
 }
@@ -494,6 +502,17 @@ mod tests {
             displayed,
             "Internal error: Invariant violation: state must be valid"
         );
+    }
+
+    #[test]
+    fn internal_error_poisoned_mutex_display() {
+        // Given a poisoned-mutex internal error with a subsystem context label
+        let err = InternalError::PoisonedMutex("resource stats rings".to_string());
+        // When we format it for display
+        let displayed = format!("{}", err);
+        // Then the message names poisoned mutex and includes the context
+        assert!(displayed.contains("Poisoned mutex"));
+        assert!(displayed.contains("resource stats rings"));
     }
 
     #[test]

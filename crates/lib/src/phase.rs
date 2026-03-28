@@ -1,8 +1,14 @@
 //! Lifecycle phase labels shared by the harness and infrastructure event records.
+//!
+//! **Why:** infrastructure [`crate::event::InfraEvent`] records carry a [`Phase`] so logs, Docker events,
+//! and resource samples sort and filter correctly in timelines (e.g. “this OOM happened during Run”).
 
 use serde::{Deserialize, Serialize};
 
 /// Ordered phase of [`crate::lifecycle::run_scenario`] (provision through teardown).
+///
+/// Stamped on diagnostics output when available so operators correlate infra signals with the active
+/// lifecycle step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {

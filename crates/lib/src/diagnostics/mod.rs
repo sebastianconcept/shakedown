@@ -1,9 +1,16 @@
-//! Infrastructure diagnostics via Docker Engine API (bollard).
+//! Infrastructure diagnostics via the Docker Engine API ([`bollard`]).
 //!
-//! Read-only: never creates, starts, or stops containers (see product DECISIONS).
+//! **What:** read-only observation of containers the harness already started—resource stats, log
+//! streaming, and engine events—plus optional resource budget assertions. This module never creates,
+//! starts, or stops containers (see product DECISIONS).
 //!
-//! Enabled when a Docker-backed resource feature is active (`kafka`, `postgres`, `mariadb`, `mysql`)
-//! unless the `no-diagnostics` feature is set.
+//! **Why:** operators need correlated infra signals in [`crate::event::EventLog`] and failure
+//! timelines without ad hoc `docker` CLI in tests.
+//!
+//! **How:** when a Docker-backed resource feature is active (`kafka`, `postgres`, `mariadb`, `mysql`),
+//! `diagnostics` is enabled, and `no-diagnostics` is off, [`try_connect`] / [`suite_diagnostics_handle`]
+//! provide a shared client; [`crate::lifecycle::run_scenario`] spawns background tasks and merges their
+//! output during diagnostic shutdown. Use `no-diagnostics` to compile out observability entirely.
 
 mod connection;
 
