@@ -28,6 +28,7 @@ async fn toxiproxy_provisions_version_ready_and_teardown_clears_proxies() {
         "toxiproxy_vertical_proof",
         |ctx: &mut Context| {
             Box::pin(async move {
+                // Given a provisioned Toxiproxy suite resource and a FaultHandle on the context
                 assert!(
                     matches!(
                         ctx.resources().first(),
@@ -38,6 +39,7 @@ async fn toxiproxy_provisions_version_ready_and_teardown_clears_proxies() {
                 let faults = ctx
                     .fault_handle_mut()
                     .expect("FaultHandle after Toxiproxy provision");
+                // When we create a proxy and exercise add/remove/reset on the control API
                 faults
                     .create_proxy("latency_proof", "127.0.0.1:0", "127.0.0.1:9")
                     .await
@@ -67,6 +69,7 @@ async fn toxiproxy_provisions_version_ready_and_teardown_clears_proxies() {
                     .reset_proxy("latency_proof")
                     .await
                     .expect("reset_proxy");
+                // Then operations complete without infrastructure error (events asserted after run_scenario)
             })
         },
         &mut event_log,

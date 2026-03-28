@@ -100,7 +100,7 @@ async fn normal_kafka_bootstrap_stays_direct_with_toxiproxy_registered() {
         "fault_injection_kafka_normal",
         |ctx: &mut Context| {
             Box::pin(async move {
-                // Given Normal kind, no suite kafka proxy is created; bootstrap is the real broker.
+                // Given Normal kind with Kafka and Toxiproxy registered, no kafka fault proxy row exists.
                 let kafka_bindings = ctx.kafka_bindings().expect("kafka bindings").clone();
                 assert!(
                     ctx.fault_handle()
@@ -109,12 +109,12 @@ async fn normal_kafka_bootstrap_stays_direct_with_toxiproxy_registered() {
                         .is_none(),
                     "Normal scenarios must not auto-create the kafka Toxiproxy proxy"
                 );
+                // When we read client-facing bootstrap, it remains the direct broker endpoint.
                 assert!(
                     !kafka_bindings.bootstrap_servers.is_empty(),
                     "direct broker bootstrap should be set"
                 );
-
-                // Then Normal runs use the real broker string; no automatic kafka proxy row exists.
+                // Then bootstrap does not equal a proxy-only listen path (no shakedown_kafka proxy).
             })
         },
         &mut event_log,

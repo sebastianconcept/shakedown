@@ -304,7 +304,11 @@ pub enum InfrastructureError {
     NotProvisioned(String),
     /// Environment backend error
     Backend(Box<dyn Error + Send + Sync>),
-    /// Fault injection (Toxiproxy control API) failure
+    /// Fault injection (Toxiproxy control API) failure.
+    ///
+    /// Map from [`crate::fault_injection::Error`] at the call site with
+    /// `.map_err(InfrastructureError::FaultInjection)?` — there is no `From` impl so the conversion
+    /// site stays visible when debugging (see project rust-style).
     #[cfg(feature = "fault-injection")]
     FaultInjection(crate::fault_injection::Error),
 }
@@ -360,13 +364,6 @@ impl Error for InfrastructureError {
             #[cfg(feature = "fault-injection")]
             InfrastructureError::FaultInjection(err) => Some(err),
         }
-    }
-}
-
-#[cfg(feature = "fault-injection")]
-impl From<crate::fault_injection::Error> for InfrastructureError {
-    fn from(err: crate::fault_injection::Error) -> Self {
-        InfrastructureError::FaultInjection(err)
     }
 }
 

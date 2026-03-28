@@ -631,13 +631,6 @@ impl Default for Context {
 }
 
 #[cfg(feature = "fault-injection")]
-fn attach_fault_handle_event_log(ctx: &mut Context, event_log: &mut EventLog) {
-    if let Some(handle) = ctx.fault_handle_mut() {
-        handle.attach_event_log(event_log);
-    }
-}
-
-#[cfg(feature = "fault-injection")]
 fn toxiproxy_api_url_from_handles(handles: &[ResourceHandle]) -> Option<String> {
     for handle in handles {
         let metadata = handle.metadata.as_ref()?;
@@ -1447,10 +1440,38 @@ where
     ))]
     shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Run);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting run phase");
+    // Fault-injection timeline: `FaultHandle` sits on `Context` and scenario code calls it from
+    // async paths (add/remove toxic, reset proxy). The harness owns `EventLog` separately; we need
+    // those fault actions to show up in the same log as lifecycle and infra lines. You cannot hand
+    // `FaultHandle` a `&mut EventLog` for the whole run: that would alias `event_log` with `ctx`
+    // across the scenario body, and tying lifetimes through `Context` is awkward. Alternatives like
+    // a raw pointer to `EventLog` would work only under `unsafe` with a brittle "call order"
+    // contract.
+    //
+    // A bounded `SyncSender`/`Receiver` pair fixes this: the handle only holds the sender and
+    // enqueues owned `Event` values with `try_send` (no shared mutable state with the log). The
+    // harness keeps the receiver and drains after `scenario_fn` returns, appending into the
+    // caller-owned `EventLog` in one place—same merge point as other diagnostics. Queue depth is
+    // [`crate::fault_injection::FAULT_EVENT_CHANNEL_CAPACITY`]; if it fills, `try_send` fails and
+    // that event is skipped (explicit back-pressure; same idea as a fixed-size buffer).
     #[cfg(feature = "fault-injection")]
-    attach_fault_handle_event_log(ctx, event_log);
+    let fault_event_receiver = {
+        let (sender, receiver) =
+            std::sync::mpsc::sync_channel(crate::fault_injection::FAULT_EVENT_CHANNEL_CAPACITY);
+        if let Some(handle) = ctx.fault_handle_mut() {
+            handle.set_event_sender(sender);
+        }
+        receiver
+    };
     // Execute the scenario function
     let _ = scenario_fn(ctx).await;
+
+    // Drain fault events into the caller-owned log after the scenario body and before assert/teardown,
+    // so timelines and tests that read `event_log` after `run_scenario` see a complete run-phase slice.
+    #[cfg(feature = "fault-injection")]
+    for event in fault_event_receiver.try_iter() {
+        event_log.append(event);
+    }
 
     // Assert phase (in a real implementation, this would run assertions)
     #[cfg(all(

@@ -2344,9 +2344,9 @@ mod toxiproxy_impl {
                 container
                     .rm()
                     .await
-                    .map_err(|error| InfrastructureError::Teardown {
+                    .map_err(|remove_error| InfrastructureError::Teardown {
                         resource: RESOURCE_NAME.into(),
-                        source: Box::new(std::io::Error::other(error.to_string())),
+                        source: Box::new(std::io::Error::other(remove_error.to_string())),
                     })?;
             }
 
