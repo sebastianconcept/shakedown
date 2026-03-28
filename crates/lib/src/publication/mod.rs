@@ -4,11 +4,19 @@
 //! assertions. Implementations are feature-gated (`kafka`, `rabbitmq`, …); this module defines
 //! the shared contract only.
 
+mod matching;
 mod spec;
 mod verifier;
 
+#[cfg(feature = "kafka")]
+mod kafka_verifier;
+
+pub use matching::message_matches_aggregate_id;
 pub use spec::{PublicationObserveSpec, DEFAULT_PUBLICATION_OBSERVE_TIMEOUT};
 pub use verifier::PublicationVerifier;
+
+#[cfg(feature = "kafka")]
+pub use kafka_verifier::KafkaPublicationVerifier;
 
 #[cfg(test)]
 mod tests {

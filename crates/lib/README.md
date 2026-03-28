@@ -163,6 +163,12 @@ If the Docker socket is missing or unusable, [`try_connect`](src/diagnostics/con
 
 ## Outbox helpers
 
+**Publication errors:** Kafka-specific `OutboxKafkaRecordNotFound` was replaced by transport-neutral
+[`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) and
+[`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) (see `Display`
+for a `kafka` / `rabbitmq` prefix). Match on those variants or on
+[`ShakedownError`](crate::error::ShakedownError) generally instead of matching on removed names.
+
 Enable outbox assertions with relational + Kafka features:
 
 ```toml
