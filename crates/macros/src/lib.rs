@@ -462,10 +462,24 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Rabbit" => Ok(quote! {
+            #[cfg(feature = "rabbitmq")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Rabbit(
+                    ::shakedown::RabbitResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "rabbitmq"))]
+            {
+                ::core::compile_error!(
+                    "Rabbit in #[shakedown::test(resources = [...])] requires `rabbitmq` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Postgres`, `MariaDB`, `Mysql`, and `Sqlite`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, and `Sqlite`"
             ),
         )),
     }
