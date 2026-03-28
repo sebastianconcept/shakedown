@@ -11,12 +11,18 @@ mod verifier;
 #[cfg(feature = "kafka")]
 mod kafka_verifier;
 
+#[cfg(feature = "rabbitmq")]
+mod rabbit_verifier;
+
 pub use matching::message_matches_aggregate_id;
 pub use spec::{PublicationObserveSpec, DEFAULT_PUBLICATION_OBSERVE_TIMEOUT};
 pub use verifier::PublicationVerifier;
 
 #[cfg(feature = "kafka")]
 pub use kafka_verifier::KafkaPublicationVerifier;
+
+#[cfg(feature = "rabbitmq")]
+pub use rabbit_verifier::{RabbitMqPublicationVerifier, RabbitMqPublicationVerifierOptions};
 
 #[cfg(test)]
 mod tests {

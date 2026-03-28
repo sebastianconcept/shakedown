@@ -155,6 +155,9 @@ pub use crate::publication::{
 
 #[cfg(all(feature = "outbox", feature = "kafka"))]
 pub use crate::publication::KafkaPublicationVerifier;
+
+#[cfg(all(feature = "outbox", feature = "rabbitmq"))]
+pub use crate::publication::{RabbitMqPublicationVerifier, RabbitMqPublicationVerifierOptions};
 pub use crate::timeline::{
     build_failure_timeline_document, emit_failure_timeline_to_stderr, render_failure_timeline,
     resolve_target_timelines_dir, sanitize_scenario_id_for_filename, write_failure_timeline_json,
