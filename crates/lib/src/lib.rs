@@ -148,8 +148,12 @@ pub use crate::phase::Phase;
 
 #[cfg(feature = "outbox")]
 pub use crate::publication::{
-    PublicationObserveSpec, PublicationVerifier, DEFAULT_PUBLICATION_OBSERVE_TIMEOUT,
+    message_matches_aggregate_id, PublicationObserveSpec, PublicationVerifier,
+    DEFAULT_PUBLICATION_OBSERVE_TIMEOUT,
 };
+
+#[cfg(all(feature = "outbox", feature = "kafka"))]
+pub use crate::publication::KafkaPublicationVerifier;
 pub use crate::timeline::{
     build_failure_timeline_document, emit_failure_timeline_to_stderr, render_failure_timeline,
     resolve_target_timelines_dir, sanitize_scenario_id_for_filename, write_failure_timeline_json,

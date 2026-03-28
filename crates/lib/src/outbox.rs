@@ -5,14 +5,6 @@
 
 use crate::error::{InfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
-#[cfg(feature = "kafka")]
-use rdkafka::config::ClientConfig;
-#[cfg(feature = "kafka")]
-use rdkafka::consumer::{BaseConsumer, Consumer};
-#[cfg(feature = "kafka")]
-use rdkafka::message::Message;
-#[cfg(feature = "kafka")]
-use std::time::{Duration, Instant};
 
 /// Row state for records in the canonical `outbox_event` table.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +41,7 @@ pub struct OutboxEntry {
 }
 
 /// Row tuple returned by outbox `SELECT` helpers (relational backends + SQLite blocking path).
+#[cfg(any(feature = "mariadb", feature = "mysql", feature = "sqlite"))]
 type OutboxAssertRow = (
     String,
     String,
@@ -202,10 +195,6 @@ pub struct Outbox<'ctx> {
 pub struct OutboxAssertBuilder {
     entry: OutboxEntry,
 }
-
-#[cfg(feature = "kafka")]
-/// Docker-backed Kafka (e.g. testcontainers) often needs >5s for consumer subscribe/rebalance.
-const DEFAULT_KAFKA_ASSERT_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl OutboxAssertBuilder {
     /// Return the asserted outbox entry for additional ad-hoc checks.
@@ -370,49 +359,17 @@ impl<'ctx> Outbox<'ctx> {
         base_topic: &str,
         aggregate_id: &str,
     ) -> Result<(), ShakedownError> {
-        let kafka_bindings = self.context.kafka_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "kafka bindings".to_string(),
-            ))
-        })?;
+        use crate::publication::{
+            KafkaPublicationVerifier, PublicationObserveSpec, PublicationVerifier,
+        };
 
-        let topic = kafka_bindings.topic_namespace(base_topic);
-        let consumer_group = format!(
-            "shakedown-outbox-assert-{}",
-            self.context.scenario_id().as_str()
-        );
-        let consumer: BaseConsumer = ClientConfig::new()
-            .set(
-                "bootstrap.servers",
-                kafka_bindings.bootstrap_servers.as_str(),
-            )
-            .set("group.id", consumer_group.as_str())
-            .set("enable.auto.commit", "false")
-            .set("auto.offset.reset", "earliest")
-            .create()
-            .map_err(as_backend_error)?;
-
-        consumer
-            .subscribe(&[topic.as_str()])
-            .map_err(as_backend_error)?;
-
-        let deadline = Instant::now() + DEFAULT_KAFKA_ASSERT_TIMEOUT;
-        while Instant::now() < deadline {
-            let remaining_duration = deadline.saturating_duration_since(Instant::now());
-            let poll_duration = remaining_duration.min(Duration::from_millis(200));
-            if let Some(result) = consumer.poll(poll_duration) {
-                let message = result.map_err(as_backend_error)?;
-                if kafka_message_matches_aggregate_id(&message, aggregate_id) {
-                    return Ok(());
-                }
-            }
-        }
-
-        Err(ShakedownError::OutboxPublicationNotFound {
-            transport: "kafka",
-            channel: topic,
+        let verifier = KafkaPublicationVerifier;
+        let spec = PublicationObserveSpec {
             aggregate_id: aggregate_id.to_string(),
-        })
+            logical_channel: base_topic.to_string(),
+            timeout: None,
+        };
+        PublicationVerifier::assert_observed(&verifier, self.context, &spec, &()).await
     }
 
     async fn assert_state(
@@ -901,30 +858,6 @@ fn outbox_expected_status_miss_error(
             expected_status: expected_status.to_string(),
         },
     }
-}
-
-#[cfg(feature = "kafka")]
-fn kafka_message_matches_aggregate_id(message: &impl Message, aggregate_id: &str) -> bool {
-    if let Some(key_bytes) = message.key() {
-        if let Ok(key_text) = std::str::from_utf8(key_bytes) {
-            if key_text == aggregate_id {
-                return true;
-            }
-        }
-    }
-
-    if let Some(payload_bytes) = message.payload() {
-        if let Ok(payload_text) = std::str::from_utf8(payload_bytes) {
-            if let Ok(payload_json) = serde_json::from_str::<serde_json::Value>(payload_text) {
-                return payload_json
-                    .get("aggregate_id")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|payload_aggregate_id| payload_aggregate_id == aggregate_id);
-            }
-        }
-    }
-
-    false
 }
 
 #[cfg(all(test, feature = "sqlite"))]
