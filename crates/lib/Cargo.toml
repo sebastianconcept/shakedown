@@ -41,8 +41,8 @@ rusqlite = { version = "0.32", optional = true, default-features = false, featur
 # RabbitMQ client for readiness and publication verification (`rabbitmq` feature)
 lapin = { version = "4.3", optional = true }
 
-# Toxiproxy for fault injection (D-12 decision)
-noxious-client = "1.0"
+# Toxiproxy control API for fault injection (D-12); enable via `fault-injection` (D-MVP-5)
+noxious-client = { version = "1.0", optional = true }
 
 # Docker Engine API (read-only observability; feature `diagnostics`)
 # Align with testcontainers' bollard to avoid duplicate bollard-stubs versions in the lockfile.
@@ -114,6 +114,8 @@ rabbitmq = [
     "testcontainers-modules/rabbitmq",
     "diagnostics",
 ]
+# Fault injection (noxious-client); composable with `kafka` etc. — does not imply other backends
+fault-injection = ["dep:noxious-client"]
 # MCP server support (post-MVP, optional)
 mcp = []
 
