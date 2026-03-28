@@ -108,6 +108,9 @@ pub mod diagnostics;
 pub mod error;
 /// Structured events and in-memory logs for timelines and diagnostics.
 pub mod event;
+/// Toxiproxy fault-injection control API (`fault-injection` feature).
+#[cfg(feature = "fault-injection")]
+pub mod fault_injection;
 /// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
 /// Outbox table setup and assertions (`outbox` + at least one relational feature).
@@ -210,6 +213,10 @@ pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResour
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
 
+#[cfg(feature = "fault-injection")]
+pub use crate::fault_injection::{Error as FaultInjectionError, FaultHandle};
+#[cfg(feature = "fault-injection")]
+pub use crate::fault_injection::{StreamDirection, Toxic, ToxicKind};
 #[cfg(feature = "fault-injection")]
 pub use crate::resources::ToxiproxyResource;
 
