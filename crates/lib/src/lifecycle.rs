@@ -194,6 +194,8 @@ pub struct Context {
     sqlite_bindings: Option<SqliteBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
+    /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
+    fault_profile: Option<String>,
     /// Toxiproxy control handle when the `fault-injection` feature is on and Toxiproxy provisioned.
     #[cfg(feature = "fault-injection")]
     fault_handle: Option<crate::fault_injection::FaultHandle>,
@@ -240,6 +242,7 @@ impl Context {
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
+            fault_profile: None,
             #[cfg(feature = "fault-injection")]
             fault_handle: None,
             #[cfg(all(feature = "fault-injection", feature = "kafka"))]
@@ -281,6 +284,7 @@ impl Context {
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
+            fault_profile: None,
             #[cfg(feature = "fault-injection")]
             fault_handle: None,
             #[cfg(all(feature = "fault-injection", feature = "kafka"))]
@@ -322,6 +326,7 @@ impl Context {
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
+            fault_profile: None,
             #[cfg(feature = "fault-injection")]
             fault_handle: None,
             #[cfg(all(feature = "fault-injection", feature = "kafka"))]
@@ -483,6 +488,16 @@ impl Context {
     /// Set the scenario kind for this run.
     pub fn set_scenario_kind(&mut self, kind: ScenarioKind) {
         self.scenario_kind = kind;
+    }
+
+    /// Optional fault profile label from `#[shakedown::faulty_test(fault_profile = "...")]`, if set.
+    pub fn fault_profile(&self) -> Option<&str> {
+        self.fault_profile.as_deref()
+    }
+
+    /// Set the fault profile label (used by `#[shakedown::faulty_test(fault_profile = "...")]`).
+    pub fn set_fault_profile(&mut self, profile: impl Into<String>) {
+        self.fault_profile = Some(profile.into());
     }
 
     /// Toxiproxy fault control when `fault-injection` is enabled and Toxiproxy was provisioned.
