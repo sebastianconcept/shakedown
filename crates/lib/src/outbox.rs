@@ -372,6 +372,44 @@ impl<'ctx> Outbox<'ctx> {
         PublicationVerifier::assert_observed(&verifier, self.context, &spec, &()).await
     }
 
+    /// Assert an AMQP message for `aggregate_id` was observed on the scenario queue (Option A topology).
+    ///
+    /// `base_exchange` and `base_queue` are logical names; [`crate::resources::RabbitBindings::namespaced_name`]
+    /// is applied for the broker. The verifier consumes from the namespaced queue; declare that queue and bind
+    /// it to your exchange in seed **before** publishing. `routing_key` for the assertion is `aggregate_id`
+    /// (override by calling [`crate::publication::PublicationVerifier::assert_observed`] with custom
+    /// [`crate::publication::RabbitMqPublicationVerifierOptions`]).
+    #[cfg(feature = "rabbitmq")]
+    pub async fn assert_rabbit_published(
+        &self,
+        base_exchange: &str,
+        base_queue: &str,
+        aggregate_id: &str,
+    ) -> Result<(), ShakedownError> {
+        use crate::publication::{
+            PublicationObserveSpec, PublicationVerifier, RabbitMqPublicationVerifier,
+            RabbitMqPublicationVerifierOptions,
+        };
+
+        let rabbit_bindings = self.context.rabbit_bindings().ok_or_else(|| {
+            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
+                "rabbitmq bindings".to_string(),
+            ))
+        })?;
+
+        let verifier = RabbitMqPublicationVerifier;
+        let spec = PublicationObserveSpec {
+            aggregate_id: aggregate_id.to_string(),
+            logical_channel: base_queue.to_string(),
+            timeout: None,
+        };
+        let options = RabbitMqPublicationVerifierOptions {
+            exchange: rabbit_bindings.namespaced_name(base_exchange),
+            routing_key: aggregate_id.to_string(),
+        };
+        PublicationVerifier::assert_observed(&verifier, self.context, &spec, &options).await
+    }
+
     async fn assert_state(
         &self,
         aggregate_id: &str,
@@ -1029,5 +1067,45 @@ mod tests {
         assert!(format!("{:?}", row).contains("OutboxEntry"));
         assert!(matches!(sent.clone(), OutboxRowState::Sent));
         assert!(matches!(failed.clone(), OutboxRowState::Failed));
+    }
+}
+
+#[cfg(all(test, feature = "sqlite", feature = "rabbitmq"))]
+mod rabbit_pub_tests {
+    use super::Outbox;
+    use crate::error::{InfrastructureError, ShakedownError};
+    use crate::lifecycle::Context;
+    use crate::resources::{BuiltinResource, SqliteResource};
+
+    #[tokio::test]
+    async fn assert_rabbit_published_errors_without_rabbit_bindings() {
+        let mut context = Context::new();
+        context.register_builtin(BuiltinResource::Sqlite(SqliteResource::new()));
+        let mut event_log = crate::EventLog::new();
+        crate::run_scenario(
+            &mut context,
+            "outbox_rabbit_pub_no_bindings",
+            |scenario_context| {
+                Box::pin(async move {
+                    let outbox = Outbox::new(scenario_context);
+                    outbox.setup().await.expect("setup");
+                    let error = outbox
+                        .assert_rabbit_published("orders_ex", "proof", "order-1")
+                        .await
+                        .expect_err("rabbit bindings missing");
+                    match error {
+                        ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
+                            message,
+                        )) => {
+                            assert!(message.contains("rabbitmq"));
+                        }
+                        other => panic!("unexpected error: {other:?}"),
+                    }
+                })
+            },
+            &mut event_log,
+        )
+        .await
+        .expect("scenario should pass");
     }
 }
