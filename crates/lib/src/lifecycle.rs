@@ -616,6 +616,13 @@ impl Default for Context {
 }
 
 #[cfg(feature = "fault-injection")]
+fn attach_fault_handle_event_log(ctx: &mut Context, event_log: &mut EventLog) {
+    if let Some(handle) = ctx.fault_handle_mut() {
+        handle.attach_event_log(event_log);
+    }
+}
+
+#[cfg(feature = "fault-injection")]
 fn toxiproxy_api_url_from_handles(handles: &[ResourceHandle]) -> Option<String> {
     for handle in handles {
         let metadata = handle.metadata.as_ref()?;
@@ -1425,6 +1432,8 @@ where
     ))]
     shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Run);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting run phase");
+    #[cfg(feature = "fault-injection")]
+    attach_fault_handle_event_log(ctx, event_log);
     // Execute the scenario function
     let _ = scenario_fn(ctx).await;
 

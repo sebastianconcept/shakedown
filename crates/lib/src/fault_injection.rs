@@ -3,12 +3,22 @@
 //! [`FaultHandle`] wraps the `noxious-client` API and a small registry of proxy listen addresses.
 //! [`crate::lifecycle::run_scenario`] installs it when a [`crate::resources::ToxiproxyResource`]
 //! provisions successfully.
+//!
+//! Toxic add/remove and proxy reset append [`crate::event::Event`] rows with
+//! [`FAULT_INJECTION_EVENT_SOURCE`] so failure timelines correlate faults with harness and infra
+//! signals.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use displaydoc::Display;
 use noxious_client::Client as ToxiproxyClient;
 pub use noxious_client::{StreamDirection, Toxic, ToxicKind};
+
+use crate::event::{Event, EventLog};
+
+/// `source` field on [`Event`] records emitted by [`FaultHandle`] for timeline filtering.
+pub const FAULT_INJECTION_EVENT_SOURCE: &str = "fault-injection";
 
 /// Fault-injection failures (Toxiproxy control API and proxy registry).
 #[derive(Display, Debug, thiserror::Error)]
@@ -31,6 +41,16 @@ pub struct FaultHandle {
     client: ToxiproxyClient,
     api_base_url: String,
     proxy_listen_addresses: HashMap<String, String>,
+    /// Upstream address per proxy (for event messages).
+    proxy_upstreams: HashMap<String, String>,
+    /// Scenario log; only valid for the active [`crate::lifecycle::run_scenario`] call.
+    ///
+    /// Wrapped in [`Mutex`] so [`FaultHandle`] (and [`crate::lifecycle::Context`]) remain `Sync` while
+    /// still appending directly to the caller-owned [`EventLog`] for correct timeline ordering.
+    ///
+    /// Stored as [`usize`] (not `*mut EventLog`) so the mutex guard is `Send` for `#[tokio::test]` /
+    /// `Future: Send` scenarios.
+    event_log_bits: Mutex<Option<usize>>,
 }
 
 impl FaultHandle {
@@ -42,12 +62,24 @@ impl FaultHandle {
             client,
             api_base_url,
             proxy_listen_addresses: HashMap::new(),
+            proxy_upstreams: HashMap::new(),
+            event_log_bits: Mutex::new(None),
         }
     }
 
     /// Toxiproxy control API base URL passed to [`FaultHandle::new`].
     pub fn api_base_url(&self) -> &str {
         self.api_base_url.as_str()
+    }
+
+    /// Wire the scenario [`EventLog`] so toxic operations append [`Event`] rows (see [`FAULT_INJECTION_EVENT_SOURCE`]).
+    ///
+    /// [`crate::lifecycle::run_scenario`] calls this before the scenario body when a handle exists.
+    pub fn attach_event_log(&mut self, event_log: &mut EventLog) {
+        *self
+            .event_log_bits
+            .lock()
+            .expect("fault event log mutex poisoned") = Some(event_log as *mut EventLog as usize);
     }
 
     /// Create a named proxy (`listen` / `upstream` in Toxiproxy address form, e.g. `127.0.0.1:0`).
@@ -66,6 +98,8 @@ impl FaultHandle {
             .map_err(Error::ProxyCreationFailed)?;
         self.proxy_listen_addresses
             .insert(proxy_name.to_string(), proxy.config.listen.clone());
+        self.proxy_upstreams
+            .insert(proxy_name.to_string(), upstream.to_string());
         Ok(())
     }
 
@@ -81,6 +115,12 @@ impl FaultHandle {
             .add_toxic(toxic)
             .await
             .map_err(Error::ToxicOperationFailed)?;
+        let upstream = self.upstream_label(proxy_name);
+        let message = format!(
+            "action=added proxy='{proxy_name}' upstream={upstream} toxic='{}' kind={} direction={}",
+            toxic.name, toxic.kind, toxic.direction
+        );
+        self.push_fault_event(message);
         Ok(())
     }
 
@@ -96,6 +136,10 @@ impl FaultHandle {
             .remove_toxic(toxic_name)
             .await
             .map_err(Error::ToxicOperationFailed)?;
+        let upstream = self.upstream_label(proxy_name);
+        let message =
+            format!("action=removed proxy='{proxy_name}' upstream={upstream} toxic='{toxic_name}'");
+        self.push_fault_event(message);
         Ok(())
     }
 
@@ -108,12 +152,18 @@ impl FaultHandle {
             .await
             .map_err(Error::ToxicOperationFailed)?;
         let toxics = proxy.toxics().await.map_err(Error::ToxicOperationFailed)?;
+        let removed_count = toxics.len();
+        let upstream = self.upstream_label(proxy_name);
         for toxic in toxics {
             proxy
                 .remove_toxic(&toxic.name)
                 .await
                 .map_err(Error::ToxicOperationFailed)?;
         }
+        let message = format!(
+            "action=reset proxy='{proxy_name}' upstream={upstream} removed_toxics_count={removed_count}"
+        );
+        self.push_fault_event(message);
         Ok(())
     }
 
@@ -131,5 +181,29 @@ impl FaultHandle {
         Err(Error::ProxyNotFound {
             proxy_name: proxy_name.to_string(),
         })
+    }
+
+    fn upstream_label(&self, proxy_name: &str) -> String {
+        self.proxy_upstreams
+            .get(proxy_name)
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    /// Append a fault-injection [`Event`] when an event log was attached.
+    fn push_fault_event(&self, message: String) {
+        let guard = self
+            .event_log_bits
+            .lock()
+            .expect("fault event log mutex poisoned");
+        let Some(bits) = *guard else {
+            return;
+        };
+        let ptr = bits as *mut EventLog;
+        // SAFETY: Bits set only via `attach_event_log` from a `&mut EventLog` that outlives the
+        // scenario body; `run_scenario` clears `FaultHandle` before the log is dropped.
+        unsafe {
+            (*ptr).append(Event::info(FAULT_INJECTION_EVENT_SOURCE, message));
+        }
     }
 }
