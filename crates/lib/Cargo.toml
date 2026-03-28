@@ -38,6 +38,9 @@ mysql_async = { version = "0.36.1", optional = true }
 # SQLite for in-memory per-scenario resources (no Docker; SPECS: rusqlite + spawn_blocking)
 rusqlite = { version = "0.32", optional = true, default-features = false, features = ["bundled"] }
 
+# RabbitMQ client for readiness and publication verification (`rabbitmq` feature)
+lapin = { version = "4.3", optional = true }
+
 # Toxiproxy for fault injection (D-12 decision)
 noxious-client = "1.0"
 
@@ -102,8 +105,14 @@ mysql = [
 sqlite = ["dep:rusqlite"]
 # Outbox helpers (requires at least one relational feature)
 outbox = []
-# RabbitMQ integration (lapin + testcontainers; expanded in US-003)
-rabbitmq = []
+# RabbitMQ integration (Docker + lapin; aligns with kafka: diagnostics via testcontainers)
+rabbitmq = [
+    "dep:lapin",
+    "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/rabbitmq",
+    "diagnostics",
+]
 # MCP server support (post-MVP, optional)
 mcp = []
 

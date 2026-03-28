@@ -61,6 +61,8 @@ use crate::resources::MariaDBBindings;
 use crate::resources::MysqlBindings;
 #[cfg(feature = "postgres")]
 use crate::resources::PostgresBindings;
+#[cfg(feature = "rabbitmq")]
+use crate::resources::RabbitBindings;
 #[cfg(feature = "sqlite")]
 use crate::resources::SqliteBindings;
 use crate::resources::{
@@ -157,14 +159,15 @@ impl std::fmt::Display for ScenarioKind {
     }
 }
 
-/// Mutable scenario state for one run: resources, backend, ids, and optional Kafka bindings.
+/// Mutable scenario state for one run: resources, backend, ids, and optional messaging/DB bindings.
 ///
 /// Why: the harness and scenario body share one place for registered infrastructure and
 /// per-run metadata so [`run_scenario`] can drive provision → teardown without global singletons.
 ///
 /// How: constructed with [`Context::new`] or by `#[shakedown::test]`; the scenario function receives
 /// `&mut Context` to register extras or read [`Context::scenario_id`], [`Context::kafka_bindings`],
-/// and (with the `postgres` / `mariadb` / `mysql` / `sqlite` features) relational bindings accessors.
+/// [`Context::rabbit_bindings`] (with the `rabbitmq` feature), and (with the `postgres` / `mariadb` /
+/// `mysql` / `sqlite` features) relational bindings accessors.
 pub struct Context {
     /// Registered resources
     resources: Vec<RegisteredResource>,
@@ -174,6 +177,9 @@ pub struct Context {
     scenario_id: ScenarioId,
     /// Kafka bindings when a Kafka resource populated them (from provision metadata).
     kafka_bindings: Option<KafkaBindings>,
+    /// RabbitMQ bindings when a Rabbit resource populated them (`rabbitmq` feature).
+    #[cfg(feature = "rabbitmq")]
+    rabbit_bindings: Option<RabbitBindings>,
     /// Postgres bindings when a Postgres resource populated them (`postgres` feature).
     #[cfg(feature = "postgres")]
     postgres_bindings: Option<PostgresBindings>,
@@ -192,6 +198,7 @@ pub struct Context {
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -210,6 +217,8 @@ impl Context {
             environment_backend: Box::new(NoopEnvironmentBackend),
             scenario_id: ScenarioId::empty(),
             kafka_bindings: None,
+            #[cfg(feature = "rabbitmq")]
+            rabbit_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
             #[cfg(feature = "mariadb")]
@@ -222,6 +231,7 @@ impl Context {
             #[cfg(all(
                 any(
                     feature = "kafka",
+                    feature = "rabbitmq",
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
@@ -240,6 +250,8 @@ impl Context {
             environment_backend: Box::new(backend),
             scenario_id: ScenarioId::empty(),
             kafka_bindings: None,
+            #[cfg(feature = "rabbitmq")]
+            rabbit_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
             #[cfg(feature = "mariadb")]
@@ -252,6 +264,7 @@ impl Context {
             #[cfg(all(
                 any(
                     feature = "kafka",
+                    feature = "rabbitmq",
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
@@ -270,6 +283,8 @@ impl Context {
             environment_backend: Box::new(NoopEnvironmentBackend),
             scenario_id: ScenarioId::new(scenario_id),
             kafka_bindings: None,
+            #[cfg(feature = "rabbitmq")]
+            rabbit_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
             #[cfg(feature = "mariadb")]
@@ -282,6 +297,7 @@ impl Context {
             #[cfg(all(
                 any(
                     feature = "kafka",
+                    feature = "rabbitmq",
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
@@ -337,6 +353,18 @@ impl Context {
     /// Get a reference to Kafka bindings if available.
     pub fn kafka_bindings(&self) -> Option<&KafkaBindings> {
         self.kafka_bindings.as_ref()
+    }
+
+    /// Set RabbitMQ bindings for this scenario (typically after Rabbit provision).
+    #[cfg(feature = "rabbitmq")]
+    pub fn set_rabbit_bindings(&mut self, rabbit_bindings: RabbitBindings) {
+        self.rabbit_bindings = Some(rabbit_bindings);
+    }
+
+    /// Get RabbitMQ bindings if available (`rabbitmq` feature).
+    #[cfg(feature = "rabbitmq")]
+    pub fn rabbit_bindings(&self) -> Option<&RabbitBindings> {
+        self.rabbit_bindings.as_ref()
     }
 
     /// Set Postgres bindings for this scenario (typically after Postgres provision).
@@ -425,6 +453,7 @@ impl Context {
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -442,6 +471,7 @@ impl Context {
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -460,6 +490,7 @@ impl Context {
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -639,6 +670,59 @@ fn apply_resource_handles_to_kafka_bindings(ctx: &mut Context, handles: &[Resour
     }
 }
 
+#[cfg(feature = "rabbitmq")]
+/// If any handle metadata carries RabbitMQ engine fields, set [`Context::set_rabbit_bindings`].
+fn apply_resource_handles_to_rabbit_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for h in handles {
+        let Some(meta) = &h.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if engine != "rabbitmq" {
+            continue;
+        }
+        let amqp_uri = meta.get("amqp_uri").and_then(|v| v.as_str());
+        let host = meta.get("host").and_then(|v| v.as_str());
+        let port = meta
+            .get("port")
+            .and_then(|v| v.as_u64())
+            .map(|port| port as u16);
+        let username = meta.get("username").and_then(|v| v.as_str());
+        let password = meta.get("password").and_then(|v| v.as_str());
+        let vhost = meta.get("vhost").and_then(|v| v.as_str());
+        let resource_prefix = meta.get("resource_prefix").and_then(|v| v.as_str());
+        if let (
+            Some(amqp_uri),
+            Some(host),
+            Some(port),
+            Some(username),
+            Some(password),
+            Some(vhost),
+            Some(resource_prefix),
+        ) = (
+            amqp_uri,
+            host,
+            port,
+            username,
+            password,
+            vhost,
+            resource_prefix,
+        ) {
+            ctx.set_rabbit_bindings(RabbitBindings::new(
+                amqp_uri,
+                host,
+                port,
+                username,
+                password,
+                vhost,
+                resource_prefix,
+            ));
+        }
+    }
+}
+
 /// Run [`Resource::teardown`](crate::resources::Resource::teardown) on every registered resource, then backend teardown.
 async fn teardown_all_resources(ctx: &mut Context) {
     for resource in ctx.resources_mut() {
@@ -707,6 +791,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
 #[cfg(all(
     any(
         feature = "kafka",
+        feature = "rabbitmq",
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
@@ -730,6 +815,7 @@ macro_rules! shakedown_merge_diagnostics {
 #[cfg(all(
     any(
         feature = "kafka",
+        feature = "rabbitmq",
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
@@ -777,6 +863,7 @@ where
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -789,6 +876,7 @@ where
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -846,6 +934,8 @@ where
         match result {
             Ok(handles) => {
                 apply_resource_handles_to_kafka_bindings(ctx, &handles);
+                #[cfg(feature = "rabbitmq")]
+                apply_resource_handles_to_rabbit_bindings(ctx, &handles);
                 #[cfg(feature = "postgres")]
                 apply_resource_handles_to_postgres_bindings(ctx, &handles);
                 #[cfg(feature = "mariadb")]
@@ -866,6 +956,7 @@ where
                 #[cfg(all(
                     any(
                         feature = "kafka",
+                        feature = "rabbitmq",
                         feature = "postgres",
                         feature = "mariadb",
                         feature = "mysql",
@@ -888,6 +979,7 @@ where
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -928,6 +1020,7 @@ where
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -964,6 +1057,7 @@ where
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -979,6 +1073,7 @@ where
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -992,6 +1087,7 @@ where
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
@@ -1005,6 +1101,7 @@ where
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",

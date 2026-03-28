@@ -69,7 +69,7 @@ async fn with_kafka(ctx: &mut Context) { ... }
 async fn with_relational_resources(ctx: &mut Context) { ... }
 ```
 
-Accepted resource names today are `Fake`, `Kafka`, `Postgres`, `MariaDB`, `Mysql`, and `Sqlite` (feature-gated where applicable).
+Accepted resource names today are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, and `Sqlite` (feature-gated where applicable).
 
 Compile-time UI coverage for these attributes lives in `tests/trybuild/` (pass + `compile_fail` cases with `.stderr` snapshots).
 

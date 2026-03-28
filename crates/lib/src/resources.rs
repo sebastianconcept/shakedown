@@ -20,7 +20,7 @@ use std::fmt;
 /// can use as a key prefix, database name, virtual host, index name — whatever your system
 /// uses for isolation. Every scenario gets its own namespace; teardown drops it.
 ///
-/// The built-in resources (Kafka, Postgres, MariaDB, MySQL, SQLite) use specialised variants
+/// The built-in resources (Kafka, RabbitMQ, Postgres, MariaDB, MySQL, SQLite) use specialised variants
 /// of this logic internally. This helper gives you the same safety guarantees without having
 /// to reimplement the sanitisation rules:
 ///
@@ -73,6 +73,14 @@ pub fn sanitize_kafka_topic_prefix(scenario_id: &str) -> String {
     }
     out.push('_');
     out
+}
+
+/// Turn a scenario id into a safe RabbitMQ exchange/queue name prefix segment.
+///
+/// Uses the same character rules as [`sanitize_kafka_topic_prefix`] so topic-style and AMQP
+/// routing identifiers stay consistent across Kafka and Rabbit in one process.
+pub fn sanitize_rabbit_resource_prefix(scenario_id: &str) -> String {
+    sanitize_kafka_topic_prefix(scenario_id)
 }
 
 /// Turn a scenario id into a safe PostgreSQL database name (`shakedown_…`, max 63 bytes).
@@ -161,6 +169,10 @@ pub enum BuiltinResource {
     /// Docker-backed Kafka (KRaft, apache image via testcontainers-modules).
     Kafka(KafkaResource),
 
+    #[cfg(feature = "rabbitmq")]
+    /// Docker-backed RabbitMQ (official image via testcontainers-modules).
+    Rabbit(RabbitResource),
+
     #[cfg(feature = "postgres")]
     /// Docker-backed PostgreSQL (suite-shared container via testcontainers-modules).
     Postgres(PostgresResource),
@@ -188,6 +200,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Fake(r) => r.provision(scenario_id).await,
             #[cfg(feature = "kafka")]
             BuiltinResource::Kafka(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "rabbitmq")]
+            BuiltinResource::Rabbit(r) => r.provision(scenario_id).await,
             #[cfg(feature = "postgres")]
             BuiltinResource::Postgres(r) => r.provision(scenario_id).await,
             #[cfg(feature = "mariadb")]
@@ -204,6 +218,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Fake(r) => r.check_ready().await,
             #[cfg(feature = "kafka")]
             BuiltinResource::Kafka(r) => r.check_ready().await,
+            #[cfg(feature = "rabbitmq")]
+            BuiltinResource::Rabbit(r) => r.check_ready().await,
             #[cfg(feature = "postgres")]
             BuiltinResource::Postgres(r) => r.check_ready().await,
             #[cfg(feature = "mariadb")]
@@ -220,6 +236,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Fake(r) => r.apply_default_seed().await,
             #[cfg(feature = "kafka")]
             BuiltinResource::Kafka(r) => r.apply_default_seed().await,
+            #[cfg(feature = "rabbitmq")]
+            BuiltinResource::Rabbit(r) => r.apply_default_seed().await,
             #[cfg(feature = "postgres")]
             BuiltinResource::Postgres(r) => r.apply_default_seed().await,
             #[cfg(feature = "mariadb")]
@@ -236,6 +254,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Fake(r) => r.teardown().await,
             #[cfg(feature = "kafka")]
             BuiltinResource::Kafka(r) => r.teardown().await,
+            #[cfg(feature = "rabbitmq")]
+            BuiltinResource::Rabbit(r) => r.teardown().await,
             #[cfg(feature = "postgres")]
             BuiltinResource::Postgres(r) => r.teardown().await,
             #[cfg(feature = "mariadb")]
@@ -589,6 +609,291 @@ mod kafka_impl {
 
             self.holds_suite_ref = false;
             self.bootstrap_servers = None;
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "rabbitmq")]
+mod rabbit_impl {
+    use super::{sanitize_rabbit_resource_prefix, Resource, ResourceHandle};
+    use crate::error::{InfrastructureError, ScenarioId};
+    use async_trait::async_trait;
+    use lapin::{types::ShortString, Connection, ConnectionProperties};
+    use std::sync::OnceLock;
+    use testcontainers::core::Image;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::rabbitmq::RabbitMq;
+    use tokio::sync::Mutex;
+
+    const RABBITMQ_AMQP_PORT: u16 = 5672;
+
+    #[allow(clippy::large_enum_variant)]
+    enum SuiteBrokerState {
+        Idle,
+        Running {
+            host: String,
+            port: u16,
+            container: testcontainers::ContainerAsync<RabbitMq>,
+            refs: usize,
+            image_key: String,
+        },
+    }
+
+    static SUITE_BROKER: OnceLock<Mutex<SuiteBrokerState>> = OnceLock::new();
+
+    fn suite_broker_mutex() -> &'static Mutex<SuiteBrokerState> {
+        SUITE_BROKER.get_or_init(|| Mutex::new(SuiteBrokerState::Idle))
+    }
+
+    fn image_fingerprint(image: &RabbitMq, tag_override: &Option<String>) -> String {
+        let tag = tag_override.as_deref().unwrap_or_else(|| image.tag());
+        format!("{}:{}", image.name(), tag)
+    }
+
+    /// Docker-backed RabbitMQ using the official image via testcontainers-modules.
+    ///
+    /// **Suite lifecycle:** the first provision in the process starts a single broker; further
+    /// [`RabbitResource`] instances reuse it. The last successful [`Resource::teardown`] removes the
+    /// container when the refcount reaches zero.
+    #[derive(Debug)]
+    pub struct RabbitResource {
+        image: RabbitMq,
+        image_tag: Option<String>,
+        holds_suite_ref: bool,
+        host: Option<String>,
+        port: Option<u16>,
+        username: String,
+        password: String,
+        vhost: String,
+        amqp_uri: Option<String>,
+        resource_prefix: String,
+    }
+
+    impl Default for RabbitResource {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl RabbitResource {
+        /// Create default Docker-backed RabbitMQ settings (suite broker started on first provision).
+        pub fn new() -> Self {
+            Self {
+                image: RabbitMq::default(),
+                image_tag: None,
+                holds_suite_ref: false,
+                host: None,
+                port: None,
+                username: "guest".to_string(),
+                password: "guest".to_string(),
+                vhost: "/".to_string(),
+                amqp_uri: None,
+                resource_prefix: String::new(),
+            }
+        }
+
+        /// Override the image tag (e.g. pin a management image tag for parity). Name stays `rabbitmq`.
+        pub fn with_image_tag(mut self, tag: impl Into<String>) -> Self {
+            self.image_tag = Some(tag.into());
+            self
+        }
+
+        /// Apply tag override from `SHAKEDOWN_RABBITMQ_IMAGE_TAG` when set.
+        pub fn with_image_tag_from_env(mut self) -> Self {
+            if let Ok(tag) = std::env::var("SHAKEDOWN_RABBITMQ_IMAGE_TAG") {
+                let tag = tag.trim();
+                if !tag.is_empty() {
+                    self.image_tag = Some(tag.to_string());
+                }
+            }
+            self
+        }
+
+        fn map_tc_err(e: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
+            InfrastructureError::Backend(Box::new(std::io::Error::other(e.to_string())))
+        }
+
+        fn build_amqp_uri(host: &str, port: u16, username: &str, password: &str) -> String {
+            format!("amqp://{username}:{password}@{host}:{port}")
+        }
+    }
+
+    #[async_trait]
+    impl Resource for RabbitResource {
+        async fn provision(
+            &mut self,
+            scenario_id: &ScenarioId,
+        ) -> Result<Vec<ResourceHandle>, InfrastructureError> {
+            if self.holds_suite_ref {
+                return Err(InfrastructureError::AlreadyProvisioned("rabbitmq".into()));
+            }
+
+            self.resource_prefix = sanitize_rabbit_resource_prefix(scenario_id.as_str());
+            let want_key = image_fingerprint(&self.image, &self.image_tag);
+
+            let mut guard = suite_broker_mutex().lock().await;
+            let (host, port) = match &mut *guard {
+                SuiteBrokerState::Idle => {
+                    use testcontainers::core::ImageExt;
+                    let image = self.image.clone();
+                    let node = if let Some(ref tag) = self.image_tag {
+                        image
+                            .with_tag(tag.clone())
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
+                            .start()
+                            .await
+                            .map_err(Self::map_tc_err)?
+                    } else {
+                        image
+                            .with_label(
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                            )
+                            .start()
+                            .await
+                            .map_err(Self::map_tc_err)?
+                    };
+
+                    let mapped_port = node
+                        .get_host_port_ipv4(RABBITMQ_AMQP_PORT)
+                        .await
+                        .map_err(Self::map_tc_err)?;
+                    let host = "127.0.0.1".to_string();
+                    *guard = SuiteBrokerState::Running {
+                        host: host.clone(),
+                        port: mapped_port,
+                        container: node,
+                        refs: 1,
+                        image_key: want_key.clone(),
+                    };
+                    (host, mapped_port)
+                }
+                SuiteBrokerState::Running {
+                    host,
+                    port,
+                    refs,
+                    image_key,
+                    ..
+                } => {
+                    if *image_key != want_key {
+                        return Err(InfrastructureError::Backend(Box::new(
+                            std::io::Error::other(format!(
+                                "RabbitMQ suite broker already running as {image_key}; \
+                                 cannot start or join as {want_key}. Use one image:tag per process."
+                            )),
+                        )));
+                    }
+                    *refs += 1;
+                    (host.clone(), *port)
+                }
+            };
+            drop(guard);
+
+            let amqp_uri = Self::build_amqp_uri(&host, port, &self.username, &self.password);
+            self.host = Some(host.clone());
+            self.port = Some(port);
+            self.amqp_uri = Some(amqp_uri.clone());
+            self.holds_suite_ref = true;
+
+            Ok(vec![ResourceHandle {
+                id: format!("rabbitmq_{scenario_id}"),
+                connection_string: amqp_uri.clone(),
+                metadata: Some(serde_json::json!({
+                    "engine": "rabbitmq",
+                    "amqp_uri": amqp_uri,
+                    "host": host,
+                    "port": port,
+                    "username": self.username,
+                    "password": self.password,
+                    "vhost": self.vhost,
+                    "resource_prefix": self.resource_prefix,
+                })),
+            }])
+        }
+
+        async fn check_ready(&self) -> Result<(), InfrastructureError> {
+            let uri = self
+                .amqp_uri
+                .as_deref()
+                .ok_or_else(|| InfrastructureError::NotProvisioned("rabbitmq".into()))?;
+
+            const ATTEMPTS: u32 = 30;
+            for attempt in 0..ATTEMPTS {
+                match Connection::connect(uri, ConnectionProperties::default()).await {
+                    Ok(conn) => match conn.create_channel().await {
+                        Ok(_) => {
+                            let _ = conn.close(200, ShortString::from("shakedown_ready")).await;
+                            return Ok(());
+                        }
+                        Err(error) if attempt + 1 == ATTEMPTS => {
+                            return Err(InfrastructureError::Readiness {
+                                resource: "rabbitmq".into(),
+                                source: Box::new(std::io::Error::other(error.to_string())),
+                            });
+                        }
+                        Err(_) => {}
+                    },
+                    Err(error) if attempt + 1 == ATTEMPTS => {
+                        return Err(InfrastructureError::Readiness {
+                            resource: "rabbitmq".into(),
+                            source: Box::new(std::io::Error::other(error.to_string())),
+                        });
+                    }
+                    Err(_) => {}
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+
+            Err(InfrastructureError::Readiness {
+                resource: "rabbitmq".into(),
+                source: Box::new(std::io::Error::other(
+                    "RabbitMQ AMQP connection did not succeed in time",
+                )),
+            })
+        }
+
+        async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+            Ok(())
+        }
+
+        async fn teardown(&mut self) -> Result<(), InfrastructureError> {
+            if !self.holds_suite_ref {
+                self.host = None;
+                self.port = None;
+                self.amqp_uri = None;
+                self.resource_prefix.clear();
+                return Ok(());
+            }
+
+            let mut guard = suite_broker_mutex().lock().await;
+            let mut container_to_rm: Option<testcontainers::ContainerAsync<RabbitMq>> = None;
+            match &mut *guard {
+                SuiteBrokerState::Idle => {}
+                SuiteBrokerState::Running { refs, .. } => {
+                    *refs = refs.saturating_sub(1);
+                    if *refs == 0 {
+                        let taken = std::mem::replace(&mut *guard, SuiteBrokerState::Idle);
+                        if let SuiteBrokerState::Running { container, .. } = taken {
+                            container_to_rm = Some(container);
+                        }
+                    }
+                }
+            }
+            drop(guard);
+
+            if let Some(c) = container_to_rm {
+                c.rm().await.map_err(Self::map_tc_err)?;
+            }
+
+            self.holds_suite_ref = false;
+            self.host = None;
+            self.port = None;
+            self.amqp_uri = None;
+            self.resource_prefix.clear();
             Ok(())
         }
     }
@@ -1744,6 +2049,9 @@ mod sqlite_impl {
 #[cfg(feature = "kafka")]
 pub use kafka_impl::KafkaResource;
 
+#[cfg(feature = "rabbitmq")]
+pub use rabbit_impl::RabbitResource;
+
 #[cfg(feature = "postgres")]
 pub use postgres_impl::PostgresResource;
 
@@ -1797,6 +2105,63 @@ impl KafkaBindings {
     /// Return the topic name under this scenario's prefix.
     pub fn topic_namespace(&self, topic_name: &str) -> String {
         format!("{}{}", self.topic_prefix, topic_name)
+    }
+}
+
+/// AMQP connection details and scenario-scoped naming for RabbitMQ.
+///
+/// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
+/// [`crate::lifecycle::Context::rabbit_bindings`] after provision (`rabbitmq` feature).
+#[cfg(feature = "rabbitmq")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RabbitBindings {
+    /// Full AMQP URI (includes credentials; test images only — do not use in production).
+    pub amqp_uri: String,
+    /// Broker hostname or IP (typically `127.0.0.1`).
+    pub host: String,
+    /// Mapped host port for AMQP (`5672` in the default image).
+    pub port: u16,
+    /// Username (default `guest` for the official test image).
+    pub username: String,
+    /// Password (default `guest`).
+    pub password: String,
+    /// Virtual host (default `/`).
+    pub vhost: String,
+    /// Prefix for exchange and queue names for this scenario (isolation).
+    pub resource_prefix: String,
+    /// Optional client connection name prefix (mirrors [`KafkaBindings::client_id_prefix`]).
+    pub client_id_prefix: Option<String>,
+}
+
+#[cfg(feature = "rabbitmq")]
+impl RabbitBindings {
+    /// Build bindings from provision metadata fields.
+    pub fn new(
+        amqp_uri: impl Into<String>,
+        host: impl Into<String>,
+        port: u16,
+        username: impl Into<String>,
+        password: impl Into<String>,
+        vhost: impl Into<String>,
+        resource_prefix: impl Into<String>,
+    ) -> Self {
+        let resource_prefix = resource_prefix.into();
+        let prefix_trimmed = resource_prefix.trim_end_matches('_').to_string();
+        RabbitBindings {
+            amqp_uri: amqp_uri.into(),
+            host: host.into(),
+            port,
+            username: username.into(),
+            password: password.into(),
+            vhost: vhost.into(),
+            resource_prefix,
+            client_id_prefix: Some(format!("shakedown_{prefix_trimmed}")),
+        }
+    }
+
+    /// Compose a queue or exchange name under this scenario's prefix (same composition as [`KafkaBindings::topic_namespace`]).
+    pub fn namespaced_name(&self, logical_name: &str) -> String {
+        format!("{}{}", self.resource_prefix, logical_name)
     }
 }
 
@@ -2197,5 +2562,23 @@ mod tests {
         assert_eq!(bindings.topic_prefix, "shakedown_test");
         assert!(bindings.client_id_prefix.is_some());
         assert_eq!(bindings.topic_namespace("proof"), "shakedown_testproof");
+    }
+
+    #[cfg(feature = "rabbitmq")]
+    #[test]
+    fn rabbit_bindings_namespaced_name() {
+        let bindings = RabbitBindings::new(
+            "amqp://guest:guest@127.0.0.1:5672",
+            "127.0.0.1",
+            5672,
+            "guest",
+            "guest",
+            "/",
+            "shakedown_test_",
+        );
+        assert_eq!(bindings.amqp_uri, "amqp://guest:guest@127.0.0.1:5672");
+        assert_eq!(bindings.port, 5672);
+        assert_eq!(bindings.vhost, "/");
+        assert_eq!(bindings.namespaced_name("proof"), "shakedown_test_proof");
     }
 }

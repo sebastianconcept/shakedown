@@ -98,6 +98,7 @@
 /// Docker Engine diagnostics (bollard) when a Docker-backed resource feature is enabled.
 #[cfg(any(
     feature = "kafka",
+    feature = "rabbitmq",
     feature = "postgres",
     feature = "mariadb",
     feature = "mysql",
@@ -164,6 +165,7 @@ pub use crate::timeline::{
 
 #[cfg(any(
     feature = "kafka",
+    feature = "rabbitmq",
     feature = "postgres",
     feature = "mariadb",
     feature = "mysql",
@@ -175,6 +177,7 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
     not(feature = "no-diagnostics"),
     any(
         feature = "kafka",
+        feature = "rabbitmq",
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
@@ -203,6 +206,9 @@ pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResour
 
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
+
+#[cfg(feature = "rabbitmq")]
+pub use crate::resources::{RabbitBindings, RabbitResource};
 
 #[cfg(all(
     feature = "outbox",
