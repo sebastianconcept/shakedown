@@ -304,6 +304,9 @@ pub enum InfrastructureError {
     NotProvisioned(String),
     /// Environment backend error
     Backend(Box<dyn Error + Send + Sync>),
+    /// Fault injection (Toxiproxy control API) failure
+    #[cfg(feature = "fault-injection")]
+    FaultInjection(crate::fault_injection::Error),
 }
 
 impl std::fmt::Display for InfrastructureError {
@@ -337,6 +340,10 @@ impl std::fmt::Display for InfrastructureError {
             InfrastructureError::Backend(e) => {
                 write!(f, "Infrastructure error: Environment backend error: {}", e)
             }
+            #[cfg(feature = "fault-injection")]
+            InfrastructureError::FaultInjection(err) => {
+                write!(f, "Infrastructure error: Fault injection: {}", err)
+            }
         }
     }
 }
@@ -350,7 +357,16 @@ impl Error for InfrastructureError {
             InfrastructureError::AlreadyProvisioned(_) => None,
             InfrastructureError::NotProvisioned(_) => None,
             InfrastructureError::Backend(e) => Some(e.as_ref()),
+            #[cfg(feature = "fault-injection")]
+            InfrastructureError::FaultInjection(err) => Some(err),
         }
+    }
+}
+
+#[cfg(feature = "fault-injection")]
+impl From<crate::fault_injection::Error> for InfrastructureError {
+    fn from(err: crate::fault_injection::Error) -> Self {
+        InfrastructureError::FaultInjection(err)
     }
 }
 
@@ -595,6 +611,16 @@ mod tests {
         fn check_send_sync<T: Send + Sync>(_: T) {}
         // Then the compiler accepts it
         check_send_sync(infra_err);
+    }
+
+    #[cfg(feature = "fault-injection")]
+    #[test]
+    fn infrastructure_fault_injection_display_and_source() {
+        let inner = crate::fault_injection::Error::NotAvailable;
+        let infra_err = InfrastructureError::FaultInjection(inner);
+        let displayed = format!("{}", infra_err);
+        assert!(displayed.contains("Fault injection"), "{displayed}");
+        assert!(infra_err.source().is_some());
     }
 
     #[test]

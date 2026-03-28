@@ -194,6 +194,9 @@ pub struct Context {
     sqlite_bindings: Option<SqliteBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
+    /// Toxiproxy control handle when the `fault-injection` feature is on and Toxiproxy provisioned.
+    #[cfg(feature = "fault-injection")]
+    fault_handle: Option<crate::fault_injection::FaultHandle>,
     /// Per-container Docker stats rings (diagnostics); set by [`run_scenario`] when monitoring runs.
     #[cfg(all(
         any(
@@ -228,6 +231,8 @@ impl Context {
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
+            #[cfg(feature = "fault-injection")]
+            fault_handle: None,
             #[cfg(all(
                 any(
                     feature = "kafka",
@@ -261,6 +266,8 @@ impl Context {
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
+            #[cfg(feature = "fault-injection")]
+            fault_handle: None,
             #[cfg(all(
                 any(
                     feature = "kafka",
@@ -294,6 +301,8 @@ impl Context {
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
             scenario_kind: ScenarioKind::Normal,
+            #[cfg(feature = "fault-injection")]
+            fault_handle: None,
             #[cfg(all(
                 any(
                     feature = "kafka",
@@ -449,6 +458,31 @@ impl Context {
         self.scenario_kind = kind;
     }
 
+    /// Toxiproxy fault control when `fault-injection` is enabled and Toxiproxy was provisioned.
+    #[cfg(feature = "fault-injection")]
+    pub fn fault_handle(&self) -> Option<&crate::fault_injection::FaultHandle> {
+        self.fault_handle.as_ref()
+    }
+
+    /// Mutable access for harness code and advanced scenario wiring.
+    #[cfg(feature = "fault-injection")]
+    pub fn fault_handle_mut(&mut self) -> Option<&mut crate::fault_injection::FaultHandle> {
+        self.fault_handle.as_mut()
+    }
+
+    #[cfg(feature = "fault-injection")]
+    pub(crate) fn set_fault_handle(
+        &mut self,
+        fault_handle: Option<crate::fault_injection::FaultHandle>,
+    ) {
+        self.fault_handle = fault_handle;
+    }
+
+    #[cfg(feature = "fault-injection")]
+    pub(crate) fn clear_fault_handle(&mut self) {
+        self.fault_handle = None;
+    }
+
     /// Snapshot handle for per-container resource stats rings (diagnostics).
     #[cfg(all(
         any(
@@ -510,6 +544,32 @@ impl Default for Context {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[cfg(feature = "fault-injection")]
+fn toxiproxy_api_url_from_handles(handles: &[ResourceHandle]) -> Option<String> {
+    for handle in handles {
+        let metadata = handle.metadata.as_ref()?;
+        let engine = metadata.get("engine")?.as_str()?;
+        if engine != "toxiproxy" {
+            continue;
+        }
+        if let Some(url) = metadata.get("api_url").and_then(|value| value.as_str()) {
+            return Some(url.to_string());
+        }
+        if !handle.connection_string.is_empty() {
+            return Some(handle.connection_string.clone());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "fault-injection")]
+fn install_fault_handle_if_toxiproxy_provisioned(ctx: &mut Context, handles: &[ResourceHandle]) {
+    let Some(api_url) = toxiproxy_api_url_from_handles(handles) else {
+        return;
+    };
+    ctx.set_fault_handle(Some(crate::fault_injection::FaultHandle::new(api_url)));
 }
 
 #[cfg(feature = "postgres")]
@@ -729,6 +789,8 @@ async fn teardown_all_resources(ctx: &mut Context) {
         let _ = resource.teardown().await;
     }
     let _ = ctx.environment_backend_mut().teardown().await;
+    #[cfg(feature = "fault-injection")]
+    ctx.clear_fault_handle();
 }
 
 /// Runs a scenario through all lifecycle phases.
@@ -944,6 +1006,8 @@ where
                 apply_resource_handles_to_mysql_bindings(ctx, &handles);
                 #[cfg(feature = "sqlite")]
                 apply_resource_handles_to_sqlite_bindings(ctx, &handles);
+                #[cfg(feature = "fault-injection")]
+                install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
             }
             Err(e) => {
@@ -1168,6 +1232,13 @@ mod tests {
         // When we ask whether it has resources
         // Then it starts empty
         assert!(ctx.is_empty());
+    }
+
+    #[cfg(feature = "fault-injection")]
+    #[test]
+    fn fault_handle_none_without_toxiproxy_provision() {
+        let ctx = Context::new();
+        assert!(ctx.fault_handle().is_none());
     }
 
     #[test]

@@ -10,7 +10,8 @@
 //! ```
 
 use shakedown::{
-    run_scenario, BuiltinResource, Context, EventLog, RegisteredResource, ToxiproxyResource,
+    run_scenario, BuiltinResource, Context, EventLog, RegisteredResource, StreamDirection, Toxic,
+    ToxicKind, ToxiproxyResource,
 };
 
 #[tokio::test]
@@ -34,6 +35,38 @@ async fn toxiproxy_provisions_version_ready_and_teardown_clears_proxies() {
                     ),
                     "expected Toxiproxy builtin"
                 );
+                let faults = ctx
+                    .fault_handle_mut()
+                    .expect("FaultHandle after Toxiproxy provision");
+                faults
+                    .create_proxy("latency_proof", "127.0.0.1:0", "127.0.0.1:9")
+                    .await
+                    .expect("create_proxy");
+                assert!(
+                    faults.proxy_listen_address("latency_proof").is_some(),
+                    "listen address recorded after create_proxy"
+                );
+                let toxic = Toxic {
+                    kind: ToxicKind::Latency {
+                        latency: 50,
+                        jitter: 0,
+                    },
+                    name: "latency_toxic".to_string(),
+                    toxicity: 1.0,
+                    direction: StreamDirection::Downstream,
+                };
+                faults
+                    .add_toxic("latency_proof", &toxic)
+                    .await
+                    .expect("add_toxic");
+                faults
+                    .remove_toxic("latency_proof", "latency_toxic")
+                    .await
+                    .expect("remove_toxic");
+                faults
+                    .reset_proxy("latency_proof")
+                    .await
+                    .expect("reset_proxy");
             })
         },
         &mut event_log,
