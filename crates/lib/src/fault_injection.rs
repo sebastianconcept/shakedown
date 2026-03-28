@@ -209,3 +209,43 @@ impl FaultHandle {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::EventLevel;
+    use std::sync::mpsc::sync_channel;
+
+    // These tests compile only with `fault-injection`; run via
+    // `cargo test -p shakedown --features fault-injection` or `--all-features`.
+
+    #[test]
+    fn push_fault_event_delivers_when_sender_set() {
+        // Given a FaultHandle wired with a channel sender
+        let mut handle = FaultHandle::new("http://127.0.0.1:8474");
+        let (sender, receiver) = sync_channel(FAULT_EVENT_CHANNEL_CAPACITY);
+        handle.set_event_sender(sender);
+        let message = "action=test proxy='p' upstream=u";
+
+        // When we push a fault event
+        handle.push_fault_event(message.to_string());
+
+        // Then exactly one event arrives with the fault-injection source and message
+        let events: Vec<_> = receiver.try_iter().collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].source, FAULT_INJECTION_EVENT_SOURCE);
+        assert_eq!(events[0].level, EventLevel::Info);
+        assert_eq!(events[0].message, message);
+    }
+
+    #[test]
+    fn push_fault_event_no_panic_without_sender() {
+        // Given a FaultHandle with no event sender
+        let handle = FaultHandle::new("http://127.0.0.1:8474");
+
+        // When we push a fault event
+        handle.push_fault_event("noop".to_string());
+
+        // Then the call completes without panic
+    }
+}

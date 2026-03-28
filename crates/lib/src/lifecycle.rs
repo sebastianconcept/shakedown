@@ -1577,7 +1577,10 @@ mod tests {
     #[cfg(feature = "fault-injection")]
     #[test]
     fn fault_handle_none_without_toxiproxy_provision() {
+        // Given a fresh context with no Toxiproxy resource provisioned
         let ctx = Context::new();
+        // When we query for a fault handle
+        // Then none is installed
         assert!(ctx.fault_handle().is_none());
     }
 
