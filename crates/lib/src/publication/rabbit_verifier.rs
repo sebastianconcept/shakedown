@@ -123,7 +123,7 @@ impl PublicationVerifier for RabbitMqPublicationVerifier {
 
         let _ = connection.close(200, "shakedown_pub_timeout".into()).await;
 
-        Err(ShakedownError::OutboxPublicationTimeout {
+        Err(ShakedownError::OutboxPublicationNotFound {
             transport: "rabbitmq",
             channel: channel_label,
             aggregate_id: spec.aggregate_id.clone(),
@@ -137,10 +137,13 @@ mod tests {
 
     #[test]
     fn rabbit_options_roundtrip() {
+        // Given Rabbit verifier options with an exchange and routing key
         let options = RabbitMqPublicationVerifierOptions {
             exchange: "orders_ex".to_string(),
             routing_key: "agg-1".to_string(),
         };
+        // When we read the fields back
+        // Then they match the values used for publication proof context
         assert_eq!(options.exchange, "orders_ex");
         assert_eq!(options.routing_key, "agg-1");
     }
