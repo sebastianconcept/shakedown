@@ -3532,6 +3532,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream",
  "tonic",
+ "tonic-prost",
  "tower",
  "tracing",
  "uuid",

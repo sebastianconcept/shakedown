@@ -77,6 +77,11 @@ serial_test = "3"
 time = { version = "0.3", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+# Unary gRPC client for `bridge_grpc` integration test (no codegen; uses `tonic_prost::ProstCodec`).
+http = "1"
+prost = "0.14"
+tonic = { version = "0.14", default-features = false, features = ["transport"] }
+tonic-prost = "0.14"
 
 [features]
 # HTTP bridge types and `hyper` stack (default-on per `mvp-bridges` US-001)
@@ -213,6 +218,12 @@ required-features = ["kafka"]
 name = "bridge_http"
 path = "tests/bridge_http.rs"
 required-features = ["bridges"]
+
+# gRPC stub bridge + tonic unary client (localhost only; `grpc-bridges`)
+[[test]]
+name = "bridge_grpc"
+path = "tests/bridge_grpc.rs"
+required-features = ["grpc-bridges"]
 
 # Postgres + RabbitMQ outbox + AMQP publication proof (Docker); no `kafka` feature
 [[test]]
