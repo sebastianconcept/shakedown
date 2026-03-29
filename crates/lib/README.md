@@ -31,9 +31,10 @@ shakedown/
 ## Milestone status
 
 - **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka** and **RabbitMQ** publication proof (`assert_kafka_published`, `assert_rabbit_published`) on top of relational bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below).
+- **Also shipped:** `mvp-bridges` — **Service bridges** ([`HttpBridge`](src/bridge/traits.rs), [`StubBridge`](src/bridge/stub.rs), [`BridgeHandle`](src/bridge/handle.rs); [`GrpcBridge`](src/bridge/traits.rs) / [`GrpcStubBridge`](src/bridge/grpc_stub.rs) behind **`grpc-bridges`**) host real localhost HTTP/gRPC servers so scenarios assert outbound calls at the **network** layer; see [Service bridges](#service-bridges).
 - **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
 - **Previous milestone:** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
-- **Next milestone (roadmap):** `mvp-bridges` — minimal HTTP/gRPC bridge story; see the MVP table in adopted docs (`MVP.md` under `~/docs/shakedown/`).
+- **Roadmap:** Further milestones are listed in adopted product docs (`MVP.md` under `~/docs/shakedown/`).
 
 Default `cargo test -p shakedown` does not require Docker.
 
@@ -67,7 +68,9 @@ Align automation with the same commands as in this section:
 
 | Command | What it runs | Docker |
 |---------|----------------|--------|
-| `cargo test -p shakedown` | Unit + integration tests for default (minimal) features | Not required for the default set |
+| `cargo test -p shakedown` | Unit + integration tests for default (minimal) features; includes **`bridge_http`** when `bridges` is in default features | Not required for the default set |
+| `cargo test -p shakedown --features bridges --test bridge_http` | HTTP [`StubBridge`](src/bridge/stub.rs) + coded [`HttpBridge`](src/bridge/traits.rs) integration tests only | No |
+| `cargo test -p shakedown --features grpc-bridges --test bridge_grpc` | gRPC [`GrpcStubBridge`](src/bridge/grpc_stub.rs) unary integration test | No |
 | `cargo test -p shakedown --features outbox,sqlite` | Outbox helpers + SQLite vertical tests | Not required |
 | `cargo test -p shakedown --features outbox,rabbitmq,sqlite` | Adds Rabbit publication helpers’ unit coverage | Not required for SQLite-only tests |
 | `cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored` | **All** tests: normal + **`#[ignore]`** + doc tests; compiles diagnostics (bollard) | **Required** for ignored integration tests |
@@ -386,6 +389,275 @@ To use your verifier from tests, call `PublicationVerifier::assert_observed(&you
 ### SQLite limitations
 
 `SELECT FOR UPDATE SKIP LOCKED` is unavailable on SQLite, so claim-locking / publisher concurrency semantics are not validated on that path. Use Postgres/MariaDB/MySQL when you need lock semantics coverage.
+
+## Service bridges
+
+**What this is:** The harness starts **real HTTP/1.1 or gRPC servers on `127.0.0.1`** and records every inbound request/response on a [`BridgeHandle`](src/bridge/handle.rs). Your service-under-test keeps its **real HTTP or gRPC client stack** — serialization, timeouts, and status handling match production. This is **network-level** substitution (stub upstreams at URLs you inject into config), **not** in-process trait mocking or swapping implementations inside the same crate.
+
+**Lifecycle:** Register bridges on [`Context`](src/lifecycle.rs) **before** [`run_scenario`](src/lifecycle.rs). The harness starts bridge servers after provisioning/readiness/seed and **before** your scenario body runs, so [`Context::bridge_url`](src/lifecycle.rs) and [`Context::bridge`](src/lifecycle.rs) are valid **inside** the scenario closure. Events are logged with `source: "bridge"` for failure timelines.
+
+### Cargo features
+
+| Feature | Default? | What it enables |
+|---------|----------|-----------------|
+| **`bridges`** | Yes | HTTP stack: [`HttpBridge`](src/bridge/traits.rs), [`StubBridge`](src/bridge/stub.rs), [`BridgeRequest`](src/bridge/types.rs) / [`BridgeResponse`](src/bridge/types.rs), [`BridgeHandle`](src/bridge/handle.rs), hyper server ([`bridge/server.rs`](src/bridge/server.rs)). |
+| **`grpc-bridges`** | No (opt-in) | Unary gRPC: [`GrpcBridge`](src/bridge/traits.rs), [`GrpcStubBridge`](src/bridge/grpc_stub.rs), [`GrpcBridgeRequest`](src/bridge/grpc_types.rs) / [`GrpcBridgeResponse`](src/bridge/grpc_types.rs), tonic-hosted server ([`bridge/grpc_server.rs`](src/bridge/grpc_server.rs)). **Implies `bridges`.** |
+
+To compile Shakedown **without** HTTP bridge code (smaller graph), depend with `default-features = false` and list only the features you need (omit `bridges`).
+
+```toml
+# Default: HTTP bridges on (typical dev-dependency)
+shakedown = { version = "0.1.0" }
+
+# Opt in to gRPC bridges as well
+shakedown = { version = "0.1.0", features = ["grpc-bridges"] }
+
+# Minimal crate without bridge modules
+shakedown = { version = "0.1.0", default-features = false, features = ["kafka"] }
+```
+
+### HTTP bridges
+
+#### Tier 1: Quick-start (five-line core)
+
+Conceptually: **build** a [`StubBridge`](src/bridge/stub.rs), **register** it, **call** `bridge_url` inside the scenario, **issue** a real HTTP request. The runnable shape is a `#[tokio::test]` with [`run_scenario`](src/lifecycle.rs) (same pattern as [`tests/bridge_http.rs`](tests/bridge_http.rs)):
+
+```rust
+use shakedown::{run_scenario, Context, EventLog, StubBridge};
+
+#[tokio::test]
+async fn bridge_quickstart() {
+    let stub = StubBridge::new("api")
+        .on("GET", "/health")
+        .respond(200);
+    let mut ctx = Context::new();
+    ctx.register_http_bridge("api", stub).expect("register");
+
+    let mut event_log = EventLog::new();
+    run_scenario(
+        &mut ctx,
+        "bridge_quickstart",
+        |context| {
+            Box::pin(async move {
+                let client = reqwest::Client::new();
+                let base = context.bridge_url("api");
+                let response = client
+                    .get(format!("{base}/health"))
+                    .send()
+                    .await
+                    .expect("GET /health");
+                assert!(response.status().is_success());
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+}
+```
+
+The five **API** lines this illustrates are: `StubBridge::new(...).on(...).respond(...)`, `register_http_bridge(...)`, `run_scenario(...)`, `bridge_url(...)`, and the client `GET` — everything else is boilerplate shared with any scenario test.
+
+#### Tier 2: Simple assertions
+
+[`BridgeHandle::assert_called_times`](src/bridge/handle.rs) checks total inbound calls. [`BridgeHandle::assert_not_called`](src/bridge/handle.rs) expects **zero** calls (for example you registered a bridge but the scenario should not hit it, or you assert before traffic). Both return `Result<(), ScenarioError>`.
+
+```rust
+// After requests in the scenario body:
+context
+    .bridge("api")
+    .assert_called_times(1)
+    .expect("exactly one request");
+
+// When no request should have been sent to this bridge:
+context
+    .bridge("optional-upstream")
+    .assert_not_called()
+    .expect("upstream not contacted");
+```
+
+#### Tier 3: Targeted assertions (`assert_called_with`)
+
+Use [`BridgeHandle::assert_called_with`](src/bridge/handle.rs) with a predicate over [`RecordedCall`](src/bridge/handle.rs). The predicate typically uses [`RecordedCall::json`](src/bridge/handle.rs) (same idea as [`BridgeRequest::json`](src/bridge/types.rs)) for JSON bodies, or inspects headers via [`RecordedCall::headers`](src/bridge/handle.rs).
+
+```rust
+use shakedown::{Context, ScenarioError};
+
+fn assert_charge_payload(context: &Context) -> Result<(), ScenarioError> {
+    context.bridge("payments").assert_called_with("POST", "/v1/charge", |call| {
+        if let Ok(value) = call.json::<serde_json::Value>() {
+            value["amount"].as_f64() == Some(9.99)
+                && call
+                    .headers()
+                    .iter()
+                    .any(|(name, value)| name == "x-idempotency-key" && !value.is_empty())
+        } else {
+            false
+        }
+    })?;
+    Ok(())
+}
+```
+
+#### Tier 4: Custom views — `calls_matching`, ordering, nth call
+
+[`BridgeHandle::calls_matching`](src/bridge/handle.rs) returns a `Vec<RecordedCall>` for one method/path pair (HTTP) in arrival order. [`BridgeHandle::calls`](src/bridge/handle.rs) returns **all** calls. Use them when you need ordering guarantees, the **n**th request, or ad-hoc filters beyond the built-in assertions.
+
+```rust
+let handle = context.bridge("counter");
+let get_root = handle.calls_matching("GET", "/");
+assert!(get_root.len() >= 2, "expected at least two GET / calls");
+
+let first_serial: u32 = serde_json::from_slice(get_root[0].response_body().as_ref())
+    .ok()
+    .and_then(|value: serde_json::Value| value.get("n")?.as_u64())
+    .and_then(|value| u32::try_from(value).ok())
+    .expect("first response n");
+
+let all_calls = handle.calls();
+assert_eq!(all_calls.len(), get_root.len(), "only GET / in this example");
+```
+
+For gRPC recordings, **method** and **path** are both set to the full gRPC path (for example `/echo.EchoService/SayHello`); use the same strings in `calls_matching` as in your client (see [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs)).
+
+### Coded `HttpBridge` (stateful logic)
+
+Implement [`HttpBridge`](src/bridge/traits.rs) for custom routing, counters, or responses that depend on request content. Recording stays in the server wrapper; the trait stays easy to unit-test with a synthetic [`BridgeRequest`](src/bridge/types.rs).
+
+**Sketch** — an [`AtomicU32`](https://doc.rust-lang.org/std/sync/atomic/struct.AtomicU32.html) increments on every call and returns JSON `{"n": …}` (full test: [`coded_http_bridge_stateful_calls_matching_order`](tests/bridge_http.rs) in [`tests/bridge_http.rs`](tests/bridge_http.rs)):
+
+```rust
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use async_trait::async_trait;
+use shakedown::{BridgeContext, BridgeRequest, BridgeResponse, HttpBridge};
+
+struct CountingJsonBridge {
+    hits: AtomicU32,
+}
+
+#[async_trait]
+impl HttpBridge for CountingJsonBridge {
+    async fn handle(&self, _request: BridgeRequest, _context: &BridgeContext) -> BridgeResponse {
+        let next = self.hits.fetch_add(1, Ordering::SeqCst) + 1;
+        BridgeResponse::json(&serde_json::json!({ "n": next })).expect("json body")
+    }
+}
+```
+
+### gRPC bridges (`grpc-bridges`)
+
+Enable **`grpc-bridges`** in `Cargo.toml`. Unary RPCs are matched on the full service/method key (for example `echo.EchoService/SayHello` for [`GrpcStubBridge::on_method`](src/bridge/grpc_stub.rs)); the harness records the HTTP/2 path (leading `/`) on [`RecordedCall`](src/bridge/handle.rs) for assertions.
+
+#### Tier 1: Quick-start (`GrpcStubBridge`)
+
+Define a `prost::Message` response type (hand-written `#[derive(prost::Message)]` or codegen). Register a stub, then call your service through a real tonic client against [`Context::bridge_url`](src/lifecycle.rs) — full unary client setup is in [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs).
+
+```rust,ignore
+use shakedown::{run_scenario, Context, EventLog, GrpcStubBridge};
+// `SayHelloResponse`: prost message type (see tests/bridge_grpc.rs).
+
+#[tokio::test]
+async fn grpc_stub_quickstart() {
+    let stub = GrpcStubBridge::new("echo")
+        .on_method("echo.EchoService/SayHello")
+        .respond_proto(&SayHelloResponse {
+            message: String::from("hello"),
+        });
+
+    let mut ctx = Context::new();
+    ctx.register_grpc_bridge("echo", stub).expect("register");
+
+    let mut event_log = EventLog::new();
+    run_scenario(
+        &mut ctx,
+        "grpc_stub_quickstart",
+        |context| {
+            Box::pin(async move {
+                // tonic::transport::Endpoint + tonic::client::Grpc::unary — see tests/bridge_grpc.rs
+                let _base = context.bridge_url("echo");
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+}
+```
+
+#### Tier 2: Simple gRPC assertions
+
+When you expect calls:
+
+```rust
+const GRPC_PATH: &str = "/echo.EchoService/SayHello";
+
+handle.assert_called_times(1).expect("one unary call");
+handle
+    .assert_path_called_times(GRPC_PATH, GRPC_PATH, 1)
+    .expect("path-specific count");
+```
+
+For gRPC, pass the full HTTP/2 path (leading `/`) for **both** the `method` and `path` arguments to [`assert_path_called_times`](src/bridge/handle.rs) — the recorded [`RecordedCall`](src/bridge/handle.rs) stores that path in both fields.
+
+When the bridge must stay idle:
+
+```rust
+handle.assert_not_called().expect("no calls");
+```
+
+For gRPC, **`assert_path_called_times`** / **`assert_called_with`** take the **same** full path string for both `method` and `path` arguments (the recorded [`RecordedCall`](src/bridge/handle.rs) duplicates the gRPC path in both fields).
+
+#### Tier 3: Predicate on protobuf bytes
+
+```rust,ignore
+use prost::Message;
+// `SayHelloRequest`: prost message type (see tests/bridge_grpc.rs).
+
+handle.assert_called_with(GRPC_PATH, GRPC_PATH, |call| {
+    SayHelloRequest::decode(call.request_body().as_ref())
+        .map(|decoded| decoded.name == "alice")
+        .unwrap_or(false)
+})
+.expect("request body decodes");
+```
+
+#### Tier 4: Ordering and filtered views
+
+Same as HTTP: `calls_matching(GRPC_PATH, GRPC_PATH)` preserves order; index into the `Vec` for first/last/**n**th call; use `calls()` for the full list.
+
+#### Coded `GrpcBridge`
+
+Implement [`GrpcBridge`](src/bridge/traits.rs) when stubs are not enough: decode [`GrpcBridgeRequest::body`](src/bridge/grpc_types.rs), branch on [`service`](src/bridge/grpc_types.rs) / [`method`](src/bridge/grpc_types.rs), return [`GrpcBridgeResponse::ok_proto`](src/bridge/grpc_types.rs) or [`GrpcBridgeResponse::status`](src/bridge/grpc_types.rs). **Reference:** unary flow and client setup in [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs); swap `GrpcStubBridge` for your type in `register_grpc_bridge`.
+
+```rust,ignore
+use async_trait::async_trait;
+use shakedown::{BridgeContext, GrpcBridge, GrpcBridgeRequest, GrpcBridgeResponse};
+// `SayHelloResponse`: prost message type (see tests/bridge_grpc.rs).
+
+struct AlwaysHello;
+
+#[async_trait]
+impl GrpcBridge for AlwaysHello {
+    async fn handle(
+        &self,
+        request: GrpcBridgeRequest,
+        _context: &BridgeContext,
+    ) -> GrpcBridgeResponse {
+        if request.service == "echo.EchoService" && request.method == "SayHello" {
+            GrpcBridgeResponse::ok_proto(&SayHelloResponse {
+                message: "hello".into(),
+            })
+        } else {
+            GrpcBridgeResponse::status(tonic::Code::Unimplemented, "unknown method")
+        }
+    }
+}
+```
+
+### Verification and tests
+
+Manual verification steps for bridges (feature flags, integration tests, docs walk-through) are in the adopted feature pack: **`~/docs/shakedown/feature/mvp-bridges/VERIFY.md`**. Automated references: [`tests/bridge_http.rs`](tests/bridge_http.rs), [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs).
 
 ## See also
 
