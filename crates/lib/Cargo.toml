@@ -59,11 +59,14 @@ tracing = "0.1"
 hyper = { version = "1", optional = true, default-features = false, features = ["server", "http1"] }
 hyper-util = { version = "0.1", optional = true, default-features = false, features = ["tokio"] }
 http = { version = "1", optional = true }
+http-body = { version = "1", optional = true }
 http-body-util = { version = "0.1", optional = true }
 bytes = { version = "1", optional = true }
 # gRPC bridges (optional; tonic aligns with lockfile via testcontainers stack)
-tonic = { version = "0.14", optional = true, default-features = false }
+tonic = { version = "0.14", optional = true, default-features = false, features = ["transport"] }
 prost = { version = "0.14", optional = true }
+tokio-stream = { version = "0.1", optional = true, default-features = false }
+tower = { version = "0.5", optional = true, default-features = false, features = ["util"] }
 
 [dev-dependencies]
 async-trait = "0.1"
@@ -77,8 +80,21 @@ uuid = { version = "1", features = ["v4", "serde"] }
 [features]
 # HTTP bridge types and `hyper` stack (default-on per `mvp-bridges` US-001)
 default = ["bridges"]
-bridges = ["dep:hyper", "dep:hyper-util", "dep:http", "dep:http-body-util", "dep:bytes"]
-grpc-bridges = ["bridges", "dep:tonic", "dep:prost"]
+bridges = [
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:http",
+    "dep:http-body",
+    "dep:http-body-util",
+    "dep:bytes",
+]
+grpc-bridges = [
+    "bridges",
+    "dep:tonic",
+    "dep:prost",
+    "dep:tokio-stream",
+    "dep:tower",
+]
 # Infrastructure diagnostics (bollard); implied by Docker-backed resource features unless `no-diagnostics` is set
 diagnostics = ["dep:bollard", "dep:futures-util"]
 # Disables Docker socket diagnostics at compile time (stub APIs; no bollard client)

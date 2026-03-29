@@ -45,6 +45,11 @@
 
 #[cfg(feature = "bridges")]
 use crate::bridge::server::{spawn_http_bridge_server, HttpBridgeRuntime};
+#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+use crate::bridge::{
+    grpc_server::{spawn_grpc_bridge_server, GrpcBridgeRuntime},
+    GrpcBridge,
+};
 #[cfg(feature = "bridges")]
 use crate::bridge::{BridgeHandle, BridgeResources, HttpBridge};
 use crate::error::{
@@ -242,9 +247,15 @@ pub struct Context {
     /// Shutdown handles for HTTP bridge accept loops (paired with names for timeline messages).
     #[cfg(feature = "bridges")]
     http_bridge_runtimes: Vec<(String, HttpBridgeRuntime)>,
-    /// True once HTTP bridge servers have been started for this [`run_scenario`] invocation.
+    /// gRPC bridges registered before [`run_scenario`] starts tonic servers (after seed).
+    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    pending_grpc_bridges: Vec<(String, Arc<dyn GrpcBridge>)>,
+    /// Running gRPC bridge servers (tonic transport).
+    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    grpc_bridge_runtimes: Vec<(String, GrpcBridgeRuntime)>,
+    /// True once HTTP and gRPC bridge servers have been started for this [`run_scenario`] invocation.
     #[cfg(feature = "bridges")]
-    http_bridge_phase_complete: bool,
+    bridge_servers_phase_complete: bool,
 }
 
 impl Context {
@@ -293,8 +304,12 @@ impl Context {
             bridge_handles: HashMap::new(),
             #[cfg(feature = "bridges")]
             http_bridge_runtimes: Vec::new(),
+            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+            pending_grpc_bridges: Vec::new(),
+            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+            grpc_bridge_runtimes: Vec::new(),
             #[cfg(feature = "bridges")]
-            http_bridge_phase_complete: false,
+            bridge_servers_phase_complete: false,
         }
     }
 
@@ -343,8 +358,12 @@ impl Context {
             bridge_handles: HashMap::new(),
             #[cfg(feature = "bridges")]
             http_bridge_runtimes: Vec::new(),
+            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+            pending_grpc_bridges: Vec::new(),
+            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+            grpc_bridge_runtimes: Vec::new(),
             #[cfg(feature = "bridges")]
-            http_bridge_phase_complete: false,
+            bridge_servers_phase_complete: false,
         }
     }
 
@@ -393,8 +412,12 @@ impl Context {
             bridge_handles: HashMap::new(),
             #[cfg(feature = "bridges")]
             http_bridge_runtimes: Vec::new(),
+            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+            pending_grpc_bridges: Vec::new(),
+            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+            grpc_bridge_runtimes: Vec::new(),
             #[cfg(feature = "bridges")]
-            http_bridge_phase_complete: false,
+            bridge_servers_phase_complete: false,
         }
     }
 
@@ -513,10 +536,50 @@ impl Context {
         name: &str,
         bridge: impl HttpBridge,
     ) -> Result<(), ShakedownError> {
-        if self.http_bridge_phase_complete {
+        if self.bridge_servers_phase_complete {
             return Err(ShakedownError::Internal(InternalError::InvalidConfiguration(
                 String::from(
-                    "register_http_bridge called after HTTP bridges were started for this scenario run",
+                    "register_http_bridge called after bridge servers were started for this scenario run",
+                ),
+            )));
+        }
+        #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+        let grpc_name_taken = self
+            .pending_grpc_bridges
+            .iter()
+            .any(|(registered_name, _)| registered_name == name);
+        #[cfg(not(all(feature = "bridges", feature = "grpc-bridges")))]
+        let grpc_name_taken = false;
+
+        if self.bridge_handles.contains_key(name)
+            || self
+                .pending_http_bridges
+                .iter()
+                .any(|(registered_name, _)| registered_name == name)
+            || grpc_name_taken
+        {
+            return Err(ShakedownError::Internal(
+                InternalError::InvalidConfiguration(format!("duplicate bridge name '{name}'")),
+            ));
+        }
+        self.pending_http_bridges
+            .push((name.to_owned(), Arc::new(bridge)));
+        Ok(())
+    }
+
+    /// Register a gRPC bridge to be started after the seed phase of [`run_scenario`] (`grpc-bridges` + `bridges`).
+    ///
+    /// Call before [`run_scenario`]. After servers start, use [`Self::bridge_url`] and [`Self::bridge`].
+    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    pub fn register_grpc_bridge(
+        &mut self,
+        name: &str,
+        bridge: impl GrpcBridge,
+    ) -> Result<(), ShakedownError> {
+        if self.bridge_servers_phase_complete {
+            return Err(ShakedownError::Internal(InternalError::InvalidConfiguration(
+                String::from(
+                    "register_grpc_bridge called after bridge servers were started for this scenario run",
                 ),
             )));
         }
@@ -525,32 +588,36 @@ impl Context {
                 .pending_http_bridges
                 .iter()
                 .any(|(registered_name, _)| registered_name == name)
+            || self
+                .pending_grpc_bridges
+                .iter()
+                .any(|(registered_name, _)| registered_name == name)
         {
             return Err(ShakedownError::Internal(
-                InternalError::InvalidConfiguration(format!("duplicate HTTP bridge name '{name}'")),
+                InternalError::InvalidConfiguration(format!("duplicate bridge name '{name}'")),
             ));
         }
-        self.pending_http_bridges
+        self.pending_grpc_bridges
             .push((name.to_owned(), Arc::new(bridge)));
         Ok(())
     }
 
-    /// Client-facing base URL for a registered HTTP bridge (panics if the name is unknown).
+    /// Client-facing base URL for a registered bridge (HTTP or gRPC; panics if the name is unknown).
     #[cfg(feature = "bridges")]
     pub fn bridge_url(&self, name: &str) -> String {
         self.bridge_handles
             .get(name)
             .map(|handle| handle.client_url.clone())
-            .unwrap_or_else(|| panic!("unknown HTTP bridge '{name}'"))
+            .unwrap_or_else(|| panic!("unknown bridge '{name}'"))
     }
 
-    /// Handle for assertions on recorded HTTP traffic (panics if the name is unknown).
+    /// Handle for assertions on recorded bridge traffic (HTTP or gRPC; panics if the name is unknown).
     #[cfg(feature = "bridges")]
     pub fn bridge(&self, name: &str) -> &BridgeHandle {
         self.bridge_handles
             .get(name)
             .map(|arc| arc.as_ref())
-            .unwrap_or_else(|| panic!("unknown HTTP bridge '{name}'"))
+            .unwrap_or_else(|| panic!("unknown bridge '{name}'"))
     }
 
     /// Build an outbox helper bound to this context (`outbox` + relational features).
@@ -1278,16 +1345,30 @@ fn bridge_resources_from_context(ctx: &Context) -> Arc<BridgeResources> {
 }
 
 #[cfg(feature = "bridges")]
-async fn reset_http_bridges_at_run_start(ctx: &mut Context) {
+async fn reset_bridges_at_run_start(ctx: &mut Context) {
+    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    {
+        let runtimes = std::mem::take(&mut ctx.grpc_bridge_runtimes);
+        for (_name, mut runtime) in runtimes {
+            if let Some(sender) = runtime.shutdown_tx.take() {
+                let _ = sender.send(());
+            }
+            let _ = runtime.join.await;
+        }
+    }
     let runtimes = std::mem::take(&mut ctx.http_bridge_runtimes);
     for (_name, mut runtime) in runtimes {
         if let Some(sender) = runtime.shutdown_tx.take() {
-            let _: Result<(), ()> = sender.send(());
+            let _ = sender.send(());
         }
         let _ = runtime.join.await;
     }
     ctx.bridge_handles.clear();
-    ctx.http_bridge_phase_complete = false;
+    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    {
+        ctx.pending_grpc_bridges.clear();
+    }
+    ctx.bridge_servers_phase_complete = false;
 }
 
 #[cfg(feature = "bridges")]
@@ -1311,8 +1392,39 @@ async fn tcp_probe_local_bind_address(bind_address: &str) -> std::io::Result<()>
         Ok(Err(source)) => Err(source),
         Err(_elapsed) => Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
-            "HTTP bridge tcp probe timed out",
+            "bridge tcp probe timed out",
         )),
+    }
+}
+
+#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+async fn shutdown_grpc_bridge_runtimes_with_log(ctx: &mut Context, event_log: &mut EventLog) {
+    let runtimes = std::mem::take(&mut ctx.grpc_bridge_runtimes);
+    for (name, mut runtime) in runtimes {
+        let recorded_count = ctx
+            .bridge_handles
+            .get(&name)
+            .map(|handle| handle.calls().len())
+            .unwrap_or(0);
+        if let Some(sender) = runtime.shutdown_tx.take() {
+            let _ = sender.send(());
+        }
+        let _ = runtime.join.await;
+        event_log.append(Event::info(
+            "bridge",
+            format!("bridge '{name}' stopped; {recorded_count} calls recorded"),
+        ));
+    }
+}
+
+#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+async fn shutdown_grpc_bridge_runtimes_silent(ctx: &mut Context) {
+    let runtimes = std::mem::take(&mut ctx.grpc_bridge_runtimes);
+    for (_name, mut runtime) in runtimes {
+        if let Some(sender) = runtime.shutdown_tx.take() {
+            let _ = sender.send(());
+        }
+        let _ = runtime.join.await;
     }
 }
 
@@ -1326,7 +1438,7 @@ async fn shutdown_http_bridge_runtimes_with_log(ctx: &mut Context, event_log: &m
             .map(|handle| handle.calls().len())
             .unwrap_or(0);
         if let Some(sender) = runtime.shutdown_tx.take() {
-            let _: Result<(), ()> = sender.send(());
+            let _ = sender.send(());
         }
         let _ = runtime.join.await;
         event_log.append(Event::info(
@@ -1341,26 +1453,36 @@ async fn shutdown_http_bridge_runtimes_silent(ctx: &mut Context) {
     let runtimes = std::mem::take(&mut ctx.http_bridge_runtimes);
     for (_name, mut runtime) in runtimes {
         if let Some(sender) = runtime.shutdown_tx.take() {
-            let _: Result<(), ()> = sender.send(());
+            let _ = sender.send(());
         }
         let _ = runtime.join.await;
     }
 }
 
 #[cfg(feature = "bridges")]
-async fn start_and_readiness_http_bridges(
+async fn start_and_readiness_bridges(
     ctx: &mut Context,
     event_log: &mut EventLog,
 ) -> Result<(), ShakedownError> {
-    let pending = std::mem::take(&mut ctx.pending_http_bridges);
-    if pending.is_empty() {
-        ctx.http_bridge_phase_complete = true;
+    let pending_http = std::mem::take(&mut ctx.pending_http_bridges);
+    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    let pending_grpc = std::mem::take(&mut ctx.pending_grpc_bridges);
+
+    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    let nothing_to_start = pending_http.is_empty() && pending_grpc.is_empty();
+    #[cfg(not(all(feature = "bridges", feature = "grpc-bridges")))]
+    let nothing_to_start = pending_http.is_empty();
+
+    if nothing_to_start {
+        ctx.bridge_servers_phase_complete = true;
         return Ok(());
     }
+
     let resources = bridge_resources_from_context(ctx);
     let scenario_id_string = ctx.scenario_id().to_string();
-    let mut started_runtimes: Vec<(String, HttpBridgeRuntime)> = Vec::new();
-    for (bridge_name, bridge_impl) in pending {
+
+    let mut started_http_runtimes: Vec<(String, HttpBridgeRuntime)> = Vec::new();
+    for (bridge_name, bridge_impl) in pending_http {
         match spawn_http_bridge_server(
             bridge_name.clone(),
             bridge_impl,
@@ -1373,16 +1495,16 @@ async fn start_and_readiness_http_bridges(
             Ok((handle, runtime)) => {
                 let bind_display = handle.bind_address.clone();
                 ctx.bridge_handles.insert(bridge_name.clone(), handle);
-                started_runtimes.push((bridge_name.clone(), runtime));
+                started_http_runtimes.push((bridge_name.clone(), runtime));
                 event_log.append(Event::info(
                     "bridge",
                     format!("bridge '{bridge_name}' started on {bind_display}"),
                 ));
             }
             Err(error) => {
-                for (_rollback_name, mut runtime) in started_runtimes {
+                for (_rollback_name, mut runtime) in started_http_runtimes {
                     if let Some(sender) = runtime.shutdown_tx.take() {
-                        let _: Result<(), ()> = sender.send(());
+                        let _ = sender.send(());
                     }
                     let _ = runtime.join.await;
                 }
@@ -1395,7 +1517,50 @@ async fn start_and_readiness_http_bridges(
             }
         }
     }
-    ctx.http_bridge_runtimes = started_runtimes;
+    ctx.http_bridge_runtimes = started_http_runtimes;
+
+    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    {
+        let mut started_grpc_runtimes: Vec<(String, GrpcBridgeRuntime)> = Vec::new();
+        for (bridge_name, bridge_impl) in pending_grpc {
+            match spawn_grpc_bridge_server(
+                bridge_name.clone(),
+                bridge_impl,
+                scenario_id_string.clone(),
+                Arc::clone(&resources),
+                None,
+            )
+            .await
+            {
+                Ok((handle, runtime)) => {
+                    let bind_display = handle.bind_address.clone();
+                    ctx.bridge_handles.insert(bridge_name.clone(), handle);
+                    started_grpc_runtimes.push((bridge_name.clone(), runtime));
+                    event_log.append(Event::info(
+                        "bridge",
+                        format!("bridge '{bridge_name}' started on {bind_display}"),
+                    ));
+                }
+                Err(error) => {
+                    shutdown_http_bridge_runtimes_silent(ctx).await;
+                    for (_rollback_name, mut runtime) in started_grpc_runtimes {
+                        if let Some(sender) = runtime.shutdown_tx.take() {
+                            let _ = sender.send(());
+                        }
+                        let _ = runtime.join.await;
+                    }
+                    ctx.bridge_handles.clear();
+                    return Err(InfrastructureError::Provision {
+                        resource: format!("bridge:{bridge_name}"),
+                        source: Box::new(error),
+                    }
+                    .into());
+                }
+            }
+        }
+        ctx.grpc_bridge_runtimes = started_grpc_runtimes;
+    }
+
     let readiness_targets: Vec<(String, String)> = ctx
         .bridge_handles
         .iter()
@@ -1404,6 +1569,8 @@ async fn start_and_readiness_http_bridges(
     for (bridge_name, bind_address) in readiness_targets {
         if let Err(source) = tcp_probe_local_bind_address(bind_address.as_str()).await {
             shutdown_http_bridge_runtimes_silent(ctx).await;
+            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+            shutdown_grpc_bridge_runtimes_silent(ctx).await;
             ctx.bridge_handles.clear();
             return Err(InfrastructureError::Readiness {
                 resource: format!("bridge:{bridge_name}"),
@@ -1412,7 +1579,7 @@ async fn start_and_readiness_http_bridges(
             .into());
         }
     }
-    ctx.http_bridge_phase_complete = true;
+    ctx.bridge_servers_phase_complete = true;
     Ok(())
 }
 
@@ -1431,7 +1598,7 @@ where
     ctx.set_scenario_id(scenario_id);
 
     #[cfg(feature = "bridges")]
-    reset_http_bridges_at_run_start(ctx).await;
+    reset_bridges_at_run_start(ctx).await;
 
     #[cfg(all(
         any(
@@ -1692,7 +1859,7 @@ where
     }
 
     #[cfg(feature = "bridges")]
-    if let Err(error) = start_and_readiness_http_bridges(ctx, event_log).await {
+    if let Err(error) = start_and_readiness_bridges(ctx, event_log).await {
         let infrastructure_error = match &error {
             ShakedownError::Infrastructure(ref infrastructure) => Some(infrastructure),
             _ => None,
@@ -1700,7 +1867,7 @@ where
         event_log.append_raw(
             EventLevel::Error,
             "lifecycle",
-            format!("HTTP bridge phase failed: {error}"),
+            format!("Bridge phase failed: {error}"),
         );
         teardown_all_resources(ctx).await;
         #[cfg(all(
@@ -1797,6 +1964,8 @@ where
     ))]
     shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Teardown);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting teardown phase");
+    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    shutdown_grpc_bridge_runtimes_with_log(ctx, event_log).await;
     #[cfg(feature = "bridges")]
     shutdown_http_bridge_runtimes_with_log(ctx, event_log).await;
     teardown_all_resources(ctx).await;

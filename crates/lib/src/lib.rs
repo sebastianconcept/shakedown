@@ -160,8 +160,10 @@ pub use crate::bridge::{
     StubRoutePending,
 };
 
-#[cfg(feature = "grpc-bridges")]
-pub use crate::bridge::grpc;
+#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+pub use crate::bridge::{
+    GrpcBridge, GrpcBridgeRequest, GrpcBridgeResponse, GrpcStubBridge, GrpcStubMethodPending,
+};
 
 #[cfg(feature = "outbox")]
 pub use crate::publication::{

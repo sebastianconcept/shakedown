@@ -2,6 +2,8 @@
 
 use async_trait::async_trait;
 
+#[cfg(feature = "grpc-bridges")]
+use super::grpc_types::{GrpcBridgeRequest, GrpcBridgeResponse};
 use super::types::{BridgeContext, BridgeRequest, BridgeResponse};
 
 /// Handles inbound HTTP requests for a shakedown bridge.
@@ -11,6 +13,20 @@ use super::types::{BridgeContext, BridgeRequest, BridgeResponse};
 pub trait HttpBridge: Send + Sync + 'static {
     /// Produce an HTTP response for the given request.
     async fn handle(&self, request: BridgeRequest, context: &BridgeContext) -> BridgeResponse;
+}
+
+/// Handles inbound unary gRPC requests for a shakedown bridge (`grpc-bridges`).
+///
+/// Recording and framing happen in the server wrapper; this trait stays free of transport details.
+#[cfg(feature = "grpc-bridges")]
+#[async_trait]
+pub trait GrpcBridge: Send + Sync + 'static {
+    /// Produce a gRPC response for the given request.
+    async fn handle(
+        &self,
+        request: GrpcBridgeRequest,
+        context: &BridgeContext,
+    ) -> GrpcBridgeResponse;
 }
 
 #[cfg(all(test, feature = "bridges"))]

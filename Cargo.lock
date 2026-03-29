@@ -3509,6 +3509,7 @@ dependencies = [
  "displaydoc",
  "futures-util",
  "http 1.4.0",
+ "http-body 1.0.1",
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",
@@ -3529,7 +3530,9 @@ dependencies = [
  "time",
  "tokio",
  "tokio-postgres",
+ "tokio-stream",
  "tonic",
+ "tower",
  "tracing",
  "uuid",
 ]
