@@ -8,12 +8,16 @@ mod handle;
 #[cfg(feature = "bridges")]
 pub(crate) mod server;
 #[cfg(feature = "bridges")]
+mod stub;
+#[cfg(feature = "bridges")]
 mod traits;
 #[cfg(feature = "bridges")]
 mod types;
 
 #[cfg(feature = "bridges")]
 pub use handle::{BridgeHandle, RecordedCall, RecordedExchange};
+#[cfg(feature = "bridges")]
+pub use stub::{RouteMatch, StubBridge, StubRoutePending};
 #[cfg(feature = "bridges")]
 pub use traits::HttpBridge;
 #[cfg(feature = "bridges")]
