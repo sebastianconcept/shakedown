@@ -15,6 +15,8 @@ mod traits;
 mod types;
 
 #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+mod grpc_protocol_error;
+#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
 pub(crate) mod grpc_server;
 #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
 mod grpc_stub;

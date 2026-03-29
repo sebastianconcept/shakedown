@@ -23,6 +23,7 @@ use tonic::Code;
 use tonic::Status;
 use tower::Service;
 
+use super::grpc_protocol_error::GrpcBridgeProtocolError;
 use super::grpc_types::{GrpcBridgeRequest, GrpcBridgeResponse};
 use super::handle::{BridgeHandle, RecordedExchange};
 use super::traits::GrpcBridge;
@@ -97,9 +98,12 @@ pub(crate) struct GrpcBridgeTowerService {
 }
 
 impl GrpcBridgeTowerService {
-    async fn handle_request_inner(&self, request: Request<Body>) -> Result<Response<Body>, Status> {
+    async fn handle_request_inner(
+        &self,
+        request: Request<Body>,
+    ) -> Result<Response<Body>, GrpcBridgeProtocolError> {
         if request.method() != http::Method::POST {
-            return Err(Status::invalid_argument("gRPC requests must use POST"));
+            return Err(GrpcBridgeProtocolError::RequestMethodNotPost);
         }
 
         let timestamp = OffsetDateTime::now_utc();
@@ -111,11 +115,11 @@ impl GrpcBridgeTowerService {
         let body_bytes = body
             .collect()
             .await
-            .map_err(|_| Status::internal("failed to read gRPC request body"))?
+            .map_err(|_| GrpcBridgeProtocolError::RequestBodyReadFailed)?
             .to_bytes();
 
-        let (service_name, method_name) = parse_grpc_path(path_owned.as_str())
-            .ok_or_else(|| Status::unimplemented("invalid gRPC path"))?;
+        let (service_name, method_name) =
+            parse_grpc_path(path_owned.as_str()).ok_or(GrpcBridgeProtocolError::InvalidGrpcPath)?;
 
         let payload = decode_unary_grpc_payload(body_bytes.as_ref())?;
 
@@ -176,7 +180,7 @@ impl Service<Request<Body>> for GrpcBridgeTowerService {
             let outcome = service.handle_request_inner(request).await;
             Ok(match outcome {
                 Ok(response) => response,
-                Err(status) => status_to_http_response(status),
+                Err(error) => status_to_http_response(error.into()),
             })
         })
     }
@@ -205,21 +209,20 @@ fn header_map_to_pairs(headers: &HeaderMap) -> Vec<(String, String)> {
     pairs
 }
 
-fn decode_unary_grpc_payload(input: &[u8]) -> Result<&[u8], Status> {
+fn decode_unary_grpc_payload(input: &[u8]) -> Result<&[u8], GrpcBridgeProtocolError> {
     if input.len() < 5 {
-        return Err(Status::invalid_argument("gRPC message too short"));
+        return Err(GrpcBridgeProtocolError::UnaryFrameTooShort);
     }
     let compressed = input[0];
     if compressed != 0 {
-        return Err(Status::unimplemented(
-            "compressed gRPC request bodies are not supported",
-        ));
+        return Err(GrpcBridgeProtocolError::CompressedUnaryPayloadNotSupported);
     }
-    let message_length = u32::from_be_bytes(input[1..5].try_into().unwrap()) as usize;
+    let length_prefix: [u8; 4] = input[1..5]
+        .try_into()
+        .map_err(|_| GrpcBridgeProtocolError::UnaryLengthPrefixLayoutInvalid)?;
+    let message_length = u32::from_be_bytes(length_prefix) as usize;
     if input.len() < 5 + message_length {
-        return Err(Status::invalid_argument(
-            "gRPC length-prefix exceeds available body",
-        ));
+        return Err(GrpcBridgeProtocolError::UnaryPayloadLengthExceedsFrame);
     }
     Ok(&input[5..5 + message_length])
 }
@@ -238,7 +241,9 @@ fn status_from_bridge_response(response: &GrpcBridgeResponse) -> Status {
     Status::new(code, message)
 }
 
-fn grpc_bridge_response_to_http(response: &GrpcBridgeResponse) -> Result<Response<Body>, Status> {
+fn grpc_bridge_response_to_http(
+    response: &GrpcBridgeResponse,
+) -> Result<Response<Body>, GrpcBridgeProtocolError> {
     if response.status_code == Code::Ok as u32 {
         let framed = encode_grpc_frame(response.body.as_ref());
         let mut trailers = HeaderMap::new();
@@ -255,7 +260,7 @@ fn grpc_bridge_response_to_http(response: &GrpcBridgeResponse) -> Result<Respons
             .status(http::StatusCode::OK)
             .header(http::header::CONTENT_TYPE, GRPC_CONTENT_TYPE)
             .body(Body::new(StreamBody::new(stream)))
-            .map_err(|_| Status::internal("invalid gRPC OK response"))
+            .map_err(|_| GrpcBridgeProtocolError::GrpcOkHttpResponseBuildFailed)
     } else {
         Ok(status_to_http_response(status_from_bridge_response(
             response,
@@ -266,12 +271,12 @@ fn grpc_bridge_response_to_http(response: &GrpcBridgeResponse) -> Result<Respons
 fn merge_trailing_metadata(
     response: &GrpcBridgeResponse,
     trailers: &mut HeaderMap,
-) -> Result<(), Status> {
+) -> Result<(), GrpcBridgeProtocolError> {
     for (key, value) in &response.metadata {
         let name = HeaderName::try_from(key.as_str())
-            .map_err(|_| Status::internal("invalid trailing metadata name"))?;
+            .map_err(|_| GrpcBridgeProtocolError::TrailingMetadataHeaderNameInvalid)?;
         let header_value = HeaderValue::try_from(value.as_str())
-            .map_err(|_| Status::internal("invalid trailing metadata value"))?;
+            .map_err(|_| GrpcBridgeProtocolError::TrailingMetadataHeaderValueInvalid)?;
         trailers.insert(name, header_value);
     }
     Ok(())
@@ -281,12 +286,25 @@ fn status_to_http_response(status: Status) -> Response<Body> {
     let mut trailers = HeaderMap::new();
     if status.add_header(&mut trailers).is_err() {
         trailers.clear();
-        let _ = Status::internal("failed to serialize gRPC status").add_header(&mut trailers);
+        let _ = Status::from(GrpcBridgeProtocolError::GrpcStatusTrailerEncodingFailed)
+            .add_header(&mut trailers);
     }
     let stream = stream_iter(vec![Ok::<_, Infallible>(Frame::trailers(trailers))]);
-    Response::builder()
+    match Response::builder()
         .status(http::StatusCode::OK)
         .header(http::header::CONTENT_TYPE, GRPC_CONTENT_TYPE)
         .body(Body::new(StreamBody::new(stream)))
-        .expect("valid gRPC error response")
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(
+                target: "shakedown::bridge",
+                "failed to build gRPC error HTTP response: {}",
+                error
+            );
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = http::StatusCode::INTERNAL_SERVER_ERROR;
+            response
+        }
+    }
 }

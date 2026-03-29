@@ -32,7 +32,7 @@ shakedown/
 
 - **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka** and **RabbitMQ** publication proof (`assert_kafka_published`, `assert_rabbit_published`) on top of relational bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below).
 - **Also shipped:** `mvp-bridges` — **Service bridges** ([`HttpBridge`](src/bridge/traits.rs), [`StubBridge`](src/bridge/stub.rs), [`BridgeHandle`](src/bridge/handle.rs); [`GrpcBridge`](src/bridge/traits.rs) / [`GrpcStubBridge`](src/bridge/grpc_stub.rs) behind **`grpc-bridges`**) host real localhost HTTP/gRPC servers so scenarios assert outbound calls at the **network** layer; see [Service bridges](#service-bridges).
-- **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
+- **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle/mod.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
 - **Previous milestone:** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
 - **Roadmap:** Further milestones are listed in adopted product docs (`MVP.md` under `~/docs/shakedown/`).
 
@@ -221,7 +221,7 @@ async fn kafka_fault_example(ctx: &mut Context) -> Result<(), shakedown::Shakedo
 }
 ```
 
-Use [`run_scenario`](src/lifecycle.rs) with [`ScenarioKind::Faulty`](src/lifecycle.rs) (via [`Context::set_scenario_kind`](src/lifecycle.rs)) and register [`KafkaResource`](src/resources.rs) / [`ToxiproxyResource`](src/resources.rs) manually if you are not using the macro — see [`tests/fault_injection_kafka.rs`](tests/fault_injection_kafka.rs).
+Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lifecycle/mod.rs) (via [`Context::set_scenario_kind`](src/lifecycle/mod.rs)) and register [`KafkaResource`](src/resources.rs) / [`ToxiproxyResource`](src/resources.rs) manually if you are not using the macro — see [`tests/fault_injection_kafka.rs`](tests/fault_injection_kafka.rs).
 
 **`KafkaBindings` and host:port:** after provision, [`KafkaBindings::bootstrap_servers`](src/resources.rs) is the **single client-facing** address your code should use (`bootstrap.servers` for rdkafka, etc.). For **`ScenarioKind::Faulty`** with **`fault-injection`** enabled and **both** resources registered, the harness rewrites that field to the **Toxiproxy listen** address (pass-through proxy to the real broker) so toxics apply transparently. For **`ScenarioKind::Normal`**, or if Toxiproxy is not registered, **`bootstrap_servers` stays the direct broker** endpoint. Scenarios do not need separate “proxy vs direct” branches for binding selection — only for **when** you call [`FaultHandle`](src/fault_injection.rs) to add or remove toxics.
 
@@ -258,7 +258,7 @@ What it provides (read-only — never starts or stops containers; testcontainers
 
 - **Container log streaming** — stdout/stderr lines are recorded as [`InfraEvent::ContainerLog`](src/event.rs) entries in the same [`EventLog`](src/event.rs) used for failure timelines.
 - **Docker Engine events** — filtered to containers labeled `io.shakedown.framework=true` (applied by Shakedown resources), including `stop`, non-zero `die`, OOM, health transitions, and `restart`.
-- **Resource stats** — periodic CPU/memory/network samples in bounded per-container ring buffers, merged into the event log after the scenario; use [`Context::assert_resource`](src/lifecycle.rs) for `peak_memory_under` / `avg_cpu_under` when diagnostics are active.
+- **Resource stats** — periodic CPU/memory/network samples in bounded per-container ring buffers, merged into the event log after the scenario; use [`Context::assert_resource`](src/lifecycle/mod.rs) for `peak_memory_under` / `avg_cpu_under` when diagnostics are active.
 
 **Cargo features:**
 
@@ -281,7 +281,7 @@ async fn scenario(ctx: &mut Context) -> Result<(), shakedown::ShakedownError> {
 
 If the Docker socket is missing or unusable, [`try_connect`](src/diagnostics/connection.rs) returns `None`, diagnostics are skipped for that run, and scenarios **do not fail** because of observability alone.
 
-**Stats tuning** (optional): `SHAKEDOWN_STATS_INTERVAL_MS` (default `1000`) and `SHAKEDOWN_STATS_BUFFER_DEPTH` (default `60`, capped) control how often samples are taken and how many per container are retained for timelines and [`Context::assert_resource`](src/lifecycle.rs).
+**Stats tuning** (optional): `SHAKEDOWN_STATS_INTERVAL_MS` (default `1000`) and `SHAKEDOWN_STATS_BUFFER_DEPTH` (default `60`, capped) control how often samples are taken and how many per container are retained for timelines and [`Context::assert_resource`](src/lifecycle/mod.rs).
 
 **Integration tests** (`cargo test -p shakedown --features kafka`; see [Running tests](#running-tests) for `just` recipes):
 
@@ -380,7 +380,7 @@ See [`tests/outbox_rabbit.rs`](tests/outbox_rabbit.rs) for a full Docker-backed 
 Use this when your team’s bus is not Kafka or RabbitMQ (e.g. **AWS SQS** is not implemented first-party, but the trait is shaped so you can add an impl without a breaking API change).
 
 1. **Trait** — Implement [`PublicationVerifier`](src/publication/verifier.rs) for your type with an associated `Options` struct (exchange, queue URL, region, etc.).
-2. **`assert_observed`** — Take [`Context`](src/lifecycle.rs), a [`PublicationObserveSpec`](src/publication/spec.rs) (`aggregate_id`, `logical_channel`, optional `timeout`), and `&Self::Options`. Poll or consume until [`message_matches_aggregate_id`](src/publication/matching.rs) succeeds or the resolved deadline is exceeded ([`DEFAULT_PUBLICATION_OBSERVE_TIMEOUT`](src/publication/spec.rs): 20s when `timeout` is `None`).
+2. **`assert_observed`** — Take [`Context`](src/lifecycle/mod.rs), a [`PublicationObserveSpec`](src/publication/spec.rs) (`aggregate_id`, `logical_channel`, optional `timeout`), and `&Self::Options`. Poll or consume until [`message_matches_aggregate_id`](src/publication/matching.rs) succeeds or the resolved deadline is exceeded ([`DEFAULT_PUBLICATION_OBSERVE_TIMEOUT`](src/publication/spec.rs): 20s when `timeout` is `None`).
 3. **Bindings** — Read connection details from [`Context::kafka_bindings()`](src/resources.rs), [`Context::rabbit_bindings()`](src/resources.rs), or fields you attach via your own resources; keep scenario isolation consistent with how your publisher names topics/queues.
 4. **Errors** — When the resolved deadline passes without a matching message, return [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) with `transport` set to a stable label (e.g. `"sqs"`), matching first-party Kafka/Rabbit. Optionally return [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) if your verifier distinguishes an infrastructure/connectivity time limit from “no matching publication observed.”
 
@@ -394,13 +394,13 @@ To use your verifier from tests, call `PublicationVerifier::assert_observed(&you
 
 **What this is:** The harness starts **real HTTP/1.1 or gRPC servers on `127.0.0.1`** and records every inbound request/response on a [`BridgeHandle`](src/bridge/handle.rs). Your service-under-test keeps its **real HTTP or gRPC client stack** — serialization, timeouts, and status handling match production. This is **network-level** substitution (stub upstreams at URLs you inject into config), **not** in-process trait mocking or swapping implementations inside the same crate.
 
-**Lifecycle:** Register bridges on [`Context`](src/lifecycle.rs) **before** [`run_scenario`](src/lifecycle.rs). The harness starts bridge servers after provisioning/readiness/seed and **before** your scenario body runs, so [`Context::bridge_url`](src/lifecycle.rs) and [`Context::bridge`](src/lifecycle.rs) are valid **inside** the scenario closure. Events are logged with `source: "bridge"` for failure timelines.
+**Lifecycle:** Register bridges on [`Context`](src/lifecycle/mod.rs) **before** [`run_scenario`](src/lifecycle/mod.rs). The harness starts bridge servers after provisioning/readiness/seed and **before** your scenario body runs, so [`Context::bridge_url`](src/lifecycle/mod.rs) and [`Context::bridge`](src/lifecycle/mod.rs) return `Some(_)` **inside** the scenario closure for registered names (or [`None`] if the name is wrong or servers are not up yet). Events are logged with `source: "bridge"` for failure timelines.
 
 ### Cargo features
 
 | Feature | Default? | What it enables |
 |---------|----------|-----------------|
-| **`bridges`** | Yes | HTTP stack: [`HttpBridge`](src/bridge/traits.rs), [`StubBridge`](src/bridge/stub.rs), [`BridgeRequest`](src/bridge/types.rs) / [`BridgeResponse`](src/bridge/types.rs), [`BridgeHandle`](src/bridge/handle.rs), hyper server ([`bridge/server.rs`](src/bridge/server.rs)). |
+| **`bridges`** | Yes | HTTP stack: [`HttpBridge`](src/bridge/traits.rs), [`StubBridge`](src/bridge/stub.rs), [`BridgeRequest`](src/bridge/types/request.rs) / [`BridgeResponse`](src/bridge/types/response.rs), [`BridgeHandle`](src/bridge/handle.rs), hyper server ([`bridge/server.rs`](src/bridge/server.rs)). |
 | **`grpc-bridges`** | No (opt-in) | Unary gRPC: [`GrpcBridge`](src/bridge/traits.rs), [`GrpcStubBridge`](src/bridge/grpc_stub.rs), [`GrpcBridgeRequest`](src/bridge/grpc_types.rs) / [`GrpcBridgeResponse`](src/bridge/grpc_types.rs), tonic-hosted server ([`bridge/grpc_server.rs`](src/bridge/grpc_server.rs)). **Implies `bridges`.** |
 
 To compile Shakedown **without** HTTP bridge code (smaller graph), depend with `default-features = false` and list only the features you need (omit `bridges`).
@@ -420,7 +420,7 @@ shakedown = { version = "0.1.0", default-features = false, features = ["kafka"] 
 
 #### Tier 1: Quick-start (five-line core)
 
-Conceptually: **build** a [`StubBridge`](src/bridge/stub.rs), **register** it, **call** `bridge_url` inside the scenario, **issue** a real HTTP request. The runnable shape is a `#[tokio::test]` with [`run_scenario`](src/lifecycle.rs) (same pattern as [`tests/bridge_http.rs`](tests/bridge_http.rs)):
+Conceptually: **build** a [`StubBridge`](src/bridge/stub.rs), **register** it, **call** `bridge_url` inside the scenario, **issue** a real HTTP request. The runnable shape is a `#[tokio::test]` with [`run_scenario`](src/lifecycle/mod.rs) (same pattern as [`tests/bridge_http.rs`](tests/bridge_http.rs)):
 
 ```rust
 use shakedown::{run_scenario, Context, EventLog, StubBridge};
@@ -440,7 +440,7 @@ async fn bridge_quickstart() {
         |context| {
             Box::pin(async move {
                 let client = reqwest::Client::new();
-                let base = context.bridge_url("api");
+                let base = context.bridge_url("api").expect("api bridge url");
                 let response = client
                     .get(format!("{base}/health"))
                     .send()
@@ -460,41 +460,46 @@ The five **API** lines this illustrates are: `StubBridge::new(...).on(...).respo
 
 #### Tier 2: Simple assertions
 
-[`BridgeHandle::assert_called_times`](src/bridge/handle.rs) checks total inbound calls. [`BridgeHandle::assert_not_called`](src/bridge/handle.rs) expects **zero** calls (for example you registered a bridge but the scenario should not hit it, or you assert before traffic). Both return `Result<(), ScenarioError>`.
+[`BridgeHandle::assert_called_times`](src/bridge/handle.rs) checks total inbound calls. [`BridgeHandle::assert_not_called`](src/bridge/handle.rs) expects **zero** calls (for example you registered a bridge but the scenario should not hit it, or you assert before traffic). Both return `Result<(), ShakedownError>` with [`ShakedownError::Scenario`](src/error.rs) on assertion failure (the bridge call log survives a poisoned mutex via recovery in [`BridgeHandle`](src/bridge/handle.rs)).
 
 ```rust
 // After requests in the scenario body:
 context
     .bridge("api")
+    .expect("api bridge handle")
     .assert_called_times(1)
     .expect("exactly one request");
 
 // When no request should have been sent to this bridge:
 context
     .bridge("optional-upstream")
+    .expect("optional-upstream bridge handle")
     .assert_not_called()
     .expect("upstream not contacted");
 ```
 
 #### Tier 3: Targeted assertions (`assert_called_with`)
 
-Use [`BridgeHandle::assert_called_with`](src/bridge/handle.rs) with a predicate over [`RecordedCall`](src/bridge/handle.rs). The predicate typically uses [`RecordedCall::json`](src/bridge/handle.rs) (same idea as [`BridgeRequest::json`](src/bridge/types.rs)) for JSON bodies, or inspects headers via [`RecordedCall::headers`](src/bridge/handle.rs).
+Use [`BridgeHandle::assert_called_with`](src/bridge/handle.rs) with a predicate over [`RecordedCall`](src/bridge/handle.rs). The predicate typically uses [`RecordedCall::json`](src/bridge/handle.rs) (same idea as [`BridgeRequest::json`](src/bridge/types/request.rs)) for JSON bodies, or inspects headers via [`RecordedCall::headers`](src/bridge/handle.rs).
 
 ```rust
-use shakedown::{Context, ScenarioError};
+use shakedown::{Context, ShakedownError};
 
-fn assert_charge_payload(context: &Context) -> Result<(), ScenarioError> {
-    context.bridge("payments").assert_called_with("POST", "/v1/charge", |call| {
-        if let Ok(value) = call.json::<serde_json::Value>() {
-            value["amount"].as_f64() == Some(9.99)
-                && call
-                    .headers()
-                    .iter()
-                    .any(|(name, value)| name == "x-idempotency-key" && !value.is_empty())
-        } else {
-            false
-        }
-    })?;
+fn assert_charge_payload(context: &Context) -> Result<(), ShakedownError> {
+    context
+        .bridge("payments")
+        .expect("payments bridge handle")
+        .assert_called_with("POST", "/v1/charge", |call| {
+            if let Ok(value) = call.json::<serde_json::Value>() {
+                value["amount"].as_f64() == Some(9.99)
+                    && call
+                        .headers()
+                        .iter()
+                        .any(|(name, value)| name == "x-idempotency-key" && !value.is_empty())
+            } else {
+                false
+            }
+        })?;
     Ok(())
 }
 ```
@@ -504,7 +509,7 @@ fn assert_charge_payload(context: &Context) -> Result<(), ScenarioError> {
 [`BridgeHandle::calls_matching`](src/bridge/handle.rs) returns a `Vec<RecordedCall>` for one method/path pair (HTTP) in arrival order. [`BridgeHandle::calls`](src/bridge/handle.rs) returns **all** calls. Use them when you need ordering guarantees, the **n**th request, or ad-hoc filters beyond the built-in assertions.
 
 ```rust
-let handle = context.bridge("counter");
+let handle = context.bridge("counter").expect("counter bridge handle");
 let get_root = handle.calls_matching("GET", "/");
 assert!(get_root.len() >= 2, "expected at least two GET / calls");
 
@@ -522,7 +527,7 @@ For gRPC recordings, **method** and **path** are both set to the full gRPC path 
 
 ### Coded `HttpBridge` (stateful logic)
 
-Implement [`HttpBridge`](src/bridge/traits.rs) for custom routing, counters, or responses that depend on request content. Recording stays in the server wrapper; the trait stays easy to unit-test with a synthetic [`BridgeRequest`](src/bridge/types.rs).
+Implement [`HttpBridge`](src/bridge/traits.rs) for custom routing, counters, or responses that depend on request content. Recording stays in the server wrapper; the trait stays easy to unit-test with a synthetic [`BridgeRequest`](src/bridge/types/request.rs).
 
 **Sketch** — an [`AtomicU32`](https://doc.rust-lang.org/std/sync/atomic/struct.AtomicU32.html) increments on every call and returns JSON `{"n": …}` (full test: [`coded_http_bridge_stateful_calls_matching_order`](tests/bridge_http.rs) in [`tests/bridge_http.rs`](tests/bridge_http.rs)):
 
@@ -551,7 +556,7 @@ Enable **`grpc-bridges`** in `Cargo.toml`. Unary RPCs are matched on the full se
 
 #### Tier 1: Quick-start (`GrpcStubBridge`)
 
-Define a `prost::Message` response type (hand-written `#[derive(prost::Message)]` or codegen). Register a stub, then call your service through a real tonic client against [`Context::bridge_url`](src/lifecycle.rs) — full unary client setup is in [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs).
+Define a `prost::Message` response type (hand-written `#[derive(prost::Message)]` or codegen). Register a stub, then call your service through a real tonic client against [`Context::bridge_url`](src/lifecycle/mod.rs) — full unary client setup is in [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs).
 
 ```rust,ignore
 use shakedown::{run_scenario, Context, EventLog, GrpcStubBridge};
@@ -575,7 +580,7 @@ async fn grpc_stub_quickstart() {
         |context| {
             Box::pin(async move {
                 // tonic::transport::Endpoint + tonic::client::Grpc::unary — see tests/bridge_grpc.rs
-                let _base = context.bridge_url("echo");
+                let _base = context.bridge_url("echo").expect("echo bridge url");
             })
         },
         &mut event_log,

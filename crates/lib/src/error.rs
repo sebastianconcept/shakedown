@@ -10,7 +10,100 @@
 
 use std::error::Error;
 
+use displaydoc::Display;
+use thiserror::Error;
+
 use crate::phase::Phase;
+
+/// Categorized assertion failure during scenario execution (see [`ScenarioError::Assertion`]).
+///
+/// Bridge-specific variants carry structured fields; use [`AssertionError::Unspecified`] only when
+/// no dedicated variant exists yet.
+#[derive(Debug, Display, Error)]
+#[ignore_extra_doc_attributes]
+pub enum AssertionError {
+    /// bridge `{bridge_name}`: expected {expected} total calls, got {actual}; recorded: {recorded_calls_diagnostic}
+    ///
+    /// Cause: total inbound calls to the bridge proxy did not match (see [`crate::bridge::BridgeHandle::assert_called_times`]).
+    BridgeCallCountMismatch {
+        bridge_name: String,
+        expected: usize,
+        actual: usize,
+        recorded_calls_diagnostic: String,
+    },
+    /// bridge `{bridge_name}`: expected {expected} calls to `{method} {path}`, got {actual}; recorded: {recorded_calls_diagnostic}
+    ///
+    /// Cause: call count for a specific route did not match (see [`crate::bridge::BridgeHandle::assert_path_called_times`]).
+    BridgePathCallCountMismatch {
+        bridge_name: String,
+        method: String,
+        path: String,
+        expected: usize,
+        actual: usize,
+        recorded_calls_diagnostic: String,
+    },
+    /// bridge `{bridge_name}`: no call to `{method} {path}` satisfied the predicate; recorded: {recorded_calls_diagnostic}
+    ///
+    /// Cause: no recorded call matched the custom predicate (see [`crate::bridge::BridgeHandle::assert_called_with`]).
+    BridgePredicateUnmatched {
+        bridge_name: String,
+        method: String,
+        path: String,
+        recorded_calls_diagnostic: String,
+    },
+    /// bridge `{bridge_name}`: expected no calls, got {actual}; recorded: {recorded_calls_diagnostic}
+    ///
+    /// Cause: the bridge should have seen no traffic but calls were recorded.
+    BridgeUnexpectedCalls {
+        bridge_name: String,
+        actual: usize,
+        recorded_calls_diagnostic: String,
+    },
+    /// bridge `{bridge_name}`: expected no calls to `{method} {path}`, got {matching_call_count}; recorded: {recorded_calls_diagnostic}
+    ///
+    /// Cause: a specific route should have been unused but matching calls exist.
+    BridgePathUnexpectedCalls {
+        bridge_name: String,
+        method: String,
+        path: String,
+        matching_call_count: usize,
+        recorded_calls_diagnostic: String,
+    },
+    /// {detail}
+    ///
+    /// Cause: generic assertion message until a dedicated variant exists.
+    Unspecified { detail: String },
+}
+
+/// Explicit scenario step failure (see [`ScenarioError::StepFailed`]).
+///
+/// Add a new variant when a call site can classify the failure; use [`StepError::Unspecified`]
+/// until then.
+#[derive(Debug, Display, Error)]
+#[ignore_extra_doc_attributes]
+pub enum StepError {
+    /// {detail}
+    ///
+    /// Cause: scenario returned or propagated an explicit failure with this message.
+    Unspecified { detail: String },
+}
+
+/// Required scenario resource was not available (see [`ScenarioError::ResourceNotFound`]).
+///
+/// Use [`ResourceNotFoundError::Missing`] when the resource is identified by a registered name;
+/// use [`ResourceNotFoundError::Unspecified`] only when no dedicated variant exists yet.
+#[derive(Debug, Display, Error)]
+#[ignore_extra_doc_attributes]
+pub enum ResourceNotFoundError {
+    /// {resource_name}
+    ///
+    /// Cause: no registered or provisioned resource matches this name in the current scenario.
+    Missing { resource_name: String },
+    /// {detail}
+    ///
+    /// Cause: generic message until a dedicated variant exists.
+    Unspecified { detail: String },
+}
 
 /// Top-level error type for all Shakedown errors.
 ///
@@ -18,170 +111,103 @@ use crate::phase::Phase;
 /// - [`Scenario`](ShakedownError::Scenario): Errors related to scenario execution
 /// - [`Infrastructure`](ShakedownError::Infrastructure): Errors related to infrastructure setup/teardown
 /// - [`Internal`](ShakedownError::Internal): Unexpected errors in the framework itself
-#[derive(Debug)]
+///
+/// [`Display`] is derived via [`displaydoc`]. Nested [`InfrastructureError`] / [`InternalError`]
+/// values use pass-through formatting (`{0}`) so their own messages keep a single
+/// “Infrastructure error:” / “Internal error:” prefix (avoiding duplication when also wrapped).
+#[derive(Debug, Display)]
+#[ignore_extra_doc_attributes]
 pub enum ShakedownError {
-    /// Scenario-related errors (assertion failures, explicit step failures)
+    /// Scenario error: {0}
+    ///
+    /// Scenario phase: assertions, explicit step failures, missing resources, timeouts, or boxed
+    /// errors from user code.
     Scenario(ScenarioError),
-    /// Infrastructure-related errors (provision, readiness, teardown failures)
+    /// {0}
+    ///
+    /// Infrastructure phase: Docker, databases, brokers, Toxiproxy, or environment backend (see
+    /// [`InfrastructureError`]). Display is delegated — the inner value already starts with
+    /// “Infrastructure error:”.
     Infrastructure(InfrastructureError),
-    /// Internal errors (unexpected bugs, invariant violations)
+    /// {0}
+    ///
+    /// Harness or framework bug: poisoned mutex, invariant violation, invalid harness config (see
+    /// [`InternalError`]). Display is delegated — the inner value already starts with “Internal error:”.
     Internal(InternalError),
-    /// Outbox helpers require one relational binding in Context
+    /// No relational database binding on [`crate::lifecycle::Context`]. Outbox row helpers need exactly one of postgres, mariadb, mysql, or sqlite provisioned.
+    ///
+    /// Cause: `ctx.outbox()` (or similar) was used without registering and provisioning a relational resource.
     NoRelationalBindings,
-    /// Outbox assertion expected row was not found
+    /// Outbox row not found for aggregate_id='{aggregate_id}', event_type='{event_type}', expected status='{expected_status}'
+    ///
+    /// Cause: no row matches the aggregate id and event type, or the row exists but not in the expected terminal status (timing, wrong id, or application never wrote the event).
     OutboxRowNotFound {
         aggregate_id: String,
         event_type: String,
         expected_status: String,
     },
-    /// Outbox assertion found row in unexpected state
+    /// Outbox row in wrong state for aggregate_id='{aggregate_id}', event_type='{event_type}': expected '{expected}', got '{actual}'
+    ///
+    /// Cause: a row was found but its status column (or equivalent) does not match the assertion.
     OutboxWrongState {
         aggregate_id: String,
         event_type: String,
         expected: String,
         actual: String,
     },
-    /// Outbox row has an unknown status value
+    /// Outbox row has unknown status '{status}' for aggregate_id='{aggregate_id}', event_type='{event_type}'
+    ///
+    /// Cause: the stored status value is not one the harness recognises — often a schema or application bug.
     OutboxUnknownState {
         status: String,
         aggregate_id: String,
         event_type: String,
     },
-    /// Outbox retry assertion failed threshold check
+    /// Outbox retry below threshold for aggregate_id='{aggregate_id}': attempts={attempts} min_attempts={min_attempts}
+    ///
+    /// Cause: a retry-count assertion expected at least `min_attempts` attempts but observed fewer (often eventual consistency or backoff).
     OutboxRetryBelowThreshold {
         aggregate_id: String,
         attempts: i32,
         min_attempts: i32,
     },
-    /// Publication proof did not observe a matching message on the bus (distinct from row assertions)
+    /// [{transport}] Outbox publication not found for aggregate_id='{aggregate_id}' (channel='{channel}')
+    ///
+    /// Cause: no matching message was observed on the bus within the proof window (Kafka topic, Rabbit queue/exchange, etc.) — distinct from relational outbox row assertions.
     OutboxPublicationNotFound {
-        /// Transport label for timelines (`"kafka"`, `"rabbitmq"`, custom).
         transport: &'static str,
-        /// Logical channel (topic, queue, exchange, …).
         channel: String,
         aggregate_id: String,
     },
-    /// Publication proof exceeded the observation window without a match
+    /// [{transport}] Outbox publication observation timed out for aggregate_id='{aggregate_id}' (channel='{channel}')
+    ///
+    /// Cause: the observation window expired before a matching publication appeared (slow pipeline, wrong channel, or aggregate id mismatch).
     OutboxPublicationTimeout {
         transport: &'static str,
         channel: String,
         aggregate_id: String,
     },
-    /// Outbox payload deserialisation failed
+    /// Outbox payload deserialisation failed: {0}
+    ///
+    /// Cause: bytes from the outbox row could not be parsed as the expected type (schema drift or corruption).
     PayloadDeserialisation(String),
-    /// Outbox payload assertion predicate returned false
+    /// Outbox payload assertion failed for aggregate_id='{aggregate_id}', event_type='{event_type}'
+    ///
+    /// Cause: the payload was deserialised but the scenario’s predicate rejected it.
     PayloadAssertionFailed {
         aggregate_id: String,
         event_type: String,
     },
-    /// Container resource budget assertion failed (diagnostics stats ring)
+    /// Resource assertion failed for container '{container}', metric '{metric}': measured {measured} exceeds threshold {threshold} (phase: {phase:?})
+    ///
+    /// Cause: diagnostics resource sample (CPU, memory, …) crossed the bound declared in the scenario (see [`crate::event::InfraEvent::ResourceSample`]).
     ResourceAssertionFailed {
-        /// Container name matched against [`crate::event::InfraEvent::ResourceSample`]
         container: String,
-        /// Metric identifier (e.g. `peak_memory`, `avg_cpu`)
         metric: String,
-        /// Observed value (human-readable)
         measured: String,
-        /// Asserted bound (human-readable)
         threshold: String,
-        /// Lifecycle phase where the peak applied, or best-effort phase for the metric
         phase: Phase,
     },
-}
-
-impl std::fmt::Display for ShakedownError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ShakedownError::Scenario(e) => write!(f, "Scenario error: {}", e),
-            ShakedownError::Infrastructure(e) => write!(f, "Infrastructure error: {}", e),
-            ShakedownError::Internal(e) => write!(f, "Internal error: {}", e),
-            ShakedownError::NoRelationalBindings => {
-                write!(
-                    f,
-                    "No relational bindings are set on Context (enable postgres, mariadb, mysql, or sqlite and provision one resource)"
-                )
-            }
-            ShakedownError::OutboxRowNotFound {
-                aggregate_id,
-                event_type,
-                expected_status,
-            } => write!(
-                f,
-                "Outbox row not found for aggregate_id='{}', event_type='{}', expected status='{}'",
-                aggregate_id, event_type, expected_status
-            ),
-            ShakedownError::OutboxWrongState {
-                aggregate_id,
-                event_type,
-                expected,
-                actual,
-            } => write!(
-                f,
-                "Outbox row in wrong state for aggregate_id='{}', event_type='{}': expected '{}', got '{}'",
-                aggregate_id, event_type, expected, actual
-            ),
-            ShakedownError::OutboxUnknownState {
-                status,
-                aggregate_id,
-                event_type,
-            } => write!(
-                f,
-                "Outbox row has unknown status '{}' for aggregate_id='{}', event_type='{}'",
-                status, aggregate_id, event_type
-            ),
-            ShakedownError::OutboxRetryBelowThreshold {
-                aggregate_id,
-                attempts,
-                min_attempts,
-            } => write!(
-                f,
-                "Outbox retry below threshold for aggregate_id='{}': attempts={} min_attempts={}",
-                aggregate_id, attempts, min_attempts
-            ),
-            ShakedownError::OutboxPublicationNotFound {
-                transport,
-                channel,
-                aggregate_id,
-            } => write!(
-                f,
-                "[{}] Outbox publication not found for aggregate_id='{}' (channel='{}')",
-                transport, aggregate_id, channel
-            ),
-            ShakedownError::OutboxPublicationTimeout {
-                transport,
-                channel,
-                aggregate_id,
-            } => write!(
-                f,
-                "[{}] Outbox publication observation timed out for aggregate_id='{}' (channel='{}')",
-                transport, aggregate_id, channel
-            ),
-            ShakedownError::PayloadDeserialisation(error_message) => write!(
-                f,
-                "Outbox payload deserialisation failed: {}",
-                error_message
-            ),
-            ShakedownError::PayloadAssertionFailed {
-                aggregate_id,
-                event_type,
-            } => write!(
-                f,
-                "Outbox payload assertion failed for aggregate_id='{}', event_type='{}'",
-                aggregate_id, event_type
-            ),
-            ShakedownError::ResourceAssertionFailed {
-                container,
-                metric,
-                measured,
-                threshold,
-                phase,
-            } => write!(
-                f,
-                "Resource assertion failed for container '{}', metric '{}': measured {} exceeds threshold {} (phase: {:?})",
-                container, metric, measured, threshold, phase
-            ),
-        }
-    }
 }
 
 impl Error for ShakedownError {
@@ -222,49 +248,62 @@ impl From<InternalError> for ShakedownError {
     }
 }
 
+impl From<AssertionError> for ShakedownError {
+    fn from(err: AssertionError) -> Self {
+        ShakedownError::Scenario(ScenarioError::Assertion(err))
+    }
+}
+
+impl From<StepError> for ShakedownError {
+    fn from(err: StepError) -> Self {
+        ShakedownError::Scenario(ScenarioError::StepFailed(err))
+    }
+}
+
+impl From<ResourceNotFoundError> for ShakedownError {
+    fn from(err: ResourceNotFoundError) -> Self {
+        ShakedownError::Scenario(ScenarioError::ResourceNotFound(err))
+    }
+}
+
 /// Error types related to scenario execution.
 ///
 /// These errors indicate failures in the user's scenario logic,
 /// assertions, or explicit step failures.
-#[derive(Debug)]
+///
+/// [`Display`] is implemented via [`displaydoc`] on each variant’s doc comment (the first paragraph
+/// is the format string); following paragraphs document cause and troubleshooting for agents.
+#[derive(Debug, Display)]
+#[ignore_extra_doc_attributes]
 pub enum ScenarioError {
-    /// An assertion failed during scenario execution
-    Assertion(String),
-    /// A step in the scenario failed explicitly
-    StepFailed(String),
-    /// A required resource was not found
-    ResourceNotFound(String),
-    /// A scenario timeout occurred
-    Timeout {
-        /// The timeout duration
-        timeout: std::time::Duration,
-    },
-    /// Other scenario-specific errors
+    /// Scenario assertion error: {0}
+    ///
+    /// Cause: bridge call counts, outbox/payload checks, or other [`AssertionError`] variants failed.
+    Assertion(AssertionError),
+    /// Scenario step failed error: {0}
+    ///
+    /// Cause: scenario code reported an explicit failure (user message in [`StepError`]).
+    StepFailed(StepError),
+    /// Scenario resource not found error: {0}
+    ///
+    /// Cause: a named handle or binding was missing (wrong name or provision order).
+    ResourceNotFound(ResourceNotFoundError),
+    /// Scenario timeout error: {timeout:?}
+    ///
+    /// Cause: the scenario body or a step exceeded the configured wall-clock limit.
+    Timeout { timeout: std::time::Duration },
+    /// Scenario error: {0}
+    ///
+    /// Cause: boxed error returned from scenario or extension code.
     Other(Box<dyn Error + Send + Sync>),
-}
-
-impl std::fmt::Display for ScenarioError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ScenarioError::Assertion(msg) => write!(f, "Scenario assertion error: {}", msg),
-            ScenarioError::StepFailed(msg) => write!(f, "Scenario step failed error: {}", msg),
-            ScenarioError::ResourceNotFound(name) => {
-                write!(f, "Scenario resource not found error: {}", name)
-            }
-            ScenarioError::Timeout { timeout } => {
-                write!(f, "Scenario timeout error: {:?}", timeout)
-            }
-            ScenarioError::Other(e) => write!(f, "Scenario error: {}", e),
-        }
-    }
 }
 
 impl Error for ScenarioError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            ScenarioError::Assertion(_) => None,
-            ScenarioError::StepFailed(_) => None,
-            ScenarioError::ResourceNotFound(_) => None,
+            ScenarioError::Assertion(assertion) => Some(assertion),
+            ScenarioError::StepFailed(step) => Some(step),
+            ScenarioError::ResourceNotFound(resource) => Some(resource),
             ScenarioError::Timeout { .. } => None,
             ScenarioError::Other(e) => Some(e.as_ref()),
         }
@@ -275,81 +314,51 @@ impl Error for ScenarioError {
 ///
 /// These errors indicate failures in the underlying infrastructure
 /// that are not caused by the scenario logic itself.
-#[derive(Debug)]
+///
+/// [`Display`] is derived via [`displaydoc`]. For [`crate::fault_injection::Error`], map at the
+/// call site with `.map_err(InfrastructureError::FaultInjection)?` (no `From` impl — see project
+/// rust-style).
+#[derive(Debug, Display)]
+#[ignore_extra_doc_attributes]
 pub enum InfrastructureError {
-    /// Failed to provision a resource
-    Provision {
-        /// The resource that failed to provision
-        resource: String,
-        /// The underlying error
-        source: Box<dyn Error + Send + Sync>,
-    },
-    /// Failed to check resource readiness
-    Readiness {
-        /// The resource that failed readiness check
-        resource: String,
-        /// The underlying error
-        source: Box<dyn Error + Send + Sync>,
-    },
-    /// Failed to teardown a resource
-    Teardown {
-        /// The resource that failed to teardown
-        resource: String,
-        /// The underlying error
-        source: Box<dyn Error + Send + Sync>,
-    },
-    /// A resource was already provisioned
-    AlreadyProvisioned(String),
-    /// A resource was not provisioned when expected
-    NotProvisioned(String),
-    /// Environment backend error
-    Backend(Box<dyn Error + Send + Sync>),
-    /// Fault injection (Toxiproxy control API) failure.
+    /// Infrastructure error: Failed to provision {resource}: {source}
     ///
-    /// Map from [`crate::fault_injection::Error`] at the call site with
-    /// `.map_err(InfrastructureError::FaultInjection)?` — there is no `From` impl so the conversion
-    /// site stays visible when debugging (see project rust-style).
+    /// Cause: Docker, driver, or network failure while starting the resource, or invalid config.
+    Provision {
+        resource: String,
+        source: Box<dyn Error + Send + Sync>,
+    },
+    /// Infrastructure error: Resource '{resource}' not ready: {source}
+    ///
+    /// Cause: TCP up but deep readiness failed (migrations, auth, broker metadata, etc.).
+    Readiness {
+        resource: String,
+        source: Box<dyn Error + Send + Sync>,
+    },
+    /// Infrastructure error: Failed to teardown {resource}: {source}
+    ///
+    /// Cause: container stop/remove failed, connection leak, or timeout during cleanup.
+    Teardown {
+        resource: String,
+        source: Box<dyn Error + Send + Sync>,
+    },
+    /// Infrastructure error: Resource '{0}' already provisioned
+    ///
+    /// Cause: duplicate registration or double provision for the same logical resource name.
+    AlreadyProvisioned(String),
+    /// Infrastructure error: Resource '{0}' was not provisioned
+    ///
+    /// Cause: scenario code expects a handle (e.g. Kafka bindings) but that resource never ran provision in this run.
+    NotProvisioned(String),
+    /// Infrastructure error: Environment backend error: {0}
+    ///
+    /// Cause: I/O or integration failure in the environment backend (process, Docker socket, etc.).
+    Backend(Box<dyn Error + Send + Sync>),
+    /// Infrastructure error: Fault injection (Toxiproxy control API): {0}
+    ///
+    /// Cause: Toxiproxy HTTP API error, missing proxy, or harness invariant (see [`crate::fault_injection::Error`]).
     #[cfg(feature = "fault-injection")]
     FaultInjection(crate::fault_injection::Error),
-}
-
-impl std::fmt::Display for InfrastructureError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            InfrastructureError::Provision { resource, source } => write!(
-                f,
-                "Infrastructure error: Failed to provision {}: {}",
-                resource, source
-            ),
-            InfrastructureError::Readiness { resource, source } => write!(
-                f,
-                "Infrastructure error: Resource '{}' not ready: {}",
-                resource, source
-            ),
-            InfrastructureError::Teardown { resource, source } => write!(
-                f,
-                "Infrastructure error: Failed to teardown {}: {}",
-                resource, source
-            ),
-            InfrastructureError::AlreadyProvisioned(name) => write!(
-                f,
-                "Infrastructure error: Resource '{}' already provisioned",
-                name
-            ),
-            InfrastructureError::NotProvisioned(name) => write!(
-                f,
-                "Infrastructure error: Resource '{}' was not provisioned",
-                name
-            ),
-            InfrastructureError::Backend(e) => {
-                write!(f, "Infrastructure error: Environment backend error: {}", e)
-            }
-            #[cfg(feature = "fault-injection")]
-            InfrastructureError::FaultInjection(err) => {
-                write!(f, "Infrastructure error: Fault injection: {}", err)
-            }
-        }
-    }
 }
 
 impl Error for InfrastructureError {
@@ -422,48 +431,40 @@ impl std::fmt::Display for ScenarioId {
 ///
 /// These errors indicate problems with the Shakedown framework itself,
 /// not with user scenarios or infrastructure.
-#[derive(Debug)]
+///
+/// [`Display`] is derived via [`displaydoc`]. Backtraces on [`InternalError::WithBacktrace`] are not
+/// printed in [`Display`] (attach a debugger or log `Backtrace` when reporting).
+#[derive(Debug, Display)]
+#[ignore_extra_doc_attributes]
 pub enum InternalError {
-    /// An invariant was violated
+    /// Internal error: Invariant violation: {0}
+    ///
+    /// Cause: a harness invariant was broken (should not happen in normal runs — report as a bug).
     InvariantViolation(String),
-    /// An invalid configuration was provided
+    /// Internal error: Invalid configuration: {0}
+    ///
+    /// Cause: lifecycle or resource wiring is inconsistent (e.g. missing prerequisite before run).
     InvalidConfiguration(String),
-    /// An unexpected state was encountered
+    /// Internal error: Unexpected state: {0}
+    ///
+    /// Cause: harness state machine saw an illegal transition or stale handle.
     UnexpectedState(String),
-    /// A bug in the framework
+    /// Internal error: Framework bug: {0}
+    ///
+    /// Cause: explicit framework defect path; please report with a minimal repro.
     Bug(String),
-    /// An internal error with backtrace for debugging
+    /// Internal error: {msg}
+    ///
+    /// Cause: internal failure with captured backtrace (not shown in this message).
     WithBacktrace {
-        /// The error message
         msg: String,
         #[doc(hidden)]
         backtrace: std::backtrace::Backtrace,
     },
-    /// A `std::sync::Mutex` protecting harness state was poisoned (another thread panicked while holding the lock).
+    /// Internal error: Poisoned mutex ({0}): another thread panicked while holding the lock
+    ///
+    /// Cause: another thread panicked while holding a mutex used by the harness; the lock is poisoned.
     PoisonedMutex(String),
-}
-
-impl std::fmt::Display for InternalError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            InternalError::InvariantViolation(msg) => {
-                write!(f, "Internal error: Invariant violation: {}", msg)
-            }
-            InternalError::InvalidConfiguration(msg) => {
-                write!(f, "Internal error: Invalid configuration: {}", msg)
-            }
-            InternalError::UnexpectedState(msg) => {
-                write!(f, "Internal error: Unexpected state: {}", msg)
-            }
-            InternalError::Bug(msg) => write!(f, "Internal error: Framework bug: {}", msg),
-            InternalError::WithBacktrace { msg, .. } => write!(f, "Internal error: {}", msg),
-            InternalError::PoisonedMutex(context) => write!(
-                f,
-                "Internal error: Poisoned mutex ({}): another thread panicked while holding the lock",
-                context
-            ),
-        }
-    }
 }
 
 impl Error for InternalError {
@@ -506,12 +507,38 @@ mod tests {
 
     #[test]
     fn scenario_error_display() {
-        // Given a scenario assertion error carrying a message
-        let err = ScenarioError::Assertion("assertion failed".to_string());
+        // Given a scenario assertion error carrying an unspecified detail
+        let err = ScenarioError::Assertion(AssertionError::Unspecified {
+            detail: "assertion failed".to_string(),
+        });
         // When we format it for display
         let displayed = format!("{}", err);
-        // Then the output includes the scenario assertion prefix and message
+        // Then the output includes the scenario assertion prefix and detail
         assert_eq!(displayed, "Scenario assertion error: assertion failed");
+    }
+
+    #[test]
+    fn scenario_error_step_failed_display() {
+        // Given an explicit step failure with a detail message
+        let err = ScenarioError::StepFailed(StepError::Unspecified {
+            detail: "user aborted".to_string(),
+        });
+        // When we format it for display
+        let displayed = format!("{}", err);
+        // Then the scenario step prefix and detail appear
+        assert_eq!(displayed, "Scenario step failed error: user aborted");
+    }
+
+    #[test]
+    fn scenario_error_resource_not_found_display() {
+        // Given a missing named resource
+        let err = ScenarioError::ResourceNotFound(ResourceNotFoundError::Missing {
+            resource_name: "kafka".to_string(),
+        });
+        // When we format it for display
+        let displayed = format!("{}", err);
+        // Then the resource name is included
+        assert_eq!(displayed, "Scenario resource not found error: kafka");
     }
 
     #[test]
@@ -557,7 +584,9 @@ mod tests {
     #[test]
     fn shakedown_error_from_scenario() {
         // Given a scenario-level error
-        let scenario_err = ScenarioError::Assertion("failed".to_string());
+        let scenario_err = ScenarioError::Assertion(AssertionError::Unspecified {
+            detail: "failed".to_string(),
+        });
         // When we lift it into the top-level Shakedown error
         let shakedown_err: ShakedownError = scenario_err.into();
         // Then it is classified as a scenario error
@@ -590,7 +619,9 @@ mod tests {
     #[test]
     fn scenario_error_is_send_sync() {
         // Given a scenario error value
-        let err = ScenarioError::Assertion("test".to_string());
+        let err = ScenarioError::Assertion(AssertionError::Unspecified {
+            detail: "test".to_string(),
+        });
         // When we require Send + Sync at the type level
         fn check_send_sync<T: Send + Sync>(_: T) {}
         // Then the compiler accepts it

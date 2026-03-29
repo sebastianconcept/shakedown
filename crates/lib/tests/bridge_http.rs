@@ -52,7 +52,7 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
         |context| {
             Box::pin(async move {
                 let client = reqwest::Client::new();
-                let base = context.bridge_url("auth-api");
+                let base = context.bridge_url("auth-api").expect("auth-api bridge url");
 
                 // **When** the scenario exercises multiple endpoints (and leaves one path unused).
                 let health = client
@@ -77,7 +77,7 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
                     .expect("GET profile");
                 assert_eq!(profile.status(), 200);
 
-                let handle = context.bridge("auth-api");
+                let handle = context.bridge("auth-api").expect("auth-api bridge handle");
 
                 // **Then** total traffic, a POST body predicate, and absence of an unused route
                 // are all assertable.
@@ -142,7 +142,7 @@ async fn coded_http_bridge_stateful_calls_matching_order() {
         |context| {
             Box::pin(async move {
                 let client = reqwest::Client::new();
-                let base = context.bridge_url("counter");
+                let base = context.bridge_url("counter").expect("counter bridge url");
 
                 // **When** two GETs hit the same path, the handler advances internal state.
                 let first = client
@@ -158,7 +158,7 @@ async fn coded_http_bridge_stateful_calls_matching_order() {
                     .expect("second GET");
                 assert_eq!(second.status(), 200);
 
-                let handle = context.bridge("counter");
+                let handle = context.bridge("counter").expect("counter bridge handle");
                 let matched = handle.calls_matching("GET", "/");
                 assert_eq!(matched.len(), 2, "both GETs recorded for path /");
 

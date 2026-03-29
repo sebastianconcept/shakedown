@@ -18,7 +18,10 @@ use tokio::sync::oneshot;
 
 use super::handle::{BridgeHandle, RecordedExchange};
 use super::traits::HttpBridge;
-use super::types::{BridgeContext, BridgeError, BridgeRequest, BridgeResources, BridgeResponse};
+use super::types::{
+    internal_server_error_http_response, BridgeContext, BridgeError, BridgeRequest,
+    BridgeResources, BridgeResponse,
+};
 
 /// Join handle and shutdown signal for one HTTP bridge accept loop.
 pub(crate) struct HttpBridgeRuntime {
@@ -132,7 +135,18 @@ async fn serve_one(
     let body_bytes = match body.collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(_) => {
-            return Ok(BridgeResponse::status(400).into_http_response());
+            return Ok(match BridgeResponse::status(400).into_http_response() {
+                Ok(response) => response,
+                Err(error) => {
+                    tracing::error!(
+                        target: "shakedown::bridge",
+                        "bridge '{}' failed to build 400 response: {}",
+                        bridge_context.bridge_name,
+                        error
+                    );
+                    internal_server_error_http_response()
+                }
+            });
         }
     };
     let bridge_request = BridgeRequest::from_http_parts(parts, body_bytes);
@@ -149,7 +163,18 @@ async fn serve_one(
 
     let response_status = bridge_response.status;
     let response_body = bridge_response.body.clone();
-    let http_response = bridge_response.into_http_response();
+    let http_response = match bridge_response.into_http_response() {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(
+                target: "shakedown::bridge",
+                "bridge '{}' invalid HTTP response from stub: {}",
+                bridge_context.bridge_name,
+                error
+            );
+            internal_server_error_http_response()
+        }
+    };
 
     recorder.push_recorded_exchange(RecordedExchange {
         timestamp,
