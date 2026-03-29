@@ -156,7 +156,8 @@ pub use crate::phase::Phase;
 #[cfg(feature = "bridges")]
 pub use crate::bridge::{
     BridgeContext, BridgeError, BridgeHandle, BridgeRequest, BridgeResources, BridgeResponse,
-    BridgeResponseBuilder, HttpBridge, RecordedCall, RecordedExchange,
+    BridgeResponseBuilder, HttpBridge, RecordedCall, RecordedExchange, RouteMatch, StubBridge,
+    StubRoutePending,
 };
 
 #[cfg(feature = "grpc-bridges")]
