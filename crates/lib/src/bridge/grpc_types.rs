@@ -29,13 +29,13 @@ impl GrpcBridgeRequest {
 /// Outbound unary gRPC response from a [`super::traits::GrpcBridge`].
 #[derive(Debug, Clone)]
 pub struct GrpcBridgeResponse {
-    /// gRPC status code (`0` = OK). Use [`tonic::Code`] when building via [`Self::status`].
-    pub status_code: u32,
+    /// gRPC status code (`Code::Ok` = success). Use [`Self::status`] for non-OK replies.
+    pub status_code: Code,
     /// gRPC status message (non-OK).
     pub message: Option<String>,
     /// Trailing metadata entries (merged into gRPC trailers where valid).
     pub metadata: Vec<(String, String)>,
-    /// Protobuf-encoded OK response body (ignored when `status_code != 0`).
+    /// Protobuf-encoded OK response body (ignored when `status_code != Code::Ok`).
     pub body: Bytes,
 }
 
@@ -43,7 +43,7 @@ impl GrpcBridgeResponse {
     /// Successful response with a raw protobuf body (will be length-prefixed by the server).
     pub fn ok(message: Bytes) -> Self {
         Self {
-            status_code: Code::Ok as u32,
+            status_code: Code::Ok,
             message: None,
             metadata: Vec::new(),
             body: message,
@@ -64,7 +64,7 @@ impl GrpcBridgeResponse {
     /// Error response with the given gRPC status code and message.
     pub fn status(code: Code, message: &str) -> Self {
         Self {
-            status_code: code as u32,
+            status_code: code,
             message: Some(message.to_owned()),
             metadata: Vec::new(),
             body: Bytes::new(),

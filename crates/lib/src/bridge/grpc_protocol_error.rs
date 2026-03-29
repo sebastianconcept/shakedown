@@ -6,7 +6,6 @@
 use displaydoc::Display;
 use thiserror::Error;
 use tonic::Code;
-use tonic::Status;
 
 /// Protocol or transport failure in the gRPC bridge server request/response path.
 #[derive(Debug, Display, Error)]
@@ -53,8 +52,59 @@ impl GrpcBridgeProtocolError {
     }
 }
 
-impl From<GrpcBridgeProtocolError> for Status {
-    fn from(error: GrpcBridgeProtocolError) -> Self {
-        Status::new(error.status_code(), error.to_string())
+#[cfg(test)]
+mod tests {
+    use super::GrpcBridgeProtocolError;
+    use tonic::Code;
+
+    #[test]
+    fn status_code_maps_each_variant() {
+        // Given each protocol error variant
+        // When we read its tonic Code
+        // Then it matches the gRPC semantics table
+        assert_eq!(
+            GrpcBridgeProtocolError::RequestMethodNotPost.status_code(),
+            Code::InvalidArgument
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::RequestBodyReadFailed.status_code(),
+            Code::Internal
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::InvalidGrpcPath.status_code(),
+            Code::Unimplemented
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::UnaryFrameTooShort.status_code(),
+            Code::InvalidArgument
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::CompressedUnaryPayloadNotSupported.status_code(),
+            Code::Unimplemented
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::UnaryLengthPrefixLayoutInvalid.status_code(),
+            Code::InvalidArgument
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::UnaryPayloadLengthExceedsFrame.status_code(),
+            Code::InvalidArgument
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::GrpcOkHttpResponseBuildFailed.status_code(),
+            Code::Internal
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::TrailingMetadataHeaderNameInvalid.status_code(),
+            Code::Internal
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::TrailingMetadataHeaderValueInvalid.status_code(),
+            Code::Internal
+        );
+        assert_eq!(
+            GrpcBridgeProtocolError::GrpcStatusTrailerEncodingFailed.status_code(),
+            Code::Internal
+        );
     }
 }

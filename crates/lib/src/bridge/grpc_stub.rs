@@ -134,7 +134,7 @@ mod tests {
         // When the bridge handles a matching request
         let response = stub.handle(request, &context).await;
         // Then the status is OK and the body round-trips through prost decode (test-only)
-        assert_eq!(response.status_code, Code::Ok as u32);
+        assert_eq!(response.status_code, Code::Ok);
         let decoded = SampleMessage::decode(response.body.as_ref())
             .expect("decode response body produced by stub");
         assert_eq!(decoded.value, 7);
@@ -155,6 +155,6 @@ mod tests {
         // When the method does not match any route
         let response = stub.handle(request, &context).await;
         // Then the bridge returns UNIMPLEMENTED
-        assert_eq!(response.status_code, Code::Unimplemented as u32);
+        assert_eq!(response.status_code, Code::Unimplemented);
     }
 }
