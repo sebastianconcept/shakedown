@@ -3511,6 +3511,7 @@ dependencies = [
  "http 1.4.0",
  "http-body-util",
  "hyper 1.8.1",
+ "hyper-util",
  "lapin",
  "mysql_async",
  "noxious-client",

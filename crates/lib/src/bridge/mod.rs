@@ -6,6 +6,8 @@
 #[cfg(feature = "bridges")]
 mod handle;
 #[cfg(feature = "bridges")]
+pub(crate) mod server;
+#[cfg(feature = "bridges")]
 mod traits;
 #[cfg(feature = "bridges")]
 mod types;
