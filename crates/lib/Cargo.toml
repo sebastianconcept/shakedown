@@ -17,7 +17,7 @@ displaydoc = "0.2"
 time = { version = "0.3", default-features = false, features = ["formatting"] }
 
 # Async runtime (public async lifecycle API)
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 async-trait = "0.1"
 
 # Kafka integration (behind feature gate per D-2)
@@ -57,6 +57,7 @@ tracing = "0.1"
 
 # HTTP bridges (MVP `mvp-bridges`; hyper 1.x + http 1.x per SPECS)
 hyper = { version = "1", optional = true, default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1", optional = true, default-features = false, features = ["tokio"] }
 http = { version = "1", optional = true }
 http-body-util = { version = "0.1", optional = true }
 bytes = { version = "1", optional = true }
@@ -76,7 +77,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 [features]
 # HTTP bridge types and `hyper` stack (default-on per `mvp-bridges` US-001)
 default = ["bridges"]
-bridges = ["dep:hyper", "dep:http", "dep:http-body-util", "dep:bytes"]
+bridges = ["dep:hyper", "dep:hyper-util", "dep:http", "dep:http-body-util", "dep:bytes"]
 grpc-bridges = ["bridges", "dep:tonic", "dep:prost"]
 # Infrastructure diagnostics (bollard); implied by Docker-backed resource features unless `no-diagnostics` is set
 diagnostics = ["dep:bollard", "dep:futures-util"]
@@ -189,6 +190,12 @@ required-features = ["kafka"]
 name = "diagnostics_graceful"
 path = "tests/diagnostics_graceful.rs"
 required-features = ["kafka"]
+
+# HTTP bridge server + Context (`bridges` is default; gate for no-default-features builds)
+[[test]]
+name = "bridge_http"
+path = "tests/bridge_http.rs"
+required-features = ["bridges"]
 
 # Postgres + RabbitMQ outbox + AMQP publication proof (Docker); no `kafka` feature
 [[test]]

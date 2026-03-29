@@ -43,7 +43,15 @@
 //! }
 //! ```
 
-use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownError};
+#[cfg(feature = "bridges")]
+use crate::bridge::server::{spawn_http_bridge_server, HttpBridgeRuntime};
+#[cfg(feature = "bridges")]
+use crate::bridge::{BridgeHandle, BridgeResources, HttpBridge};
+use crate::error::{
+    InfrastructureError, InternalError, ResourceHandle, ScenarioId, ShakedownError,
+};
+#[cfg(feature = "bridges")]
+use crate::event::Event;
 use crate::event::{EventLevel, EventLog};
 #[cfg(all(
     feature = "outbox",
@@ -69,6 +77,10 @@ use crate::resources::{
     BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
 };
 use async_trait::async_trait;
+#[cfg(feature = "bridges")]
+use std::collections::HashMap;
+#[cfg(feature = "bridges")]
+use std::sync::Arc;
 
 pub use crate::phase::Phase;
 
@@ -221,6 +233,18 @@ pub struct Context {
         not(feature = "no-diagnostics"),
     ))]
     stats_rings: Option<crate::diagnostics::SharedResourceStatsRings>,
+    /// HTTP bridges registered before [`run_scenario`] starts servers (after seed).
+    #[cfg(feature = "bridges")]
+    pending_http_bridges: Vec<(String, Arc<dyn HttpBridge>)>,
+    /// Running HTTP bridge handles (populated when servers start).
+    #[cfg(feature = "bridges")]
+    bridge_handles: HashMap<String, Arc<BridgeHandle>>,
+    /// Shutdown handles for HTTP bridge accept loops (paired with names for timeline messages).
+    #[cfg(feature = "bridges")]
+    http_bridge_runtimes: Vec<(String, HttpBridgeRuntime)>,
+    /// True once HTTP bridge servers have been started for this [`run_scenario`] invocation.
+    #[cfg(feature = "bridges")]
+    http_bridge_phase_complete: bool,
 }
 
 impl Context {
@@ -263,6 +287,14 @@ impl Context {
                 not(feature = "no-diagnostics"),
             ))]
             stats_rings: None,
+            #[cfg(feature = "bridges")]
+            pending_http_bridges: Vec::new(),
+            #[cfg(feature = "bridges")]
+            bridge_handles: HashMap::new(),
+            #[cfg(feature = "bridges")]
+            http_bridge_runtimes: Vec::new(),
+            #[cfg(feature = "bridges")]
+            http_bridge_phase_complete: false,
         }
     }
 
@@ -305,6 +337,14 @@ impl Context {
                 not(feature = "no-diagnostics"),
             ))]
             stats_rings: None,
+            #[cfg(feature = "bridges")]
+            pending_http_bridges: Vec::new(),
+            #[cfg(feature = "bridges")]
+            bridge_handles: HashMap::new(),
+            #[cfg(feature = "bridges")]
+            http_bridge_runtimes: Vec::new(),
+            #[cfg(feature = "bridges")]
+            http_bridge_phase_complete: false,
         }
     }
 
@@ -347,6 +387,14 @@ impl Context {
                 not(feature = "no-diagnostics"),
             ))]
             stats_rings: None,
+            #[cfg(feature = "bridges")]
+            pending_http_bridges: Vec::new(),
+            #[cfg(feature = "bridges")]
+            bridge_handles: HashMap::new(),
+            #[cfg(feature = "bridges")]
+            http_bridge_runtimes: Vec::new(),
+            #[cfg(feature = "bridges")]
+            http_bridge_phase_complete: false,
         }
     }
 
@@ -454,6 +502,55 @@ impl Context {
     #[cfg(feature = "sqlite")]
     pub fn sqlite_bindings(&self) -> Option<&SqliteBindings> {
         self.sqlite_bindings.as_ref()
+    }
+
+    /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
+    ///
+    /// Call before [`run_scenario`]. After servers start, use [`Self::bridge_url`] and [`Self::bridge`].
+    #[cfg(feature = "bridges")]
+    pub fn register_http_bridge(
+        &mut self,
+        name: &str,
+        bridge: impl HttpBridge,
+    ) -> Result<(), ShakedownError> {
+        if self.http_bridge_phase_complete {
+            return Err(ShakedownError::Internal(InternalError::InvalidConfiguration(
+                String::from(
+                    "register_http_bridge called after HTTP bridges were started for this scenario run",
+                ),
+            )));
+        }
+        if self.bridge_handles.contains_key(name)
+            || self
+                .pending_http_bridges
+                .iter()
+                .any(|(registered_name, _)| registered_name == name)
+        {
+            return Err(ShakedownError::Internal(
+                InternalError::InvalidConfiguration(format!("duplicate HTTP bridge name '{name}'")),
+            ));
+        }
+        self.pending_http_bridges
+            .push((name.to_owned(), Arc::new(bridge)));
+        Ok(())
+    }
+
+    /// Client-facing base URL for a registered HTTP bridge (panics if the name is unknown).
+    #[cfg(feature = "bridges")]
+    pub fn bridge_url(&self, name: &str) -> String {
+        self.bridge_handles
+            .get(name)
+            .map(|handle| handle.client_url.clone())
+            .unwrap_or_else(|| panic!("unknown HTTP bridge '{name}'"))
+    }
+
+    /// Handle for assertions on recorded HTTP traffic (panics if the name is unknown).
+    #[cfg(feature = "bridges")]
+    pub fn bridge(&self, name: &str) -> &BridgeHandle {
+        self.bridge_handles
+            .get(name)
+            .map(|arc| arc.as_ref())
+            .unwrap_or_else(|| panic!("unknown HTTP bridge '{name}'"))
     }
 
     /// Build an outbox helper bound to this context (`outbox` + relational features).
@@ -1155,6 +1252,170 @@ fn emit_failure_timeline_on_infra_err(
     );
 }
 
+#[cfg(feature = "bridges")]
+#[allow(unused_variables)] // `ctx` unused when no resource features are enabled alongside `bridges`
+fn bridge_resources_from_context(ctx: &Context) -> Arc<BridgeResources> {
+    #[allow(unused_mut)]
+    // assignments are feature-gated; with `bridges` alone the struct stays default
+    let mut resources = BridgeResources::default();
+    #[cfg(feature = "kafka")]
+    {
+        resources.kafka_bindings = ctx.kafka_bindings().cloned();
+    }
+    #[cfg(feature = "rabbitmq")]
+    {
+        resources.rabbit_bindings = ctx.rabbit_bindings().cloned();
+    }
+    #[cfg(feature = "postgres")]
+    {
+        resources.postgres_bindings = ctx.postgres_bindings().cloned();
+    }
+    #[cfg(feature = "mariadb")]
+    {
+        resources.mariadb_bindings = ctx.mariadb_bindings().cloned();
+    }
+    Arc::new(resources)
+}
+
+#[cfg(feature = "bridges")]
+async fn reset_http_bridges_at_run_start(ctx: &mut Context) {
+    let runtimes = std::mem::take(&mut ctx.http_bridge_runtimes);
+    for (_name, mut runtime) in runtimes {
+        if let Some(sender) = runtime.shutdown_tx.take() {
+            let _: Result<(), ()> = sender.send(());
+        }
+        let _ = runtime.join.await;
+    }
+    ctx.bridge_handles.clear();
+    ctx.http_bridge_phase_complete = false;
+}
+
+#[cfg(feature = "bridges")]
+async fn tcp_probe_local_bind_address(bind_address: &str) -> std::io::Result<()> {
+    let socket_address: std::net::SocketAddr = bind_address.parse().map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid HTTP bridge bind address",
+        )
+    })?;
+    let connect_result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::net::TcpStream::connect(socket_address),
+    )
+    .await;
+    match connect_result {
+        Ok(Ok(stream)) => {
+            drop(stream);
+            Ok(())
+        }
+        Ok(Err(source)) => Err(source),
+        Err(_elapsed) => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "HTTP bridge tcp probe timed out",
+        )),
+    }
+}
+
+#[cfg(feature = "bridges")]
+async fn shutdown_http_bridge_runtimes_with_log(ctx: &mut Context, event_log: &mut EventLog) {
+    let runtimes = std::mem::take(&mut ctx.http_bridge_runtimes);
+    for (name, mut runtime) in runtimes {
+        let recorded_count = ctx
+            .bridge_handles
+            .get(&name)
+            .map(|handle| handle.calls().len())
+            .unwrap_or(0);
+        if let Some(sender) = runtime.shutdown_tx.take() {
+            let _: Result<(), ()> = sender.send(());
+        }
+        let _ = runtime.join.await;
+        event_log.append(Event::info(
+            "bridge",
+            format!("bridge '{name}' stopped; {recorded_count} calls recorded"),
+        ));
+    }
+}
+
+#[cfg(feature = "bridges")]
+async fn shutdown_http_bridge_runtimes_silent(ctx: &mut Context) {
+    let runtimes = std::mem::take(&mut ctx.http_bridge_runtimes);
+    for (_name, mut runtime) in runtimes {
+        if let Some(sender) = runtime.shutdown_tx.take() {
+            let _: Result<(), ()> = sender.send(());
+        }
+        let _ = runtime.join.await;
+    }
+}
+
+#[cfg(feature = "bridges")]
+async fn start_and_readiness_http_bridges(
+    ctx: &mut Context,
+    event_log: &mut EventLog,
+) -> Result<(), ShakedownError> {
+    let pending = std::mem::take(&mut ctx.pending_http_bridges);
+    if pending.is_empty() {
+        ctx.http_bridge_phase_complete = true;
+        return Ok(());
+    }
+    let resources = bridge_resources_from_context(ctx);
+    let scenario_id_string = ctx.scenario_id().to_string();
+    let mut started_runtimes: Vec<(String, HttpBridgeRuntime)> = Vec::new();
+    for (bridge_name, bridge_impl) in pending {
+        match spawn_http_bridge_server(
+            bridge_name.clone(),
+            bridge_impl,
+            scenario_id_string.clone(),
+            Arc::clone(&resources),
+            None,
+        )
+        .await
+        {
+            Ok((handle, runtime)) => {
+                let bind_display = handle.bind_address.clone();
+                ctx.bridge_handles.insert(bridge_name.clone(), handle);
+                started_runtimes.push((bridge_name.clone(), runtime));
+                event_log.append(Event::info(
+                    "bridge",
+                    format!("bridge '{bridge_name}' started on {bind_display}"),
+                ));
+            }
+            Err(error) => {
+                for (_rollback_name, mut runtime) in started_runtimes {
+                    if let Some(sender) = runtime.shutdown_tx.take() {
+                        let _: Result<(), ()> = sender.send(());
+                    }
+                    let _ = runtime.join.await;
+                }
+                ctx.bridge_handles.clear();
+                return Err(InfrastructureError::Provision {
+                    resource: format!("bridge:{bridge_name}"),
+                    source: Box::new(error),
+                }
+                .into());
+            }
+        }
+    }
+    ctx.http_bridge_runtimes = started_runtimes;
+    let readiness_targets: Vec<(String, String)> = ctx
+        .bridge_handles
+        .iter()
+        .map(|(bridge_name, handle)| (bridge_name.clone(), handle.bind_address.clone()))
+        .collect();
+    for (bridge_name, bind_address) in readiness_targets {
+        if let Err(source) = tcp_probe_local_bind_address(bind_address.as_str()).await {
+            shutdown_http_bridge_runtimes_silent(ctx).await;
+            ctx.bridge_handles.clear();
+            return Err(InfrastructureError::Readiness {
+                resource: format!("bridge:{bridge_name}"),
+                source: Box::new(source),
+            }
+            .into());
+        }
+    }
+    ctx.http_bridge_phase_complete = true;
+    Ok(())
+}
+
 pub async fn run_scenario<F>(
     ctx: &mut Context,
     scenario_id: impl Into<String>,
@@ -1168,6 +1429,9 @@ where
 {
     // Update scenario ID
     ctx.set_scenario_id(scenario_id);
+
+    #[cfg(feature = "bridges")]
+    reset_http_bridges_at_run_start(ctx).await;
 
     #[cfg(all(
         any(
@@ -1427,6 +1691,39 @@ where
         }
     }
 
+    #[cfg(feature = "bridges")]
+    if let Err(error) = start_and_readiness_http_bridges(ctx, event_log).await {
+        let infrastructure_error = match &error {
+            ShakedownError::Infrastructure(ref infrastructure) => Some(infrastructure),
+            _ => None,
+        };
+        event_log.append_raw(
+            EventLevel::Error,
+            "lifecycle",
+            format!("HTTP bridge phase failed: {error}"),
+        );
+        teardown_all_resources(ctx).await;
+        #[cfg(all(
+            any(
+                feature = "kafka",
+                feature = "postgres",
+                feature = "mariadb",
+                feature = "mysql",
+            ),
+            not(feature = "no-diagnostics"),
+        ))]
+        shakedown_merge_diagnostics!(
+            docker_events_monitor,
+            resource_stats_monitor,
+            container_logs_monitor,
+            event_log
+        );
+        if let Some(infrastructure) = infrastructure_error {
+            emit_failure_timeline_on_infra_err(event_log, &scenario_id, infrastructure);
+        }
+        return Err(error);
+    }
+
     // Run phase
     #[cfg(all(
         any(
@@ -1500,6 +1797,8 @@ where
     ))]
     shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Teardown);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting teardown phase");
+    #[cfg(feature = "bridges")]
+    shutdown_http_bridge_runtimes_with_log(ctx, event_log).await;
     teardown_all_resources(ctx).await;
 
     #[cfg(all(

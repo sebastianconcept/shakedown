@@ -1,5 +1,7 @@
 //! Per-bridge call recording and assertion helpers.
 
+use std::fmt;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -89,16 +91,32 @@ pub struct RecordedExchange {
 }
 
 /// Handle for one bridge instance: bind URL, client URL, and recorded traffic.
-#[derive(Debug)]
 pub struct BridgeHandle {
     pub name: String,
     /// Actual socket address the server bound to (e.g. `127.0.0.1:54321`).
     pub bind_address: String,
     /// URL the service-under-test should use (may differ from bind when proxied).
     pub client_url: String,
-    pub calls: Vec<RecordedCall>,
+    calls_storage: Arc<Mutex<Vec<RecordedCall>>>,
     /// When set, request/response bodies stored on [`RecordedCall`] are capped; see [`RecordedCall::body_truncated`].
     pub max_recorded_body_size: Option<usize>,
+}
+
+impl fmt::Debug for BridgeHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let count = self
+            .calls_storage
+            .lock()
+            .map(|calls| calls.len())
+            .unwrap_or(0);
+        f.debug_struct("BridgeHandle")
+            .field("name", &self.name)
+            .field("bind_address", &self.bind_address)
+            .field("client_url", &self.client_url)
+            .field("call_count", &count)
+            .field("max_recorded_body_size", &self.max_recorded_body_size)
+            .finish()
+    }
 }
 
 impl BridgeHandle {
@@ -113,18 +131,18 @@ impl BridgeHandle {
             name: name.into(),
             bind_address: bind_address.into(),
             client_url: client_url.into(),
-            calls: Vec::new(),
+            calls_storage: Arc::new(Mutex::new(Vec::new())),
             max_recorded_body_size,
         }
     }
 
     /// Append a call, applying [`Self::max_recorded_body_size`] to request/response bodies.
-    pub fn push_recorded_exchange(&mut self, exchange: RecordedExchange) {
+    pub fn push_recorded_exchange(&self, exchange: RecordedExchange) {
         let (request_body, rb_trunc) =
             truncate_bytes(exchange.request_body, self.max_recorded_body_size);
         let (response_body, resp_trunc) =
             truncate_bytes(exchange.response_body, self.max_recorded_body_size);
-        self.calls.push(RecordedCall {
+        let recorded = RecordedCall {
             timestamp: exchange.timestamp,
             method: exchange.method,
             path: exchange.path,
@@ -135,23 +153,40 @@ impl BridgeHandle {
             response_body,
             duration: exchange.duration,
             body_truncated: rb_trunc || resp_trunc,
-        });
+        };
+        let mut calls = self
+            .calls_storage
+            .lock()
+            .expect("bridge calls mutex poisoned");
+        calls.push(recorded);
     }
 
-    pub fn calls(&self) -> &[RecordedCall] {
-        self.calls.as_slice()
+    pub fn calls(&self) -> Vec<RecordedCall> {
+        self.calls_storage
+            .lock()
+            .expect("bridge calls mutex poisoned")
+            .clone()
     }
 
     /// Calls whose method and path match exactly (case-sensitive for method).
-    pub fn calls_matching(&self, method: &str, path: &str) -> Vec<&RecordedCall> {
-        self.calls
+    pub fn calls_matching(&self, method: &str, path: &str) -> Vec<RecordedCall> {
+        let calls = self
+            .calls_storage
+            .lock()
+            .expect("bridge calls mutex poisoned");
+        calls
             .iter()
             .filter(|call| call.method() == method && call.path() == path)
+            .cloned()
             .collect()
     }
 
     pub fn assert_called_times(&self, expected: usize) -> Result<(), ScenarioError> {
-        let actual = self.calls.len();
+        let calls = self
+            .calls_storage
+            .lock()
+            .expect("bridge calls mutex poisoned");
+        let actual = calls.len();
         if actual == expected {
             return Ok(());
         }
@@ -160,7 +195,7 @@ impl BridgeHandle {
             self.name,
             expected,
             actual,
-            format_calls_diagnostic(&self.calls)
+            format_calls_diagnostic(&calls)
         )))
     }
 
@@ -170,8 +205,14 @@ impl BridgeHandle {
         path: &str,
         expected: usize,
     ) -> Result<(), ScenarioError> {
-        let matching = self.calls_matching(method, path);
-        let actual = matching.len();
+        let calls = self
+            .calls_storage
+            .lock()
+            .expect("bridge calls mutex poisoned");
+        let actual = calls
+            .iter()
+            .filter(|call| call.method() == method && call.path() == path)
+            .count();
         if actual == expected {
             return Ok(());
         }
@@ -182,7 +223,7 @@ impl BridgeHandle {
             method,
             path,
             actual,
-            format_calls_diagnostic(&self.calls)
+            format_calls_diagnostic(&calls)
         )))
     }
 
@@ -192,12 +233,15 @@ impl BridgeHandle {
         path: &str,
         predicate: impl Fn(&RecordedCall) -> bool,
     ) -> Result<(), ScenarioError> {
-        let matched: Vec<&RecordedCall> = self
-            .calls_matching(method, path)
-            .into_iter()
-            .filter(|call| predicate(call))
-            .collect();
-        if !matched.is_empty() {
+        let calls = self
+            .calls_storage
+            .lock()
+            .expect("bridge calls mutex poisoned");
+        let matched = calls
+            .iter()
+            .filter(|call| call.method() == method && call.path() == path)
+            .any(predicate);
+        if matched {
             return Ok(());
         }
         Err(ScenarioError::Assertion(format!(
@@ -205,25 +249,36 @@ impl BridgeHandle {
             self.name,
             method,
             path,
-            format_calls_diagnostic(&self.calls)
+            format_calls_diagnostic(&calls)
         )))
     }
 
     pub fn assert_not_called(&self) -> Result<(), ScenarioError> {
-        if self.calls.is_empty() {
+        let calls = self
+            .calls_storage
+            .lock()
+            .expect("bridge calls mutex poisoned");
+        if calls.is_empty() {
             return Ok(());
         }
         Err(ScenarioError::Assertion(format!(
             "bridge '{}': expected no calls, got {}; recorded: {}",
             self.name,
-            self.calls.len(),
-            format_calls_diagnostic(&self.calls)
+            calls.len(),
+            format_calls_diagnostic(&calls)
         )))
     }
 
     pub fn assert_path_not_called(&self, method: &str, path: &str) -> Result<(), ScenarioError> {
-        let matching = self.calls_matching(method, path);
-        if matching.is_empty() {
+        let calls = self
+            .calls_storage
+            .lock()
+            .expect("bridge calls mutex poisoned");
+        let matching = calls
+            .iter()
+            .filter(|call| call.method() == method && call.path() == path)
+            .count();
+        if matching == 0 {
             return Ok(());
         }
         Err(ScenarioError::Assertion(format!(
@@ -231,8 +286,8 @@ impl BridgeHandle {
             self.name,
             method,
             path,
-            matching.len(),
-            format_calls_diagnostic(&self.calls)
+            matching,
+            format_calls_diagnostic(&calls)
         )))
     }
 }
@@ -285,8 +340,8 @@ mod tests {
         request_body: &[u8],
         status: u16,
         response_body: &[u8],
-    ) -> RecordedCall {
-        RecordedCall {
+    ) -> RecordedExchange {
+        RecordedExchange {
             timestamp: sample_time(),
             method: method.to_owned(),
             path: path.to_owned(),
@@ -296,13 +351,24 @@ mod tests {
             response_status: status,
             response_body: Bytes::copy_from_slice(response_body),
             duration: Duration::from_millis(2),
-            body_truncated: false,
         }
     }
 
     #[test]
     fn recorded_call_json_and_accessors() {
-        let call = make_call("POST", "/v1/echo", br#"{"x":1}"#, 200, br#"{"ok":true}"#);
+        let handle = BridgeHandle::new("h", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        handle.push_recorded_exchange(RecordedExchange {
+            timestamp: sample_time(),
+            method: String::from("POST"),
+            path: String::from("/v1/echo"),
+            query: None,
+            request_headers: Vec::new(),
+            request_body: Bytes::from(r#"{"x":1}"#),
+            response_status: 200,
+            response_body: Bytes::from(r#"{"ok":true}"#),
+            duration: Duration::from_millis(2),
+        });
+        let call = &handle.calls()[0];
         assert_eq!(call.method(), "POST");
         assert_eq!(call.path(), "/v1/echo");
         assert_eq!(call.query(), None);
@@ -318,24 +384,18 @@ mod tests {
 
     #[test]
     fn calls_matching_filters_method_and_path() {
-        let mut handle = BridgeHandle::new("pay", "127.0.0.1:1", "http://127.0.0.1:1", None);
-        handle
-            .calls
-            .push(make_call("GET", "/health", b"", 200, b""));
-        handle
-            .calls
-            .push(make_call("POST", "/charge", b"{}", 201, b""));
-        handle
-            .calls
-            .push(make_call("POST", "/charge", b"[]", 400, b""));
+        let handle = BridgeHandle::new("pay", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        handle.push_recorded_exchange(make_call("GET", "/health", b"", 200, b""));
+        handle.push_recorded_exchange(make_call("POST", "/charge", b"{}", 201, b""));
+        handle.push_recorded_exchange(make_call("POST", "/charge", b"[]", 400, b""));
         let matched = handle.calls_matching("POST", "/charge");
         assert_eq!(matched.len(), 2);
     }
 
     #[test]
     fn assert_called_times_pass_and_fail() {
-        let mut handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
-        handle.calls.push(make_call("GET", "/", b"", 200, b""));
+        let handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        handle.push_recorded_exchange(make_call("GET", "/", b"", 200, b""));
         assert!(handle.assert_called_times(1).is_ok());
         let err = handle.assert_called_times(0).unwrap_err();
         let msg = err.to_string();
@@ -345,8 +405,8 @@ mod tests {
 
     #[test]
     fn assert_path_called_times_pass_and_fail() {
-        let mut handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
-        handle.calls.push(make_call("POST", "/v1/x", b"", 200, b""));
+        let handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        handle.push_recorded_exchange(make_call("POST", "/v1/x", b"", 200, b""));
         assert!(handle.assert_path_called_times("POST", "/v1/x", 1).is_ok());
         let err = handle
             .assert_path_called_times("POST", "/v1/y", 1)
@@ -356,8 +416,8 @@ mod tests {
 
     #[test]
     fn assert_called_with_pass_and_fail() {
-        let mut handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
-        handle.calls.push(make_call(
+        let handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        handle.push_recorded_exchange(make_call(
             "POST",
             "/v1/charge",
             br#"{"amount":10}"#,
@@ -382,18 +442,16 @@ mod tests {
     fn assert_not_called_pass_and_fail() {
         let empty = BridgeHandle::new("e", "127.0.0.1:1", "http://127.0.0.1:1", None);
         assert!(empty.assert_not_called().is_ok());
-        let mut handle = BridgeHandle::new("e", "127.0.0.1:1", "http://127.0.0.1:1", None);
-        handle.calls.push(make_call("GET", "/", b"", 200, b""));
+        let handle = BridgeHandle::new("e", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        handle.push_recorded_exchange(make_call("GET", "/", b"", 200, b""));
         let err = handle.assert_not_called().unwrap_err();
         assert!(err.to_string().contains("expected no calls"));
     }
 
     #[test]
     fn assert_path_not_called_pass_and_fail() {
-        let mut handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
-        handle
-            .calls
-            .push(make_call("DELETE", "/v1/x", b"", 204, b""));
+        let handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        handle.push_recorded_exchange(make_call("DELETE", "/v1/x", b"", 204, b""));
         assert!(handle.assert_path_not_called("GET", "/v1/x").is_ok());
         let err = handle
             .assert_path_not_called("DELETE", "/v1/x")
@@ -403,7 +461,7 @@ mod tests {
 
     #[test]
     fn push_recorded_exchange_truncates_and_sets_flag() {
-        let mut handle = BridgeHandle::new("t", "127.0.0.1:1", "http://proxy.example:9", Some(4));
+        let handle = BridgeHandle::new("t", "127.0.0.1:1", "http://proxy.example:9", Some(4));
         handle.push_recorded_exchange(RecordedExchange {
             timestamp: sample_time(),
             method: String::from("POST"),
@@ -415,8 +473,8 @@ mod tests {
             response_body: Bytes::from_static(b"ghijkl"),
             duration: Duration::from_millis(1),
         });
-        assert_eq!(handle.calls.len(), 1);
-        let call = &handle.calls[0];
+        assert_eq!(handle.calls().len(), 1);
+        let call = &handle.calls()[0];
         assert!(call.body_truncated);
         assert_eq!(call.request_body().len(), 4);
         assert_eq!(call.response_body().len(), 4);
@@ -426,7 +484,7 @@ mod tests {
 
     #[test]
     fn push_recorded_exchange_no_limit_no_truncation() {
-        let mut handle = BridgeHandle::new("t", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let handle = BridgeHandle::new("t", "127.0.0.1:1", "http://127.0.0.1:1", None);
         handle.push_recorded_exchange(RecordedExchange {
             timestamp: sample_time(),
             method: String::from("GET"),
@@ -438,7 +496,7 @@ mod tests {
             response_body: Bytes::from_static(b"err"),
             duration: Duration::from_micros(9),
         });
-        let call = &handle.calls[0];
+        let call = &handle.calls()[0];
         assert!(!call.body_truncated);
         assert_eq!(call.query(), Some("q=1"));
         assert_eq!(call.headers().len(), 1);
