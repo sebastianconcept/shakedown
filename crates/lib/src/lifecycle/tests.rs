@@ -371,3 +371,100 @@ async fn test_async_resource_phases() {
     // Then provisioning and readiness complete without error
     assert!(result.is_ok());
 }
+
+#[cfg(feature = "bridges")]
+mod bridge_registration_tests {
+    use crate::bridge::StubBridge;
+    use crate::error::{InternalError, ShakedownError};
+
+    use super::Context;
+
+    #[test]
+    fn register_http_bridge_duplicate_name_returns_error() {
+        // Given a context and one registered HTTP bridge
+        let mut context = Context::new();
+        let stub = StubBridge::new("api").on("GET", "/").respond(200);
+        context.register_http_bridge("edge", stub.clone()).unwrap();
+        // When we register another bridge with the same name
+        let error = context.register_http_bridge("edge", stub).unwrap_err();
+        // Then we get invalid configuration mentioning duplicate name
+        match error {
+            ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
+                assert!(message.contains("duplicate bridge name"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn register_http_bridge_after_servers_started_returns_error() {
+        // Given a context where the bridge phase is marked complete
+        let mut context = Context::new();
+        context.set_bridge_servers_phase_complete_for_test(true);
+        let stub = StubBridge::new("api").on("GET", "/").respond(200);
+        // When we try to register a bridge
+        let error = context.register_http_bridge("edge", stub).unwrap_err();
+        // Then registration is rejected
+        match error {
+            ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
+                assert!(message.contains("after bridge servers were started"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+}
+
+#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+mod bridge_grpc_registration_tests {
+    use crate::bridge::{GrpcStubBridge, StubBridge};
+    use crate::error::{InternalError, ShakedownError};
+    use tonic::Code;
+
+    use super::Context;
+
+    #[test]
+    fn register_grpc_bridge_duplicate_name_returns_error() {
+        // Given one registered gRPC bridge
+        let mut context = Context::new();
+        let first_stub = GrpcStubBridge::new("grpc")
+            .on_method("svc/Method")
+            .respond_status(Code::Aborted, "first");
+        let second_stub = GrpcStubBridge::new("grpc")
+            .on_method("svc/Other")
+            .respond_status(Code::Aborted, "second");
+        context.register_grpc_bridge("dup", first_stub).unwrap();
+        // When we register another gRPC bridge with the same name
+        let error = context
+            .register_grpc_bridge("dup", second_stub)
+            .unwrap_err();
+        // Then we get duplicate name
+        match error {
+            ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
+                assert!(message.contains("duplicate bridge name"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn register_grpc_bridge_name_conflicts_with_http_bridge() {
+        // Given an HTTP bridge already registered under a name
+        let mut context = Context::new();
+        let http_stub = StubBridge::new("api").on("GET", "/").respond(200);
+        context.register_http_bridge("shared", http_stub).unwrap();
+        let grpc_stub = GrpcStubBridge::new("grpc")
+            .on_method("svc/M")
+            .respond_status(Code::Ok, "ok");
+        // When we register gRPC under the same name
+        let error = context
+            .register_grpc_bridge("shared", grpc_stub)
+            .unwrap_err();
+        // Then we get duplicate name
+        match error {
+            ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
+                assert!(message.contains("duplicate bridge name"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+}

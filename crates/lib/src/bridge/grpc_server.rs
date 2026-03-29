@@ -108,8 +108,7 @@ impl GrpcBridgeTowerService {
 
         let timestamp = OffsetDateTime::now_utc();
         let (parts, body) = request.into_parts();
-        let path_owned = parts.uri.path().to_owned();
-        let full_grpc_path = path_owned.clone();
+        let grpc_path = parts.uri.path().to_owned();
         let request_headers = header_map_to_pairs(&parts.headers);
 
         let body_bytes = body
@@ -119,7 +118,7 @@ impl GrpcBridgeTowerService {
             .to_bytes();
 
         let (service_name, method_name) =
-            parse_grpc_path(path_owned.as_str()).ok_or(GrpcBridgeProtocolError::InvalidGrpcPath)?;
+            parse_grpc_path(grpc_path.as_str()).ok_or(GrpcBridgeProtocolError::InvalidGrpcPath)?;
 
         let payload = decode_unary_grpc_payload(body_bytes.as_ref())?;
 
@@ -143,7 +142,7 @@ impl GrpcBridgeTowerService {
         let http_response = grpc_bridge_response_to_http(&bridge_response)?;
 
         let response_status = 200u16;
-        let response_body = if bridge_response.status_code == Code::Ok as u32 {
+        let response_body = if bridge_response.status_code == Code::Ok {
             encode_grpc_frame(bridge_response.body.as_ref())
         } else {
             Bytes::new()
@@ -151,8 +150,8 @@ impl GrpcBridgeTowerService {
 
         self.recorder.push_recorded_exchange(RecordedExchange {
             timestamp,
-            method: full_grpc_path.clone(),
-            path: full_grpc_path,
+            method: grpc_path.clone(),
+            path: grpc_path,
             query: None,
             request_headers,
             request_body: Bytes::copy_from_slice(payload),
@@ -180,7 +179,10 @@ impl Service<Request<Body>> for GrpcBridgeTowerService {
             let outcome = service.handle_request_inner(request).await;
             Ok(match outcome {
                 Ok(response) => response,
-                Err(error) => status_to_http_response(error.into()),
+                Err(error) => {
+                    let status = Status::new(error.status_code(), error.to_string());
+                    status_to_http_response(status)
+                }
             })
         })
     }
@@ -228,6 +230,10 @@ fn decode_unary_grpc_payload(input: &[u8]) -> Result<&[u8], GrpcBridgeProtocolEr
 }
 
 fn encode_grpc_frame(message: &[u8]) -> Bytes {
+    debug_assert!(
+        message.len() <= u32::MAX as usize,
+        "gRPC frame payload exceeds u32::MAX"
+    );
     let mut buffer = BytesMut::with_capacity(5 + message.len());
     buffer.put_u8(0);
     buffer.put_u32(message.len() as u32);
@@ -236,15 +242,14 @@ fn encode_grpc_frame(message: &[u8]) -> Bytes {
 }
 
 fn status_from_bridge_response(response: &GrpcBridgeResponse) -> Status {
-    let code = Code::from_i32(response.status_code as i32);
     let message = response.message.clone().unwrap_or_default();
-    Status::new(code, message)
+    Status::new(response.status_code, message)
 }
 
 fn grpc_bridge_response_to_http(
     response: &GrpcBridgeResponse,
 ) -> Result<Response<Body>, GrpcBridgeProtocolError> {
-    if response.status_code == Code::Ok as u32 {
+    if response.status_code == Code::Ok {
         let framed = encode_grpc_frame(response.body.as_ref());
         let mut trailers = HeaderMap::new();
         trailers.insert(
@@ -286,8 +291,8 @@ fn status_to_http_response(status: Status) -> Response<Body> {
     let mut trailers = HeaderMap::new();
     if status.add_header(&mut trailers).is_err() {
         trailers.clear();
-        let _ = Status::from(GrpcBridgeProtocolError::GrpcStatusTrailerEncodingFailed)
-            .add_header(&mut trailers);
+        let fallback = GrpcBridgeProtocolError::GrpcStatusTrailerEncodingFailed;
+        let _ = Status::new(fallback.status_code(), fallback.to_string()).add_header(&mut trailers);
     }
     let stream = stream_iter(vec![Ok::<_, Infallible>(Frame::trailers(trailers))]);
     match Response::builder()
@@ -306,5 +311,136 @@ fn status_to_http_response(status: Status) -> Response<Body> {
             *response.status_mut() = http::StatusCode::INTERNAL_SERVER_ERROR;
             response
         }
+    }
+}
+
+#[cfg(all(test, feature = "grpc-bridges"))]
+mod tests {
+    use http::header::{HeaderMap, HeaderName, HeaderValue};
+
+    use super::super::grpc_protocol_error::GrpcBridgeProtocolError;
+    use super::*;
+
+    #[test]
+    fn parse_grpc_path_valid() {
+        // Given a standard gRPC path `/Service/Method`
+        // When we parse it
+        let parsed = parse_grpc_path("/echo.EchoService/SayHello");
+        // Then service and method split on the last `/`
+        assert_eq!(
+            parsed,
+            Some((String::from("echo.EchoService"), String::from("SayHello")))
+        );
+    }
+
+    #[test]
+    fn parse_grpc_path_missing_leading_slash() {
+        // Given a path without a leading slash
+        // When we parse
+        // Then parsing fails
+        assert_eq!(parse_grpc_path("echo.Service/Method"), None);
+    }
+
+    #[test]
+    fn parse_grpc_path_empty_method_segment() {
+        // Given a path ending with `/` so the method segment is empty
+        // When we parse
+        // Then parsing fails
+        assert_eq!(parse_grpc_path("/service/"), None);
+    }
+
+    #[test]
+    fn parse_grpc_path_no_method_separator() {
+        // Given a single path segment after the leading slash
+        // When we parse
+        // Then there is no `service/method` pair
+        assert_eq!(parse_grpc_path("/NoInnerSlash"), None);
+    }
+
+    #[test]
+    fn decode_unary_grpc_payload_too_short() {
+        // Given fewer than 5 bytes (no full length prefix)
+        // When we decode
+        // Then we get UnaryFrameTooShort
+        assert!(matches!(
+            decode_unary_grpc_payload(&[0, 1, 2]),
+            Err(GrpcBridgeProtocolError::UnaryFrameTooShort)
+        ));
+    }
+
+    #[test]
+    fn decode_unary_grpc_payload_compressed_not_supported() {
+        // Given the compression flag byte set to non-zero
+        let frame = [1u8, 0, 0, 0, 0];
+        // When we decode
+        // Then compressed payloads are rejected
+        assert!(matches!(
+            decode_unary_grpc_payload(&frame),
+            Err(GrpcBridgeProtocolError::CompressedUnaryPayloadNotSupported)
+        ));
+    }
+
+    #[test]
+    fn decode_unary_grpc_payload_valid() {
+        // Given a valid 5-byte prefix and one message byte
+        let frame = [0u8, 0, 0, 0, 1, 0x42];
+        // When we decode
+        // Then the payload slice is that byte
+        assert_eq!(decode_unary_grpc_payload(&frame).unwrap(), &[0x42u8][..]);
+    }
+
+    #[test]
+    fn decode_unary_grpc_payload_truncated_message() {
+        // Given a length prefix claiming more bytes than follow
+        let frame = [0u8, 0, 0, 0, 10, 1, 2, 3];
+        // When we decode
+        // Then we get UnaryPayloadLengthExceedsFrame
+        assert!(matches!(
+            decode_unary_grpc_payload(&frame),
+            Err(GrpcBridgeProtocolError::UnaryPayloadLengthExceedsFrame)
+        ));
+    }
+
+    #[test]
+    fn encode_grpc_frame_round_trips_decode() {
+        // Given a protobuf payload
+        let payload = b"hello";
+        // When we encode then decode
+        let framed = encode_grpc_frame(payload);
+        let round_trip = decode_unary_grpc_payload(framed.as_ref()).unwrap();
+        // Then the bytes match
+        assert_eq!(round_trip, payload);
+    }
+
+    #[test]
+    fn header_map_to_pairs_lowercases_header_names() {
+        // Given headers with mixed-case names
+        let mut map = HeaderMap::new();
+        map.insert("X-Custom", HeaderValue::from_static("Value"));
+        map.insert("ACCEPT", HeaderValue::from_static("application/json"));
+        // When we convert to pairs
+        let pairs = header_map_to_pairs(&map);
+        // Then names are ASCII-lowercased
+        assert!(pairs.iter().any(|(k, v)| k == "x-custom" && v == "Value"));
+        assert!(pairs
+            .iter()
+            .any(|(k, v)| k == "accept" && v == "application/json"));
+    }
+
+    #[test]
+    fn header_map_to_pairs_skips_non_utf8_header_values() {
+        // Given one UTF-8 header and one opaque value that is not `to_str()`-able
+        let mut map = HeaderMap::new();
+        map.insert(
+            HeaderName::from_static("x-ascii"),
+            HeaderValue::from_static("ok"),
+        );
+        let opaque = HeaderValue::from_bytes(&[0xff]).expect("opaque header value");
+        map.insert(HeaderName::from_static("x-bin"), opaque);
+        // When we convert to pairs
+        let pairs = header_map_to_pairs(&map);
+        // Then only ASCII-decodable values appear
+        assert!(pairs.iter().any(|(k, v)| k == "x-ascii" && v == "ok"));
+        assert!(!pairs.iter().any(|(k, _)| k == "x-bin"));
     }
 }

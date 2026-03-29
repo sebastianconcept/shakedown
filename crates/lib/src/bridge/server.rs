@@ -99,20 +99,20 @@ async fn run_listener(
                     }
                 };
                 let io = TokioIo::new(tcp);
-                let bridge_c = Arc::clone(&bridge);
-                let scenario_id_c = scenario_id.clone();
-                let bridge_name_c = bridge_name.clone();
-                let resources_c = Arc::clone(&resources);
-                let handle_c = Arc::clone(&handle);
+                let bridge_for_connection = Arc::clone(&bridge);
+                let scenario_id_for_connection = scenario_id.clone();
+                let bridge_name_for_connection = bridge_name.clone();
+                let resources_for_connection = Arc::clone(&resources);
+                let handle_for_connection = Arc::clone(&handle);
                 tokio::spawn(async move {
                     let service = service_fn(move |request: Request<Incoming>| {
-                        let bridge = Arc::clone(&bridge_c);
+                        let bridge = Arc::clone(&bridge_for_connection);
                         let bridge_context = BridgeContext::new(
-                            scenario_id_c.clone(),
-                            bridge_name_c.clone(),
-                            Arc::clone(&resources_c),
+                            scenario_id_for_connection.clone(),
+                            bridge_name_for_connection.clone(),
+                            Arc::clone(&resources_for_connection),
                         );
-                        let recorder = Arc::clone(&handle_c);
+                        let recorder = Arc::clone(&handle_for_connection);
                         async move { serve_one(bridge, bridge_context, recorder, request).await }
                     });
                     let connection = http1::Builder::new().serve_connection(io, service);

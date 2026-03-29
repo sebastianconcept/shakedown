@@ -2,7 +2,7 @@
 
 use bytes::Bytes;
 
-use super::{BridgeRequest, BridgeResponse};
+use super::{BridgeError, BridgeRequest, BridgeResponse};
 
 #[test]
 fn bridge_request_json_roundtrip() {
@@ -60,4 +60,53 @@ fn bridge_request_from_http_request() {
         .headers()
         .iter()
         .any(|(key, value)| key == "accept" && value == "application/json"));
+}
+
+#[test]
+fn bridge_request_text_valid_utf8() {
+    // Given a request body that is valid UTF-8
+    let request = BridgeRequest {
+        method: String::from("POST"),
+        path: String::from("/t"),
+        query: None,
+        headers: Vec::new(),
+        body: Bytes::from_static(b"hello world"),
+    };
+    // When we decode as text
+    let text = request.text().expect("text");
+    // Then the string matches
+    assert_eq!(text, "hello world");
+}
+
+#[test]
+fn bridge_request_text_invalid_utf8_returns_encoding_error() {
+    // Given a body that is not valid UTF-8
+    let request = BridgeRequest {
+        method: String::from("POST"),
+        path: String::from("/t"),
+        query: None,
+        headers: Vec::new(),
+        body: Bytes::from_static(&[0xff, 0xfe, 0xfd]),
+    };
+    // When we decode as text
+    let result = request.text();
+    // Then we get an encoding error
+    assert!(matches!(result, Err(BridgeError::Encoding { .. })));
+}
+
+#[test]
+fn bridge_response_builder_body_empty_preserves_status_and_headers() {
+    // Given a builder with 204 and a custom header
+    let response = BridgeResponse::builder()
+        .status(204)
+        .header("X-Empty", "1")
+        .body_empty();
+    // When we inspect the built response
+    // Then status and header are preserved and body is empty
+    assert_eq!(response.status, 204);
+    assert!(response
+        .headers
+        .iter()
+        .any(|(key, value)| key == "x-empty" && value == "1"));
+    assert!(response.body.is_empty());
 }

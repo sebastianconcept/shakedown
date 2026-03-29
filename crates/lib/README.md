@@ -403,6 +403,8 @@ To use your verifier from tests, call `PublicationVerifier::assert_observed(&you
 | **`bridges`** | Yes | HTTP stack: [`HttpBridge`](src/bridge/traits.rs), [`StubBridge`](src/bridge/stub.rs), [`BridgeRequest`](src/bridge/types/request.rs) / [`BridgeResponse`](src/bridge/types/response.rs), [`BridgeHandle`](src/bridge/handle.rs), hyper server ([`bridge/server.rs`](src/bridge/server.rs)). |
 | **`grpc-bridges`** | No (opt-in) | Unary gRPC: [`GrpcBridge`](src/bridge/traits.rs), [`GrpcStubBridge`](src/bridge/grpc_stub.rs), [`GrpcBridgeRequest`](src/bridge/grpc_types.rs) / [`GrpcBridgeResponse`](src/bridge/grpc_types.rs), tonic-hosted server ([`bridge/grpc_server.rs`](src/bridge/grpc_server.rs)). **Implies `bridges`.** |
 
+**gRPC response type:** [`GrpcBridgeResponse::status_code`](src/bridge/grpc_types.rs) is [`tonic::Code`](https://docs.rs/tonic/latest/tonic/enum.Code.html), not a raw `u32`. Match on `Code::Ok` and other variants when branching on status from [`GrpcBridge::handle`](src/bridge/traits.rs).
+
 To compile Shakedown **without** HTTP bridge code (smaller graph), depend with `default-features = false` and list only the features you need (omit `bridges`).
 
 ```toml

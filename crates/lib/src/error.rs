@@ -210,6 +210,9 @@ pub enum ShakedownError {
     },
 }
 
+// `std::error::Error` is implemented by hand for the top-level harness enums (not via `thiserror`'s
+// derive) because `source()` must thread through `Box<dyn Error + Send + Sync>` and mixed variant
+// shapes; `#[source]` on those boxed fields does not match the chaining we want for every variant.
 impl Error for ShakedownError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
@@ -298,6 +301,8 @@ pub enum ScenarioError {
     Other(Box<dyn Error + Send + Sync>),
 }
 
+// See comment on `impl Error for ShakedownError` — manual `source()` for boxed `Other` and nested
+// assertion/step/resource errors.
 impl Error for ScenarioError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
@@ -361,6 +366,7 @@ pub enum InfrastructureError {
     FaultInjection(crate::fault_injection::Error),
 }
 
+// See comment on `impl Error for ShakedownError` — manual `source()` for `Box<dyn Error>` sources.
 impl Error for InfrastructureError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
@@ -467,6 +473,7 @@ pub enum InternalError {
     PoisonedMutex(String),
 }
 
+// See comment on `impl Error for ShakedownError` — variants are mostly leaf errors (`source` none).
 impl Error for InternalError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {

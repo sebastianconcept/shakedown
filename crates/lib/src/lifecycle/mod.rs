@@ -602,6 +602,12 @@ impl Context {
         Ok(())
     }
 
+    /// Test-only: control [`Self::register_http_bridge`] / [`Self::register_grpc_bridge`] phase guards.
+    #[cfg(all(test, feature = "bridges"))]
+    pub(crate) fn set_bridge_servers_phase_complete_for_test(&mut self, complete: bool) {
+        self.bridge_servers_phase_complete = complete;
+    }
+
     /// Client-facing base URL for a registered bridge (HTTP or gRPC).
     ///
     /// Returns [`None`] if no bridge was registered under `name` or bridge servers have not
