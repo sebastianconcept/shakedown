@@ -1364,10 +1364,6 @@ async fn reset_bridges_at_run_start(ctx: &mut Context) {
         let _ = runtime.join.await;
     }
     ctx.bridge_handles.clear();
-    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-    {
-        ctx.pending_grpc_bridges.clear();
-    }
     ctx.bridge_servers_phase_complete = false;
 }
 
