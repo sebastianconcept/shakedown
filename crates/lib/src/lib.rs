@@ -95,6 +95,9 @@
 //! }
 //! ```
 
+/// Service bridge types and traits (`bridges` feature, default).
+#[cfg(feature = "bridges")]
+pub mod bridge;
 /// Docker Engine diagnostics (bollard) when a Docker-backed resource feature is enabled.
 #[cfg(any(
     feature = "kafka",
@@ -149,6 +152,15 @@ pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, ScenarioKind,
 };
 pub use crate::phase::Phase;
+
+#[cfg(feature = "bridges")]
+pub use crate::bridge::{
+    BridgeContext, BridgeError, BridgeRequest, BridgeResources, BridgeResponse,
+    BridgeResponseBuilder, HttpBridge,
+};
+
+#[cfg(feature = "grpc-bridges")]
+pub use crate::bridge::grpc;
 
 #[cfg(feature = "outbox")]
 pub use crate::publication::{
