@@ -141,7 +141,8 @@ pub mod timeline;
 
 #[doc(inline)]
 pub use crate::error::{
-    InfrastructureError, InternalError, ResourceHandle, Result, ScenarioError, ScenarioId,
+    AssertionError, InfrastructureError, InternalError, ResourceHandle, ResourceNotFoundError,
+    Result, ScenarioError, ScenarioId, ShakedownError, StepError,
 };
 pub use crate::event::{
     DockerEventKind, Event, EventLevel, EventLog, EventSnapshot, InfraEvent, InfraSeverity,
@@ -259,7 +260,9 @@ pub use shakedown_macros::{faulty_test, test};
 
 #[cfg(test)]
 mod tests {
-    use crate::error::{InfrastructureError, InternalError, ResourceHandle, ScenarioError};
+    use crate::error::{
+        AssertionError, InfrastructureError, InternalError, ResourceHandle, ScenarioError,
+    };
     use crate::event::{EventLevel, EventLog};
     use crate::lifecycle::{Context, NoopEnvironmentBackend};
     use crate::resources::{
@@ -294,7 +297,9 @@ mod tests {
         fn check_send_sync<T: Send + Sync>(_: T) {}
 
         // Given one value of each Shakedown error category
-        let _scenario_err = ScenarioError::Assertion("test".to_string());
+        let _scenario_err = ScenarioError::Assertion(AssertionError::Unspecified {
+            detail: "test".to_string(),
+        });
         let _infra_err = InfrastructureError::Provision {
             resource: "test".to_string(),
             source: Box::new(std::io::Error::other("test")),

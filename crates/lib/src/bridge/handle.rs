@@ -7,7 +7,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use time::OffsetDateTime;
 
-use crate::error::ScenarioError;
+use crate::error::{AssertionError, ShakedownError};
 
 use super::types::BridgeError;
 
@@ -72,7 +72,8 @@ impl RecordedCall {
 
     /// Deserialize the **request** body as JSON.
     pub fn json<T: serde::de::DeserializeOwned>(&self) -> Result<T, BridgeError> {
-        serde_json::from_slice(self.request_body.as_ref()).map_err(BridgeError::from)
+        serde_json::from_slice(self.request_body.as_ref())
+            .map_err(|source| BridgeError::Deserialization { source })
     }
 }
 
@@ -102,13 +103,20 @@ pub struct BridgeHandle {
     pub max_recorded_body_size: Option<usize>,
 }
 
+/// Locks the recorded-calls buffer. If the mutex is poisoned (a panicking thread held the lock),
+/// recovers the inner data via [`std::sync::PoisonError::into_inner`] so teardown and assertions
+/// can still run after a panic elsewhere.
+fn lock_bridge_calls(
+    storage: &Arc<Mutex<Vec<RecordedCall>>>,
+) -> std::sync::MutexGuard<'_, Vec<RecordedCall>> {
+    storage
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 impl fmt::Debug for BridgeHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let count = self
-            .calls_storage
-            .lock()
-            .map(|calls| calls.len())
-            .unwrap_or(0);
+        let count = lock_bridge_calls(&self.calls_storage).len();
         f.debug_struct("BridgeHandle")
             .field("name", &self.name)
             .field("bind_address", &self.bind_address)
@@ -154,26 +162,18 @@ impl BridgeHandle {
             duration: exchange.duration,
             body_truncated: rb_trunc || resp_trunc,
         };
-        let mut calls = self
-            .calls_storage
-            .lock()
-            .expect("bridge calls mutex poisoned");
+        let mut calls = lock_bridge_calls(&self.calls_storage);
         calls.push(recorded);
     }
 
+    /// Returns a clone of all recorded calls.
     pub fn calls(&self) -> Vec<RecordedCall> {
-        self.calls_storage
-            .lock()
-            .expect("bridge calls mutex poisoned")
-            .clone()
+        lock_bridge_calls(&self.calls_storage).clone()
     }
 
     /// Calls whose method and path match exactly (case-sensitive for method).
     pub fn calls_matching(&self, method: &str, path: &str) -> Vec<RecordedCall> {
-        let calls = self
-            .calls_storage
-            .lock()
-            .expect("bridge calls mutex poisoned");
+        let calls = lock_bridge_calls(&self.calls_storage);
         calls
             .iter()
             .filter(|call| call.method() == method && call.path() == path)
@@ -181,34 +181,30 @@ impl BridgeHandle {
             .collect()
     }
 
-    pub fn assert_called_times(&self, expected: usize) -> Result<(), ScenarioError> {
-        let calls = self
-            .calls_storage
-            .lock()
-            .expect("bridge calls mutex poisoned");
+    /// On mismatch returns [`ShakedownError::Scenario`].
+    pub fn assert_called_times(&self, expected: usize) -> Result<(), ShakedownError> {
+        let calls = lock_bridge_calls(&self.calls_storage);
         let actual = calls.len();
         if actual == expected {
             return Ok(());
         }
-        Err(ScenarioError::Assertion(format!(
-            "bridge '{}': expected {} total calls, got {}; recorded: {}",
-            self.name,
+        Err(AssertionError::BridgeCallCountMismatch {
+            bridge_name: self.name.clone(),
             expected,
             actual,
-            format_calls_diagnostic(&calls)
-        )))
+            recorded_calls_diagnostic: format_calls_diagnostic(&calls),
+        }
+        .into())
     }
 
+    /// See [`Self::assert_called_times`] for error semantics.
     pub fn assert_path_called_times(
         &self,
         method: &str,
         path: &str,
         expected: usize,
-    ) -> Result<(), ScenarioError> {
-        let calls = self
-            .calls_storage
-            .lock()
-            .expect("bridge calls mutex poisoned");
+    ) -> Result<(), ShakedownError> {
+        let calls = lock_bridge_calls(&self.calls_storage);
         let actual = calls
             .iter()
             .filter(|call| call.method() == method && call.path() == path)
@@ -216,27 +212,25 @@ impl BridgeHandle {
         if actual == expected {
             return Ok(());
         }
-        Err(ScenarioError::Assertion(format!(
-            "bridge '{}': expected {} calls to `{} {}`, got {}; recorded: {}",
-            self.name,
+        Err(AssertionError::BridgePathCallCountMismatch {
+            bridge_name: self.name.clone(),
+            method: method.to_string(),
+            path: path.to_string(),
             expected,
-            method,
-            path,
             actual,
-            format_calls_diagnostic(&calls)
-        )))
+            recorded_calls_diagnostic: format_calls_diagnostic(&calls),
+        }
+        .into())
     }
 
+    /// See [`Self::assert_called_times`] for error semantics.
     pub fn assert_called_with(
         &self,
         method: &str,
         path: &str,
         predicate: impl Fn(&RecordedCall) -> bool,
-    ) -> Result<(), ScenarioError> {
-        let calls = self
-            .calls_storage
-            .lock()
-            .expect("bridge calls mutex poisoned");
+    ) -> Result<(), ShakedownError> {
+        let calls = lock_bridge_calls(&self.calls_storage);
         let matched = calls
             .iter()
             .filter(|call| call.method() == method && call.path() == path)
@@ -244,36 +238,32 @@ impl BridgeHandle {
         if matched {
             return Ok(());
         }
-        Err(ScenarioError::Assertion(format!(
-            "bridge '{}': no call to `{} {}` satisfied the predicate; recorded: {}",
-            self.name,
-            method,
-            path,
-            format_calls_diagnostic(&calls)
-        )))
+        Err(AssertionError::BridgePredicateUnmatched {
+            bridge_name: self.name.clone(),
+            method: method.to_string(),
+            path: path.to_string(),
+            recorded_calls_diagnostic: format_calls_diagnostic(&calls),
+        }
+        .into())
     }
 
-    pub fn assert_not_called(&self) -> Result<(), ScenarioError> {
-        let calls = self
-            .calls_storage
-            .lock()
-            .expect("bridge calls mutex poisoned");
+    /// See [`Self::assert_called_times`] for error semantics.
+    pub fn assert_not_called(&self) -> Result<(), ShakedownError> {
+        let calls = lock_bridge_calls(&self.calls_storage);
         if calls.is_empty() {
             return Ok(());
         }
-        Err(ScenarioError::Assertion(format!(
-            "bridge '{}': expected no calls, got {}; recorded: {}",
-            self.name,
-            calls.len(),
-            format_calls_diagnostic(&calls)
-        )))
+        Err(AssertionError::BridgeUnexpectedCalls {
+            bridge_name: self.name.clone(),
+            actual: calls.len(),
+            recorded_calls_diagnostic: format_calls_diagnostic(&calls),
+        }
+        .into())
     }
 
-    pub fn assert_path_not_called(&self, method: &str, path: &str) -> Result<(), ScenarioError> {
-        let calls = self
-            .calls_storage
-            .lock()
-            .expect("bridge calls mutex poisoned");
+    /// See [`Self::assert_called_times`] for error semantics.
+    pub fn assert_path_not_called(&self, method: &str, path: &str) -> Result<(), ShakedownError> {
+        let calls = lock_bridge_calls(&self.calls_storage);
         let matching = calls
             .iter()
             .filter(|call| call.method() == method && call.path() == path)
@@ -281,14 +271,14 @@ impl BridgeHandle {
         if matching == 0 {
             return Ok(());
         }
-        Err(ScenarioError::Assertion(format!(
-            "bridge '{}': expected no calls to `{} {}`, got {}; recorded: {}",
-            self.name,
-            method,
-            path,
-            matching,
-            format_calls_diagnostic(&calls)
-        )))
+        Err(AssertionError::BridgePathUnexpectedCalls {
+            bridge_name: self.name.clone(),
+            method: method.to_string(),
+            path: path.to_string(),
+            matching_call_count: matching,
+            recorded_calls_diagnostic: format_calls_diagnostic(&calls),
+        }
+        .into())
     }
 }
 

@@ -34,7 +34,8 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
         .on_method("echo.EchoService/SayHello")
         .respond_proto(&SayHelloResponse {
             message: String::from("hello alice"),
-        });
+        })
+        .expect("respond_proto");
 
     let mut ctx = Context::new();
     ctx.register_grpc_bridge("echo", stub)
@@ -46,7 +47,7 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
         "grpc_stub_bridge_unary_register_client_assert_recorded_call",
         |context| {
             Box::pin(async move {
-                let base_url = context.bridge_url("echo");
+                let base_url = context.bridge_url("echo").expect("echo bridge url");
                 let origin_uri: http::Uri = base_url.parse().expect("bridge url parses as URI");
                 let channel = Endpoint::from_shared(base_url)
                     .expect("valid endpoint")
@@ -73,7 +74,7 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
 
                 assert_eq!(response.into_inner().message, "hello alice");
 
-                let handle: &BridgeHandle = context.bridge("echo");
+                let handle: &BridgeHandle = context.bridge("echo").expect("echo bridge handle");
 
                 // **Then** one call is recorded; harness stores the full gRPC path on both
                 // `method` and `path`, and the request body round-trips through prost.

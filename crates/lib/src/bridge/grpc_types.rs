@@ -4,6 +4,8 @@ use bytes::Bytes;
 use prost::Message;
 use tonic::Code;
 
+use super::types::BridgeError;
+
 /// Inbound unary gRPC request presented to a [`super::traits::GrpcBridge`].
 #[derive(Debug, Clone)]
 pub struct GrpcBridgeRequest {
@@ -49,12 +51,14 @@ impl GrpcBridgeResponse {
     }
 
     /// Successful response encoding a [`prost::Message`].
-    pub fn ok_proto(message: &impl Message) -> Self {
+    pub fn ok_proto(message: &impl Message) -> Result<Self, BridgeError> {
         let mut encoded = Vec::new();
         message
             .encode(&mut encoded)
-            .expect("prost encode of GrpcBridgeResponse payload must succeed");
-        Self::ok(Bytes::from(encoded))
+            .map_err(|error| BridgeError::Encoding {
+                message: format!("prost encode: {error}"),
+            })?;
+        Ok(Self::ok(Bytes::from(encoded)))
     }
 
     /// Error response with the given gRPC status code and message.

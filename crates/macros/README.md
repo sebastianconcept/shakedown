@@ -1,6 +1,6 @@
 # Shakedown Macros
 
-Procedural attribute macros for shakedown testing. They expand to `#[::tokio::test]` wrappers that call [`run_scenario`](../lib/src/lifecycle.rs) on the `shakedown` crate — same lifecycle as manual harness code.
+Procedural attribute macros for shakedown testing. They expand to `#[::tokio::test]` wrappers that call [`run_scenario`](../lib/src/lifecycle/mod.rs) on the `shakedown` crate — same lifecycle as manual harness code.
 
 ## Quick start
 
@@ -30,7 +30,7 @@ async fn order_created_event(ctx: &mut Context) {
 }
 ```
 
-The macro expands to an outer `#[::tokio::test]` async function that calls [`run_scenario`](../lib/src/lifecycle.rs):
+The macro expands to an outer `#[::tokio::test]` async function that calls [`run_scenario`](../lib/src/lifecycle/mod.rs):
 
 - Creates `Context::new()` and `EventLog::new()`
 - Registers builtin resources when given `resources = [...]`
@@ -52,7 +52,7 @@ async fn fault_injected_scenario(ctx: &mut Context) {
 
 The generated code calls `ctx.set_scenario_kind(ScenarioKind::Faulty)` before running the scenario.
 
-**`fault_profile = "..."`** — Recognized and expanded to `ctx.set_fault_profile("...")` immediately after `set_scenario_kind(Faulty)` (before `run_scenario`). Use it to tag a scenario for future harness presets or for your own assertions via [`Context::fault_profile`](../lib/src/lifecycle.rs).
+**`fault_profile = "..."`** — Recognized and expanded to `ctx.set_fault_profile("...")` immediately after `set_scenario_kind(Faulty)` (before `run_scenario`). Use it to tag a scenario for future harness presets or for your own assertions via [`Context::fault_profile`](../lib/src/lifecycle/mod.rs).
 
 **Other `key = <expr>` pairs** — Reserved for future macro wiring (same parse shape as today). They are accepted and **ignored** so call sites can stay forward-compatible; toxic specs and runtime fault control remain on [`Context`] / `FaultHandle` APIs.
 

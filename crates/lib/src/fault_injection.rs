@@ -43,6 +43,8 @@ pub enum Error {
     ProxyNotFound { proxy_name: String },
     /// Kafka fault proxy was deferred but Toxiproxy did not provision (register Toxiproxy in the same scenario).
     KafkaFaultProxyIncomplete,
+    /// Toxiproxy proxy `{proxy_name}` was created but listen address was not recorded (framework invariant).
+    ListenAddressMissingAfterProxyCreate { proxy_name: String },
 }
 
 /// Handle for controlling Toxiproxy proxies and toxics for one scenario run.

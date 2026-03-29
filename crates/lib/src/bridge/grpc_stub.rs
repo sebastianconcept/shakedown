@@ -6,7 +6,7 @@ use tonic::Code;
 
 use super::grpc_types::{GrpcBridgeRequest, GrpcBridgeResponse};
 use super::traits::GrpcBridge;
-use super::types::BridgeContext;
+use super::types::{BridgeContext, BridgeError};
 
 #[derive(Debug, Clone)]
 enum GrpcStubRoute {
@@ -62,12 +62,15 @@ impl GrpcStubBridge {
 
 impl GrpcStubMethodPending {
     /// Respond with a serialized protobuf message body.
-    pub fn respond_proto(mut self, message: &impl prost::Message) -> GrpcStubBridge {
-        self.stub.routes.push((
-            self.method_path,
-            GrpcStubRoute::OkBody(GrpcBridgeResponse::ok_proto(message).body),
-        ));
+    pub fn respond_proto(
+        mut self,
+        message: &impl prost::Message,
+    ) -> Result<GrpcStubBridge, BridgeError> {
+        let response = GrpcBridgeResponse::ok_proto(message)?;
         self.stub
+            .routes
+            .push((self.method_path, GrpcStubRoute::OkBody(response.body)));
+        Ok(self.stub)
     }
 
     /// Respond with a non-OK gRPC status.
@@ -114,9 +117,11 @@ mod tests {
 
     #[tokio::test]
     async fn stub_matches_registered_method() {
+        // Given a stub that responds on `test.Service/Do` with a fixed protobuf payload
         let stub = GrpcStubBridge::new("inventory")
             .on_method("test.Service/Do")
-            .respond_proto(&SampleMessage { value: 7 });
+            .respond_proto(&SampleMessage { value: 7 })
+            .expect("respond_proto");
 
         let resources = Arc::new(crate::bridge::types::BridgeResources::default());
         let context = BridgeContext::new("s1", "inventory", resources);
@@ -126,14 +131,18 @@ mod tests {
             metadata: Vec::new(),
             body: Bytes::new(),
         };
+        // When the bridge handles a matching request
         let response = stub.handle(request, &context).await;
+        // Then the status is OK and the body round-trips through prost decode (test-only)
         assert_eq!(response.status_code, Code::Ok as u32);
-        let decoded = SampleMessage::decode(response.body.as_ref()).unwrap();
+        let decoded = SampleMessage::decode(response.body.as_ref())
+            .expect("decode response body produced by stub");
         assert_eq!(decoded.value, 7);
     }
 
     #[tokio::test]
     async fn stub_unimplemented_when_unmatched() {
+        // Given a stub with no routes registered
         let stub = GrpcStubBridge::new("inventory");
         let resources = Arc::new(crate::bridge::types::BridgeResources::default());
         let context = BridgeContext::new("s1", "inventory", resources);
@@ -143,7 +152,9 @@ mod tests {
             metadata: Vec::new(),
             body: Bytes::new(),
         };
+        // When the method does not match any route
         let response = stub.handle(request, &context).await;
+        // Then the bridge returns UNIMPLEMENTED
         assert_eq!(response.status_code, Code::Unimplemented as u32);
     }
 }
