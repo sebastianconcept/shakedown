@@ -55,6 +55,15 @@ futures-util = { version = "0.3", default-features = false, features = ["std"], 
 # Structured logging for diagnostics connection and future ShakedownLayer (SPECS §1)
 tracing = "0.1"
 
+# HTTP bridges (MVP `mvp-bridges`; hyper 1.x + http 1.x per SPECS)
+hyper = { version = "1", optional = true, default-features = false, features = ["server", "http1"] }
+http = { version = "1", optional = true }
+http-body-util = { version = "0.1", optional = true }
+bytes = { version = "1", optional = true }
+# gRPC bridges (optional; tonic aligns with lockfile via testcontainers stack)
+tonic = { version = "0.14", optional = true, default-features = false }
+prost = { version = "0.14", optional = true }
+
 [dev-dependencies]
 async-trait = "0.1"
 bollard = { version = "0.20", default-features = false, features = ["ssl"] }
@@ -65,8 +74,10 @@ tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 [features]
-# Default: no heavy dependencies by default (unit tests work without Docker)
-default = []
+# HTTP bridge types and `hyper` stack (default-on per `mvp-bridges` US-001)
+default = ["bridges"]
+bridges = ["dep:hyper", "dep:http", "dep:http-body-util", "dep:bytes"]
+grpc-bridges = ["bridges", "dep:tonic", "dep:prost"]
 # Infrastructure diagnostics (bollard); implied by Docker-backed resource features unless `no-diagnostics` is set
 diagnostics = ["dep:bollard", "dep:futures-util"]
 # Disables Docker socket diagnostics at compile time (stub APIs; no bollard client)
