@@ -72,6 +72,7 @@ tower = { version = "0.5", optional = true, default-features = false, features =
 async-trait = "0.1"
 bollard = { version = "0.20", default-features = false, features = ["ssl"] }
 lapin = { version = "4.3" }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 serial_test = "3"
 time = { version = "0.3", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1", features = ["full"] }
