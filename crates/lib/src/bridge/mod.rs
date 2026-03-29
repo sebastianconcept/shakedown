@@ -4,10 +4,14 @@
 //! `tonic` and `prost` for gRPC bridge work in later milestones.
 
 #[cfg(feature = "bridges")]
+mod handle;
+#[cfg(feature = "bridges")]
 mod traits;
 #[cfg(feature = "bridges")]
 mod types;
 
+#[cfg(feature = "bridges")]
+pub use handle::{BridgeHandle, RecordedCall, RecordedExchange};
 #[cfg(feature = "bridges")]
 pub use traits::HttpBridge;
 #[cfg(feature = "bridges")]
