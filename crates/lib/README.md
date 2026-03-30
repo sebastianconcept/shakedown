@@ -37,6 +37,7 @@ shakedown/
 
 - **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka** and **RabbitMQ** publication proof (`assert_kafka_published`, `assert_rabbit_published`) on top of relational bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below).
 - **Also shipped:** `mvp-bridges` — **Service bridges** ([`HttpBridge`](src/bridge/traits.rs), [`StubBridge`](src/bridge/stub.rs), [`BridgeHandle`](src/bridge/handle.rs); [`GrpcBridge`](src/bridge/traits.rs) / [`GrpcStubBridge`](src/bridge/grpc_stub.rs) behind **`grpc-bridges`**) host real localhost HTTP/gRPC servers so scenarios assert outbound calls at the **network** layer; see [Service bridges](#service-bridges).
+- **Also shipped:** **`services`** (service-under-test) — opt-in Cargo feature to run **application containers** via testcontainers during scenarios: [`ServiceUnderTest`](src/service/builder.rs) → [`ServiceSpec`](src/service/types.rs), convention-based **env injection** (Kafka, relational DBs, RabbitMQ, bridges, `depends_on` peers), **convergence health checks**, [`Context::service_url`](src/lifecycle/mod.rs) / [`service_handle`](src/lifecycle/mod.rs) on the test host (`127.0.0.1`), and **bollard** diagnostics labels — see [Service under test](#service-under-test-services-feature).
 - **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle/mod.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
 - **Previous milestone:** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
 - **Roadmap:** Further milestones are listed in adopted product docs (`MVP.md` under `~/docs/shakedown/`).
@@ -78,6 +79,7 @@ Align automation with the same commands as in this section:
 | `cargo test -p shakedown --features grpc-bridges --test bridge_grpc` | gRPC [`GrpcStubBridge`](src/bridge/grpc_stub.rs) unary integration test | No |
 | `cargo test -p shakedown --features outbox,sqlite` | Outbox helpers + SQLite vertical tests | Not required |
 | `cargo test -p shakedown --features outbox,rabbitmq,sqlite` | Adds Rabbit publication helpers’ unit coverage | Not required for SQLite-only tests |
+| `cargo test -p shakedown --features services` | Service-under-test unit tests + integration **targets** (Docker cases still **`#[ignore]`** unless you pass `-- --ignored`) | Optional Docker for ignored targets |
 | `cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored` | **All** tests: normal + **`#[ignore]`** + doc tests; compiles diagnostics (bollard) | **Required** for ignored integration tests |
 | `just test-lib` | `cargo test -p shakedown` | Same as column above |
 | `just test-shakedown-all-include-ignored` | Same as the long `--include-ignored` row; uses **nextest** when installed, else `cargo test` | **Required** for ignored tests |
@@ -113,6 +115,12 @@ These need a running Docker engine. They are **skipped** in a normal `cargo test
 | Diagnostics (bollard: logs, events, stats) | `cargo test -p shakedown --features kafka --test diagnostics_integration -- --ignored` | `just test-diagnostics-integration-ignored` |
 | Toxiproxy vertical (control API) | `cargo test -p shakedown --features fault-injection --test toxiproxy_vertical -- --ignored` | `just test-toxiproxy-ignored` |
 | Kafka + Toxiproxy (Faulty bootstrap / proxy) | `cargo test -p shakedown --features kafka,fault-injection --test fault_injection_kafka -- --ignored` | `just test-fault-injection-kafka-ignored` |
+| Service lifecycle (`whoami`) | `cargo test -p shakedown --features services --test services_lifecycle -- --ignored` | — |
+| Service host.docker.internal | `cargo test -p shakedown --features services --test service_host_resolution -- --ignored` | — |
+| Multi-service `depends_on` | `cargo test -p shakedown --features services --test services_multi_dependency -- --ignored` | — |
+| Service diagnostics (labels + timeline) | `cargo test -p shakedown --features services --test services_diagnostics -- --ignored` | — |
+| US-012: Kafka + bridge + whoami | `cargo test -p shakedown --features kafka,services --test services_us012_kafka_bridge_whoami -- --ignored` | — |
+| US-013: Postgres + two whoami | `cargo test -p shakedown --features postgres,services --test services_us013_multi_postgres_whoami -- --ignored` | — |
 
 **Note:** `tests/diagnostics_integration.rs` also has a **non-ignored** test (`try_connect_graceful_when_docker_unreachable`); it runs with `cargo test -p shakedown --features kafka` without `--ignored`.
 
@@ -785,6 +793,150 @@ impl GrpcBridge for AlwaysHello {
 ### Verification and tests
 
 Manual verification steps for bridges (feature flags, integration tests, docs walk-through) are in the adopted feature pack: **`~/docs/shakedown/feature/mvp-bridges/VERIFY.md`**. Automated references: [`tests/bridge_http.rs`](tests/bridge_http.rs), [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs).
+
+## Service under test (`services` feature)
+
+**What this is:** In addition to **infrastructure** resources (Kafka, Postgres, …) and **bridges** (stub upstreams), Shakedown can start **your service** (or a lightweight stand-in image) as a **Docker container** inside the same [`run_scenario`](src/lifecycle/mod.rs) lifecycle. After infrastructure is ready and bridges are listening, the harness **injects** connection strings and URLs into the container, waits for **readiness** using configurable probes, and exposes each service’s **HTTP base URL** on [`Context`](src/lifecycle/mod.rs) for assertions from the **test process** (loopback). Teardown stops service containers **before** bridges and infrastructure so graceful shutdown still sees live dependencies.
+
+**Cargo feature:** Enable **`services`** (opt-in — not in default features). It pulls **testcontainers**, **reqwest** (HTTP health probes), and **`diagnostics`** (bollard) so service containers can participate in the same observability story as infra. Compose with **`kafka`**, **`postgres`**, **`bridges`**, and other features when you want **convention-based** injection from those bindings.
+
+```toml
+[dev-dependencies]
+shakedown = { version = "0.1.0", default-features = false, features = ["services", "bridges"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+```
+
+`default-features = false` is shown so you opt in explicitly; many teams keep default **`bridges`** on and add **`services`**.
+
+Public entry points (all behind `feature = "services"`): [`ServiceUnderTest`](src/service/builder.rs), [`ServiceSpec`](src/service/types.rs), [`HealthCheck`](src/service/health.rs), [`EnvMapping`](src/service/types.rs) / [`PullPolicy`](src/service/types.rs), [`ServiceHandle`](src/service/handle.rs), [`Context::register_service`](src/lifecycle/mod.rs), [`Context::service_url`](src/lifecycle/mod.rs), [`Context::service_handle`](src/lifecycle/mod.rs). Address rewriting for containers uses [`HOST_DOCKER_INTERNAL`](src/service/address.rs) (see §2).
+
+Runnable references in this repo: [`tests/services_lifecycle.rs`](tests/services_lifecycle.rs) (single container), [`tests/services_us012_kafka_bridge_whoami.rs`](tests/services_us012_kafka_bridge_whoami.rs), [`tests/services_us013_multi_postgres_whoami.rs`](tests/services_us013_multi_postgres_whoami.rs).
+
+### 1. Single-service quick-start (register, health check, assert)
+
+1. Build a [`ServiceSpec`](src/service/types.rs) with [`ServiceUnderTest::docker`](src/service/builder.rs) — **`.name(...)`** and **at least one `.port(...)`** are required; if you omit [`.health_check`](src/service/builder.rs), the harness defaults to [`HealthCheck::tcp`](src/service/health.rs).
+2. Call [`Context::register_service`](src/lifecycle/mod.rs) **before** [`run_scenario`](src/lifecycle/mod.rs). Dependencies must already be registered (see §3).
+3. Inside the scenario closure, use [`Context::service_url`](src/lifecycle/mod.rs) for HTTP clients from the **host** (`http://127.0.0.1:…`). [`Context::service_handle`](src/lifecycle/mod.rs) exposes [`ServiceHandle::base_url`](src/service/handle.rs), [`container_id`](src/service/handle.rs), and [`is_healthy`](src/service/handle.rs).
+
+The example below matches [`tests/services_lifecycle.rs`](tests/services_lifecycle.rs) and requires **Docker** when executed (`#[ignore]` in the crate’s integration test). Add **`tokio`** and **`reqwest`** to your crate as in the manifest snippet above.
+
+```rust
+use shakedown::{run_scenario, Context, EventLog, HealthCheck, ServiceUnderTest};
+
+#[tokio::test]
+async fn service_quickstart() {
+    let specification = ServiceUnderTest::docker("traefik/whoami:v1.10")
+        .name("web")
+        .port(80)
+        .health_check(HealthCheck::http("/"))
+        .build()
+        .expect("valid ServiceSpec");
+
+    let mut context = Context::new();
+    context.register_service(specification).expect("register_service");
+
+    let mut event_log = EventLog::new();
+    run_scenario(
+        &mut context,
+        "service_quickstart",
+        |scenario_context| {
+            Box::pin(async move {
+                let base_url = scenario_context
+                    .service_url("web")
+                    .expect("URL after readiness");
+                let client = reqwest::Client::new();
+                let response = client.get(base_url).send().await.expect("GET /");
+                assert!(response.status().is_success());
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+}
+```
+
+### 2. Config injection and health checks
+
+#### Convention-based env vars
+
+When **[`auto_inject(true)`](src/service/builder.rs)** (the default), the harness adds variables derived from whatever is present on [`Context`](src/lifecycle/mod.rs) at container start time:
+
+| Binding | Default env var | Notes |
+|--------|-------------------|--------|
+| Kafka | `KAFKA_BOOTSTRAP_SERVERS` | Requires `kafka` feature + registered Kafka resource |
+| Postgres | `DATABASE_URL` | `postgres` feature; see §3 for **per-service** URLs when multiple services are registered |
+| MariaDB | `MARIADB_URL` | `mariadb` feature |
+| MySQL | `MYSQL_URL` | `mysql` feature |
+| RabbitMQ | `RABBITMQ_URL` | `rabbitmq` feature |
+| HTTP/gRPC bridge | `{UPPER_SNAKE(bridge_name)}_URL` | e.g. bridge `"order-gateway"` → `ORDER_GATEWAY_URL` (`bridges` + `services`) |
+| `depends_on` peer | `{UPPER_SNAKE(service_name)}_URL` | Only for names listed in [`.depends_on`](src/service/builder.rs) (§3) |
+
+**Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`bridge`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
+
+**Opt out:** [`.auto_inject(false)`](src/service/builder.rs) skips the table above; only `.env` and resolved `.env_mapping` entries are injected.
+
+**Container vs test host:** Injected values rewrite loopback and `localhost` to **`host.docker.internal`** (and add Linux `host-gateway` mapping) so processes **inside** the service container reach Kafka, DBs, and bridges on the host. The test process keeps using **`127.0.0.1`** via [`service_url`](src/lifecycle/mod.rs) — see [`HOST_DOCKER_INTERNAL`](src/service/address.rs).
+
+#### `PullPolicy`
+
+[`.pull_policy`](src/service/builder.rs) controls image pull before start: [`PullPolicy::Always`](src/service/types.rs), [`IfNotPresent`](src/service/types.rs) (default, Docker-style), [`Never`](src/service/types.rs).
+
+#### `HealthCheck` variants
+
+Constructors live on [`HealthCheck`](src/service/health.rs): [`http`](src/service/health.rs), [`http_status`](src/service/health.rs), [`grpc`](src/service/health.rs), [`grpc_service`](src/service/health.rs), [`tcp`](src/service/health.rs), [`command`](src/service/health.rs), [`composite`](src/service/health.rs). Default poll budget is **30s** with **500ms** interval ([`DEFAULT_HEALTH_CHECK_TIMEOUT`](src/service/health.rs), [`DEFAULT_HEALTH_CHECK_INTERVAL`](src/service/health.rs)); tune with [`.with_timeout`](src/service/health.rs) / [`.with_interval`](src/service/health.rs).
+
+**Implemented today for readiness:** **HTTP**, **TCP**, **Command** (container exec), and **Composite** (ordered nested checks). **`Grpc`** is accepted in configuration but **not yet implemented** as a probe — use **`http`** or **`tcp`** until gRPC health wiring lands.
+
+```rust
+use shakedown::HealthCheck;
+use std::time::Duration;
+
+let ready = HealthCheck::http("/health/ready")
+    .with_timeout(Duration::from_secs(90));
+
+let _tcp_fallback = HealthCheck::tcp().with_interval(Duration::from_millis(250));
+```
+
+### 3. Multi-service dependencies, inter-service URLs, and partitioned resources
+
+Register **each** service with [`register_service`](src/lifecycle/mod.rs). Declare ordering with [`.depends_on("other_name")`](src/service/builder.rs); the harness performs a **topological sort** and rejects **cycles** or **missing** dependency names at registration time.
+
+When **`auto_inject`** is on and more than one service is registered, **Postgres / MariaDB / MySQL** URLs use **per-service database path suffixes** so every container still receives the standard name (`DATABASE_URL` for Postgres, etc.) but points at an **isolated** database — same transparency model as other resources ([DECISIONS.md](../../DECISIONS.md) scenario isolation).
+
+A downstream service that **depends on** an upstream receives **`UPSTREAM_URL`** (upper-snake of the dependency name) with the upstream’s base URL, rewritten for the container network. Services **not** listed in `depends_on` do **not** get each other’s URLs automatically.
+
+```rust
+use shakedown::{HealthCheck, ServiceUnderTest};
+
+let upstream = ServiceUnderTest::docker("traefik/whoami:v1.10")
+    .name("upstream")
+    .port(80)
+    .health_check(HealthCheck::http("/"))
+    .build()
+    .expect("upstream spec");
+
+let downstream = ServiceUnderTest::docker("traefik/whoami:v1.10")
+    .name("downstream")
+    .port(80)
+    .depends_on("upstream")
+    .health_check(HealthCheck::http("/"))
+    .build()
+    .expect("downstream spec");
+
+// Register `upstream` before `downstream` (or rely on validation errors if order is wrong).
+```
+
+Full Docker proof: [`tests/services_us013_multi_postgres_whoami.rs`](tests/services_us013_multi_postgres_whoami.rs) (`postgres`, `services`).
+
+### 4. Diagnostics and resource assertions on service containers
+
+Service containers are labeled like infrastructure: **`io.shakedown.framework=true`** plus **`io.shakedown.service={name}`** (see [`SHAKEDOWN_SERVICE_LABEL_KEY`](src/diagnostics/labels.rs) in [`docker_labels.rs`](src/docker_labels.rs)). Bollard **log streaming**, **Docker events**, and **resource stats** use the same filters as other Shakedown-managed containers when **`diagnostics`** is active (the `services` feature enables it unless you compile with **`no-diagnostics`**).
+
+Use the **logical service name** you passed to [`.name`](src/service/builder.rs) with [`Context::assert_resource`](src/lifecycle/mod.rs) for **`peak_memory_under`** / **`avg_cpu_under`** — correlation prefers the `io.shakedown.service` label ([`correlation_name_from_container_summary`](src/diagnostics/labels.rs)). Deeper background: [Infrastructure diagnostics (bollard)](#infrastructure-diagnostics-bollard).
+
+**End-to-end** exercise (Kafka + bridge + whoami + diagnostics): [`tests/services_us012_kafka_bridge_whoami.rs`](tests/services_us012_kafka_bridge_whoami.rs) (`kafka`, `services`, Docker + `--ignored`).
 
 ## See also
 
