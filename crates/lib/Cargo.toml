@@ -39,6 +39,9 @@ mysql_async = { version = "0.36.1", optional = true }
 # SQLite for in-memory per-scenario resources (no Docker; SPECS: rusqlite + spawn_blocking)
 rusqlite = { version = "0.32", optional = true, default-features = false, features = ["bundled"] }
 
+# Redis / Valkey async client (`redis` / `valkey` features; RESP)
+redis = { version = "1.1", optional = true, default-features = false, features = ["tokio-comp"] }
+
 # RabbitMQ client for readiness and publication verification (`rabbitmq` feature)
 lapin = { version = "4.3", optional = true }
 
@@ -157,6 +160,22 @@ fault-injection = [
     "dep:noxious-client",
     "dep:reqwest",
     "dep:testcontainers",
+]
+# Redis (Docker + redis crate; suite-shared broker)
+redis = [
+    "dep:redis",
+    "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/redis",
+    "diagnostics",
+]
+# Valkey (Docker + redis crate; suite-shared server; shared types with `redis` feature)
+valkey = [
+    "dep:redis",
+    "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/valkey",
+    "diagnostics",
 ]
 # MCP server support (post-MVP, optional)
 mcp = []
@@ -295,3 +314,21 @@ required-features = ["postgres", "services"]
 name = "outbox_rabbit"
 path = "tests/outbox_rabbit.rs"
 required-features = ["outbox", "postgres", "rabbitmq"]
+
+# Redis suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "redis_vertical"
+path = "tests/redis_vertical.rs"
+required-features = ["redis"]
+
+# Redis helpers round-trip (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_redis"
+path = "tests/helpers_redis.rs"
+required-features = ["redis"]
+
+# Valkey suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "valkey_vertical"
+path = "tests/valkey_vertical.rs"
+required-features = ["valkey"]

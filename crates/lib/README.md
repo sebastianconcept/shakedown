@@ -121,6 +121,8 @@ These need a running Docker engine. They are **skipped** in a normal `cargo test
 | Service diagnostics (labels + timeline) | `cargo test -p shakedown --features services --test services_diagnostics -- --ignored` | — |
 | US-012: Kafka + bridge + whoami | `cargo test -p shakedown --features kafka,services --test services_us012_kafka_bridge_whoami -- --ignored` | — |
 | US-013: Postgres + two whoami | `cargo test -p shakedown --features postgres,services --test services_us013_multi_postgres_whoami -- --ignored` | — |
+| Redis vertical + helpers | `cargo test -p shakedown --features redis --test redis_vertical --test helpers_redis -- --ignored` | — |
+| Valkey vertical | `cargo test -p shakedown --features valkey --test valkey_vertical -- --ignored` | — |
 
 **Note:** `tests/diagnostics_integration.rs` also has a **non-ignored** test (`try_connect_graceful_when_docker_unreachable`); it runs with `cargo test -p shakedown --features kafka` without `--ignored`.
 
@@ -259,13 +261,26 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 - **Image tag:** [`MysqlResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_MYSQL_IMAGE_TAG` via [`MysqlResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`8.4`** (adopted SPECS).
 - [`MysqlBindings`](src/resources.rs) is applied after provision (`engine: mysql` in handle metadata).
 
-Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
+**Redis (`redis` feature, `testcontainers-modules::redis`, default tag `7`):**
+
+- [`RedisResource`](src/resources.rs) uses a **suite-level** broker: first provision starts one container; refcounted teardown removes it when the last scenario ends. Each scenario gets a [`sanitize_redis_key_prefix`](src/resources.rs) (`shakedown:<scenario>:`) applied by [`RedisHelpers`](src/helpers/redis.rs) and removed with **SCAN + DEL** on teardown.
+- **Image tag:** [`RedisResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_REDIS_IMAGE_TAG` via [`RedisResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`7`** (`redis:7`).
+- [`RedisBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: redis` in handle metadata). Use [`Context::redis()`](src/lifecycle/mod.rs) for helpers.
+
+**Valkey (`valkey` feature, `testcontainers-modules::valkey`, default tag `8`):**
+
+- [`ValkeyResource`](src/resources.rs) mirrors Redis: same suite/refcount model, same [`RedisBindings`](src/resources.rs) and [`RedisHelpers`](src/helpers/redis.rs) (`ctx.redis()`), handle metadata `engine: valkey`.
+- **Image tag:** [`ValkeyResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_VALKEY_IMAGE_TAG` via [`ValkeyResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`8`** (`valkey/valkey:8`).
+
+**Service injection:** with the **`services`** feature, [`EnvMapping::redis`](src/service/types.rs) and convention injection default to **`REDIS_URL`** for [`RedisBindings::connection_url`](src/resources.rs) (shared name for Redis and Valkey).
+
+Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, Redis, Valkey, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
 
 Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
 
 ## Infrastructure diagnostics (bollard)
 
-When you enable any **Docker-backed** resource feature (`kafka`, `postgres`, `mariadb`, `mysql`), the crate also enables the **`diagnostics`** feature unless you opt out with **`no-diagnostics`**.
+When you enable any **Docker-backed** resource feature (`kafka`, `postgres`, `mariadb`, `mysql`, `redis`, `valkey`), the crate also enables the **`diagnostics`** feature unless you opt out with **`no-diagnostics`**.
 
 What it provides (read-only — never starts or stops containers; testcontainers owns lifecycle):
 
@@ -303,7 +318,7 @@ If the Docker socket is missing or unusable, [`try_connect`](src/diagnostics/con
 
 ## Typed helpers
 
-The harness always exposes **structured bindings** on [`Context`] after provisioning (for example [`KafkaBindings`](src/resources.rs), [`RabbitBindings`](src/resources.rs), [`PostgresBindings`](src/resources.rs)). On top of that, Shakedown offers **optional typed helpers** — thin facades that apply scenario isolation (topic prefixes, namespaced AMQP names, scoped database URLs) so common steps stay short.
+The harness always exposes **structured bindings** on [`Context`] after provisioning (for example [`KafkaBindings`](src/resources.rs), [`RabbitBindings`](src/resources.rs), [`PostgresBindings`](src/resources.rs), [`RedisBindings`](src/resources.rs) for Redis/Valkey). On top of that, Shakedown offers **optional typed helpers** — thin facades that apply scenario isolation (topic prefixes, namespaced AMQP names, scoped database URLs, Redis key prefixes) so common steps stay short.
 
 There are **three patterns**; pick based on what you are proving:
 
@@ -870,10 +885,11 @@ When **[`auto_inject(true)`](src/service/builder.rs)** (the default), the harnes
 | MariaDB | `MARIADB_URL` | `mariadb` feature |
 | MySQL | `MYSQL_URL` | `mysql` feature |
 | RabbitMQ | `RABBITMQ_URL` | `rabbitmq` feature |
+| Redis / Valkey | `REDIS_URL` | `redis` or `valkey` feature (`EnvMapping::redis` renames the var) |
 | HTTP/gRPC bridge | `{UPPER_SNAKE(bridge_name)}_URL` | e.g. bridge `"order-gateway"` → `ORDER_GATEWAY_URL` (`bridges` + `services`) |
 | `depends_on` peer | `{UPPER_SNAKE(service_name)}_URL` | Only for names listed in [`.depends_on`](src/service/builder.rs) (§3) |
 
-**Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`bridge`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
+**Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`redis`](src/service/types.rs), [`bridge`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
 
 **Opt out:** [`.auto_inject(false)`](src/service/builder.rs) skips the table above; only `.env` and resolved `.env_mapping` entries are injected.
 

@@ -16,6 +16,8 @@ pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
     feature = "mariadb",
     feature = "mysql",
     feature = "sqlite",
+    feature = "redis",
+    feature = "valkey",
 ))]
 pub(crate) fn map_backend_error(
     error: impl std::error::Error + Send + Sync + 'static,
@@ -81,6 +83,9 @@ pub mod mysql;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
+#[cfg(any(feature = "redis", feature = "valkey"))]
+pub mod redis;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
@@ -98,3 +103,6 @@ pub use mysql::MysqlHelpers;
 
 #[cfg(feature = "sqlite")]
 pub use sqlite::SqliteHelpers;
+
+#[cfg(any(feature = "redis", feature = "valkey"))]
+pub use redis::RedisHelpers;

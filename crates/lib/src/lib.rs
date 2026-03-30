@@ -107,6 +107,8 @@ pub mod bridge;
     feature = "postgres",
     feature = "mariadb",
     feature = "mysql",
+    feature = "redis",
+    feature = "valkey",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -207,6 +209,8 @@ pub use crate::timeline::{
     feature = "postgres",
     feature = "mariadb",
     feature = "mysql",
+    feature = "redis",
+    feature = "valkey",
     feature = "services",
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
@@ -220,6 +224,8 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
+        feature = "redis",
+        feature = "valkey",
         feature = "services",
     ),
 ))]
@@ -228,8 +234,8 @@ pub use crate::diagnostics::ResourceAssertBuilder;
 /// First-party resource implementations.
 #[doc(inline)]
 pub use crate::resources::{
-    sanitize_resource_namespace, BuiltinResource, FakeResource, KafkaBindings, RegisteredResource,
-    Resource,
+    sanitize_redis_key_prefix, sanitize_resource_namespace, BuiltinResource, FakeResource,
+    KafkaBindings, RegisteredResource, Resource,
 };
 
 #[cfg(feature = "postgres")]
@@ -253,6 +259,8 @@ pub use crate::helpers::MariaDbHelpers;
 pub use crate::helpers::MysqlHelpers;
 #[cfg(feature = "postgres")]
 pub use crate::helpers::PostgresHelpers;
+#[cfg(any(feature = "redis", feature = "valkey"))]
+pub use crate::helpers::RedisHelpers;
 #[cfg(feature = "sqlite")]
 pub use crate::helpers::SqliteHelpers;
 #[cfg(feature = "rabbitmq")]
@@ -271,6 +279,15 @@ pub use crate::resources::ToxiproxyResource;
 
 #[cfg(feature = "rabbitmq")]
 pub use crate::resources::{RabbitBindings, RabbitResource};
+
+#[cfg(any(feature = "redis", feature = "valkey"))]
+pub use crate::resources::RedisBindings;
+
+#[cfg(feature = "redis")]
+pub use crate::resources::RedisResource;
+
+#[cfg(feature = "valkey")]
+pub use crate::resources::ValkeyResource;
 
 #[cfg(all(
     feature = "outbox",

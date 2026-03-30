@@ -45,6 +45,7 @@ struct MappingOverrides {
     mariadb: Option<String>,
     mysql: Option<String>,
     rabbitmq: Option<String>,
+    redis: Option<String>,
     bridges: HashMap<String, String>,
     services: HashMap<String, String>,
 }
@@ -57,6 +58,7 @@ impl MappingOverrides {
             mariadb: None,
             mysql: None,
             rabbitmq: None,
+            redis: None,
             bridges: HashMap::new(),
             services: HashMap::new(),
         };
@@ -67,6 +69,7 @@ impl MappingOverrides {
                 EnvMapping::MariaDb(name) => overrides.mariadb = Some(name.clone()),
                 EnvMapping::Mysql(name) => overrides.mysql = Some(name.clone()),
                 EnvMapping::Rabbitmq(name) => overrides.rabbitmq = Some(name.clone()),
+                EnvMapping::Redis(name) => overrides.redis = Some(name.clone()),
                 EnvMapping::Bridge {
                     bridge_name,
                     env_var,
@@ -146,6 +149,12 @@ fn inject_conventions(
     if let Some(bindings) = context.rabbit_bindings() {
         let key = overrides.rabbitmq.as_deref().unwrap_or("RABBITMQ_URL");
         environment.insert(key.to_string(), bindings.amqp_uri.clone());
+    }
+
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    if let Some(bindings) = context.redis_bindings() {
+        let key = overrides.redis.as_deref().unwrap_or("REDIS_URL");
+        environment.insert(key.to_string(), bindings.connection_url.clone());
     }
 
     // Bridge URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::Bridge`.
@@ -252,6 +261,12 @@ fn resolve_env_mapping(
             .map(|bindings| (key.clone(), bindings.amqp_uri.clone())),
         #[cfg(not(feature = "rabbitmq"))]
         EnvMapping::Rabbitmq(_) => None,
+        #[cfg(any(feature = "redis", feature = "valkey"))]
+        EnvMapping::Redis(key) => context
+            .redis_bindings()
+            .map(|bindings| (key.clone(), bindings.connection_url.clone())),
+        #[cfg(not(any(feature = "redis", feature = "valkey")))]
+        EnvMapping::Redis(_) => None,
         EnvMapping::Bridge {
             bridge_name,
             env_var,

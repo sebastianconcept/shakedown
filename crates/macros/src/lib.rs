@@ -516,6 +516,34 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Redis" => Ok(quote! {
+            #[cfg(feature = "redis")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Redis(
+                    ::shakedown::RedisResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "redis"))]
+            {
+                ::core::compile_error!(
+                    "Redis in #[shakedown::test(resources = [...])] requires `redis` feature on the `shakedown` dependency"
+                );
+            }
+        }),
+        "Valkey" => Ok(quote! {
+            #[cfg(feature = "valkey")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Valkey(
+                    ::shakedown::ValkeyResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "valkey"))]
+            {
+                ::core::compile_error!(
+                    "Valkey in #[shakedown::test(resources = [...])] requires `valkey` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Toxiproxy" => Ok(quote! {
             #[cfg(feature = "fault-injection")]
             {
@@ -533,7 +561,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `Redis`, `Valkey`, and `Toxiproxy`"
             ),
         )),
     }
