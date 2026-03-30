@@ -180,7 +180,7 @@ mod tests {
         );
         assert!(spec.env_vars.is_empty());
         assert!(spec.env_mappings.is_empty());
-        assert_eq!(spec.auto_inject, true);
+        assert!(spec.auto_inject);
         assert_eq!(spec.pull_policy, PullPolicy::IfNotPresent);
         assert!(matches!(spec.health_check, HealthCheck::Tcp { .. }));
         assert!(spec.depends_on.is_empty());
@@ -211,7 +211,7 @@ mod tests {
         assert!(matches!(spec.health_check, HealthCheck::Http { .. }));
         assert_eq!(spec.depends_on, vec!["worker".to_string()]);
         assert_eq!(spec.env_mappings.len(), 1);
-        assert_eq!(spec.auto_inject, false);
+        assert!(!spec.auto_inject);
         assert_eq!(spec.pull_policy, PullPolicy::Always);
     }
 
