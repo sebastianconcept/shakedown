@@ -10,6 +10,7 @@ pub const SHAKEDOWN_DOCKER_LABEL_KEY: &str = "io.shakedown.framework";
 pub const SHAKEDOWN_DOCKER_LABEL_VALUE: &str = "true";
 
 /// Label key identifying a logical service-under-test name on its container.
+#[allow(dead_code)] // Reserved for service container labeling; referenced by docs / future diagnostics.
 pub const SHAKEDOWN_SERVICE_LABEL_KEY: &str = "io.shakedown.service";
 
 /// `label=` filter fragment for Docker Engine APIs (`key=value`).

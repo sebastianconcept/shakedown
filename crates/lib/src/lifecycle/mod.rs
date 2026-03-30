@@ -68,6 +68,8 @@ use crate::helpers::MysqlHelpers;
 use crate::helpers::PostgresHelpers;
 #[cfg(feature = "rabbitmq")]
 use crate::helpers::RabbitHelpers;
+#[cfg(any(feature = "redis", feature = "valkey"))]
+use crate::helpers::RedisHelpers;
 #[cfg(feature = "sqlite")]
 use crate::helpers::SqliteHelpers;
 #[cfg(all(
@@ -88,6 +90,8 @@ use crate::resources::MysqlBindings;
 use crate::resources::PostgresBindings;
 #[cfg(feature = "rabbitmq")]
 use crate::resources::RabbitBindings;
+#[cfg(any(feature = "redis", feature = "valkey"))]
+use crate::resources::RedisBindings;
 #[cfg(feature = "sqlite")]
 use crate::resources::SqliteBindings;
 use crate::resources::{
@@ -197,7 +201,8 @@ impl std::fmt::Display for ScenarioKind {
 ///
 /// How: constructed with [`Context::new`] or by `#[shakedown::test]`; the scenario function receives
 /// `&mut Context` to register extras or read [`Context::scenario_id`], [`Context::kafka_bindings`],
-/// [`Context::rabbit_bindings`] (with the `rabbitmq` feature), and (with the `postgres` / `mariadb` /
+/// [`Context::rabbit_bindings`] (with the `rabbitmq` feature), [`Context::redis_bindings`] /
+/// [`Context::redis`] (with the `redis` / `valkey` features), and (with the `postgres` / `mariadb` /
 /// `mysql` / `sqlite` features) relational bindings accessors.
 pub struct Context {
     /// Registered resources
@@ -223,6 +228,9 @@ pub struct Context {
     /// SQLite bindings when a SQLite resource populated them (`sqlite` feature).
     #[cfg(feature = "sqlite")]
     sqlite_bindings: Option<SqliteBindings>,
+    /// Redis / Valkey bindings when a matching resource populated them (`redis` / `valkey` features).
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    redis_bindings: Option<RedisBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -247,6 +255,8 @@ pub struct Context {
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -294,6 +304,8 @@ impl Context {
             mysql_bindings: None,
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
+            #[cfg(any(feature = "redis", feature = "valkey"))]
+            redis_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -311,6 +323,8 @@ impl Context {
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "redis",
+                    feature = "valkey",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -351,6 +365,8 @@ impl Context {
             mysql_bindings: None,
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
+            #[cfg(any(feature = "redis", feature = "valkey"))]
+            redis_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -368,6 +384,8 @@ impl Context {
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "redis",
+                    feature = "valkey",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -408,6 +426,8 @@ impl Context {
             mysql_bindings: None,
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
+            #[cfg(any(feature = "redis", feature = "valkey"))]
+            redis_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -425,6 +445,8 @@ impl Context {
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "redis",
+                    feature = "valkey",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -552,6 +574,18 @@ impl Context {
     #[cfg(feature = "sqlite")]
     pub fn sqlite_bindings(&self) -> Option<&SqliteBindings> {
         self.sqlite_bindings.as_ref()
+    }
+
+    /// Set Redis / Valkey bindings for this scenario (typically after Redis or Valkey provision).
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    pub fn set_redis_bindings(&mut self, redis_bindings: RedisBindings) {
+        self.redis_bindings = Some(redis_bindings);
+    }
+
+    /// Redis or Valkey connection details when a matching resource populated them (`redis` / `valkey` features).
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    pub fn redis_bindings(&self) -> Option<&RedisBindings> {
+        self.redis_bindings.as_ref()
     }
 
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
@@ -705,6 +739,12 @@ impl Context {
         SqliteHelpers::new(self)
     }
 
+    /// Redis / Valkey key/value helpers (`redis` and/or `valkey` features).
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    pub fn redis(&self) -> RedisHelpers<'_> {
+        RedisHelpers::new(self)
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -810,6 +850,8 @@ impl Context {
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -829,6 +871,8 @@ impl Context {
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -849,6 +893,8 @@ impl Context {
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1305,6 +1351,39 @@ fn apply_resource_handles_to_kafka_bindings(ctx: &mut Context, handles: &[Resour
     }
 }
 
+#[cfg(any(feature = "redis", feature = "valkey"))]
+/// If any handle metadata carries Redis or Valkey engine fields, set [`Context::set_redis_bindings`].
+fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if engine != "redis" && engine != "valkey" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|value| value.as_str());
+        let port = meta
+            .get("port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let connection_url = meta.get("connection_url").and_then(|value| value.as_str());
+        let key_prefix = meta.get("key_prefix").and_then(|value| value.as_str());
+        if let (Some(host), Some(port), Some(connection_url), Some(key_prefix)) =
+            (host, port, connection_url, key_prefix)
+        {
+            ctx.set_redis_bindings(RedisBindings {
+                host: host.to_string(),
+                port,
+                connection_url: connection_url.to_string(),
+                key_prefix: key_prefix.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(feature = "rabbitmq")]
 /// If any handle metadata carries RabbitMQ engine fields, set [`Context::set_rabbit_bindings`].
 fn apply_resource_handles_to_rabbit_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
@@ -1432,6 +1511,8 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
+        feature = "redis",
+        feature = "valkey",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -1457,6 +1538,8 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
+        feature = "redis",
+        feature = "valkey",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -1772,6 +1855,8 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1786,6 +1871,8 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -1860,6 +1947,8 @@ where
                             feature = "postgres",
                             feature = "mariadb",
                             feature = "mysql",
+                            feature = "redis",
+                            feature = "valkey",
                             feature = "services",
                         ),
                         not(feature = "no-diagnostics"),
@@ -1884,6 +1973,8 @@ where
                 apply_resource_handles_to_mysql_bindings(ctx, &handles);
                 #[cfg(feature = "sqlite")]
                 apply_resource_handles_to_sqlite_bindings(ctx, &handles);
+                #[cfg(any(feature = "redis", feature = "valkey"))]
+                apply_resource_handles_to_redis_bindings(ctx, &handles);
                 #[cfg(feature = "fault-injection")]
                 install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
@@ -1902,6 +1993,8 @@ where
                         feature = "postgres",
                         feature = "mariadb",
                         feature = "mysql",
+                        feature = "redis",
+                        feature = "valkey",
                         feature = "services",
                     ),
                     not(feature = "no-diagnostics"),
@@ -1936,6 +2029,8 @@ where
                 feature = "postgres",
                 feature = "mariadb",
                 feature = "mysql",
+                feature = "redis",
+                feature = "valkey",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -1958,6 +2053,8 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -1979,6 +2076,8 @@ where
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "redis",
+                    feature = "valkey",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2002,6 +2101,8 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2019,6 +2120,8 @@ where
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "redis",
+                    feature = "valkey",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2053,6 +2156,8 @@ where
                 feature = "postgres",
                 feature = "mariadb",
                 feature = "mysql",
+                feature = "redis",
+                feature = "valkey",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2086,6 +2191,8 @@ where
                 feature = "postgres",
                 feature = "mariadb",
                 feature = "mysql",
+                feature = "redis",
+                feature = "valkey",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2108,6 +2215,8 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2155,6 +2264,8 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2170,6 +2281,8 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2198,6 +2311,8 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2216,6 +2331,8 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "redis",
+            feature = "valkey",
             feature = "services",
         ),
         feature = "diagnostics",

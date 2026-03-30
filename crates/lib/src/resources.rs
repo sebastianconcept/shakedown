@@ -20,7 +20,7 @@ use std::fmt;
 /// can use as a key prefix, database name, virtual host, index name — whatever your system
 /// uses for isolation. Every scenario gets its own namespace; teardown drops it.
 ///
-/// The built-in resources (Kafka, RabbitMQ, Postgres, MariaDB, MySQL, SQLite) use specialised variants
+/// The built-in resources (Kafka, RabbitMQ, Postgres, MariaDB, MySQL, SQLite, Redis, Valkey) use specialised variants
 /// of this logic internally. This helper gives you the same safety guarantees without having
 /// to reimplement the sanitisation rules:
 ///
@@ -81,6 +81,25 @@ pub fn sanitize_kafka_topic_prefix(scenario_id: &str) -> String {
 /// routing identifiers stay consistent across Kafka and Rabbit in one process.
 pub fn sanitize_rabbit_resource_prefix(scenario_id: &str) -> String {
     sanitize_kafka_topic_prefix(scenario_id)
+}
+
+/// Turn a scenario id into a safe Redis / Valkey key prefix (`shakedown:<id>:`).
+///
+/// Uses `:` as the segment separator (RESP key convention). Only ASCII alphanumerics survive;
+/// other characters become `_`. Empty ids map to `shakedown:scenario:`.
+pub fn sanitize_redis_key_prefix(scenario_id: &str) -> String {
+    let mut middle = String::new();
+    for ch in scenario_id.chars().take(200) {
+        if ch.is_ascii_alphanumeric() {
+            middle.push(ch.to_ascii_lowercase());
+        } else {
+            middle.push('_');
+        }
+    }
+    if middle.is_empty() {
+        middle.push_str("scenario");
+    }
+    format!("shakedown:{middle}:")
 }
 
 /// Turn a scenario id into a safe PostgreSQL database name (`shakedown_…`, max 63 bytes).
@@ -192,6 +211,14 @@ pub enum BuiltinResource {
     #[cfg(feature = "fault-injection")]
     /// Docker-backed Toxiproxy (suite-shared container via [`ToxiproxyResource`]).
     Toxiproxy(ToxiproxyResource),
+
+    #[cfg(feature = "redis")]
+    /// Docker-backed Redis (official image via testcontainers-modules; suite-shared container).
+    Redis(RedisResource),
+
+    #[cfg(feature = "valkey")]
+    /// Docker-backed Valkey (official image via testcontainers-modules; suite-shared container).
+    Valkey(ValkeyResource),
 }
 
 #[async_trait]
@@ -216,6 +243,10 @@ impl Resource for BuiltinResource {
             BuiltinResource::Sqlite(r) => r.provision(scenario_id).await,
             #[cfg(feature = "fault-injection")]
             BuiltinResource::Toxiproxy(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "redis")]
+            BuiltinResource::Redis(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "valkey")]
+            BuiltinResource::Valkey(r) => r.provision(scenario_id).await,
         }
     }
 
@@ -236,6 +267,10 @@ impl Resource for BuiltinResource {
             BuiltinResource::Sqlite(r) => r.check_ready().await,
             #[cfg(feature = "fault-injection")]
             BuiltinResource::Toxiproxy(r) => r.check_ready().await,
+            #[cfg(feature = "redis")]
+            BuiltinResource::Redis(r) => r.check_ready().await,
+            #[cfg(feature = "valkey")]
+            BuiltinResource::Valkey(r) => r.check_ready().await,
         }
     }
 
@@ -256,6 +291,10 @@ impl Resource for BuiltinResource {
             BuiltinResource::Sqlite(r) => r.apply_default_seed().await,
             #[cfg(feature = "fault-injection")]
             BuiltinResource::Toxiproxy(r) => r.apply_default_seed().await,
+            #[cfg(feature = "redis")]
+            BuiltinResource::Redis(r) => r.apply_default_seed().await,
+            #[cfg(feature = "valkey")]
+            BuiltinResource::Valkey(r) => r.apply_default_seed().await,
         }
     }
 
@@ -276,6 +315,10 @@ impl Resource for BuiltinResource {
             BuiltinResource::Sqlite(r) => r.teardown().await,
             #[cfg(feature = "fault-injection")]
             BuiltinResource::Toxiproxy(r) => r.teardown().await,
+            #[cfg(feature = "redis")]
+            BuiltinResource::Redis(r) => r.teardown().await,
+            #[cfg(feature = "valkey")]
+            BuiltinResource::Valkey(r) => r.teardown().await,
         }
     }
 }
@@ -907,6 +950,513 @@ mod rabbit_impl {
             self.amqp_uri = None;
             self.resource_prefix.clear();
             Ok(())
+        }
+    }
+}
+
+#[cfg(any(feature = "redis", feature = "valkey"))]
+mod resp_family {
+    use super::{sanitize_redis_key_prefix, Resource, ResourceHandle};
+    use crate::error::{InfrastructureError, ScenarioId};
+    use async_trait::async_trait;
+    use testcontainers::core::Image;
+    use testcontainers::core::ImageExt;
+    use testcontainers::runners::AsyncRunner;
+    use tokio::sync::Mutex;
+
+    const RESP_PORT: u16 = 6379;
+
+    #[allow(clippy::large_enum_variant)]
+    pub(crate) enum SuiteState<I: Image> {
+        Idle,
+        Running {
+            host: String,
+            port: u16,
+            container: testcontainers::ContainerAsync<I>,
+            refs: usize,
+            image_key: String,
+        },
+    }
+
+    /// Suite-shared RESP server (Redis or Valkey image) with per-scenario key prefixes.
+    pub struct RespResource<I>
+    where
+        I: Image + Clone + Send + Sync + std::fmt::Debug + 'static,
+    {
+        pub image: I,
+        pub image_tag: Option<String>,
+        pub suite: &'static Mutex<SuiteState<I>>,
+        pub engine: &'static str,
+        pub env_tag_var: &'static str,
+        /// When set and `image_tag` is unset, use this instead of [`Image::tag`] (pins Redis to `7`).
+        pub hardcoded_default_tag: Option<&'static str>,
+        holds_suite_ref: bool,
+        host: Option<String>,
+        port: Option<u16>,
+        connection_url: Option<String>,
+        key_prefix: String,
+    }
+
+    impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> std::fmt::Debug
+        for RespResource<I>
+    {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("RespResource")
+                .field("engine", &self.engine)
+                .field("image_tag", &self.image_tag)
+                .finish_non_exhaustive()
+        }
+    }
+
+    impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> RespResource<I> {
+        pub(crate) fn new(
+            image: I,
+            suite: &'static Mutex<SuiteState<I>>,
+            engine: &'static str,
+            env_tag_var: &'static str,
+            hardcoded_default_tag: Option<&'static str>,
+        ) -> Self {
+            Self {
+                image,
+                image_tag: None,
+                suite,
+                engine,
+                env_tag_var,
+                hardcoded_default_tag,
+                holds_suite_ref: false,
+                host: None,
+                port: None,
+                connection_url: None,
+                key_prefix: String::new(),
+            }
+        }
+
+        /// Override the image tag (full `name:tag` is `Image::name` + this tag).
+        pub fn with_image_tag(mut self, tag: impl Into<String>) -> Self {
+            self.image_tag = Some(tag.into());
+            self
+        }
+
+        /// Load tag override from `self.env_tag_var` when set (e.g. `SHAKEDOWN_REDIS_IMAGE_TAG`).
+        pub fn with_image_tag_from_env(mut self) -> Self {
+            if let Ok(tag) = std::env::var(self.env_tag_var) {
+                let tag = tag.trim();
+                if !tag.is_empty() {
+                    self.image_tag = Some(tag.to_string());
+                }
+            }
+            self
+        }
+
+        fn map_tc_err(
+            error: impl std::fmt::Display + Send + Sync + 'static,
+        ) -> InfrastructureError {
+            InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
+        }
+
+        fn effective_tag(&self) -> String {
+            if let Some(ref tag) = self.image_tag {
+                return tag.clone();
+            }
+            if let Some(tag) = self.hardcoded_default_tag {
+                return tag.to_string();
+            }
+            self.image.tag().to_string()
+        }
+
+        fn fingerprint(&self) -> String {
+            format!("{}:{}", self.image.name(), self.effective_tag())
+        }
+
+        fn connection_url_display(&self) -> Result<&str, InfrastructureError> {
+            self.connection_url
+                .as_deref()
+                .ok_or_else(|| InfrastructureError::NotProvisioned(self.engine.into()))
+        }
+    }
+
+    async fn delete_keys_with_prefix(
+        connection_url: &str,
+        key_prefix: &str,
+        resource_label: &str,
+    ) -> Result<(), InfrastructureError> {
+        let client =
+            redis::Client::open(connection_url).map_err(|error| InfrastructureError::Teardown {
+                resource: resource_label.to_string(),
+                source: Box::new(std::io::Error::other(error.to_string())),
+            })?;
+        let mut connection = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|error| InfrastructureError::Teardown {
+                resource: resource_label.to_string(),
+                source: Box::new(std::io::Error::other(error.to_string())),
+            })?;
+
+        let pattern = format!("{key_prefix}*");
+        let mut cursor: u64 = 0;
+        loop {
+            let (next_cursor, keys): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(&pattern)
+                .arg("COUNT")
+                .arg(256)
+                .query_async(&mut connection)
+                .await
+                .map_err(|error| InfrastructureError::Teardown {
+                    resource: resource_label.to_string(),
+                    source: Box::new(std::io::Error::other(error.to_string())),
+                })?;
+
+            if !keys.is_empty() {
+                redis::cmd("DEL")
+                    .arg(&keys)
+                    .query_async::<i64>(&mut connection)
+                    .await
+                    .map_err(|error| InfrastructureError::Teardown {
+                        resource: resource_label.to_string(),
+                        source: Box::new(std::io::Error::other(error.to_string())),
+                    })?;
+            }
+
+            if next_cursor == 0 {
+                break;
+            }
+            cursor = next_cursor;
+        }
+
+        Ok(())
+    }
+
+    #[async_trait]
+    impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> Resource for RespResource<I> {
+        async fn provision(
+            &mut self,
+            scenario_id: &ScenarioId,
+        ) -> Result<Vec<ResourceHandle>, InfrastructureError> {
+            if self.holds_suite_ref {
+                return Err(InfrastructureError::AlreadyProvisioned(self.engine.into()));
+            }
+
+            self.key_prefix = sanitize_redis_key_prefix(scenario_id.as_str());
+            let want_key = self.fingerprint();
+
+            let mut guard = self.suite.lock().await;
+            let (host, port) = match &mut *guard {
+                SuiteState::Idle => {
+                    let tag = self.effective_tag();
+                    let node = self
+                        .image
+                        .clone()
+                        .with_tag(tag)
+                        .with_label(
+                            crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                            crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                        )
+                        .start()
+                        .await
+                        .map_err(Self::map_tc_err)?;
+
+                    let mapped_port = node
+                        .get_host_port_ipv4(RESP_PORT)
+                        .await
+                        .map_err(Self::map_tc_err)?;
+                    let host = "127.0.0.1".to_string();
+                    *guard = SuiteState::Running {
+                        host: host.clone(),
+                        port: mapped_port,
+                        container: node,
+                        refs: 1,
+                        image_key: want_key.clone(),
+                    };
+                    (host, mapped_port)
+                }
+                SuiteState::Running {
+                    host,
+                    port,
+                    ref mut refs,
+                    image_key,
+                    ..
+                } => {
+                    if image_key != &want_key {
+                        return Err(InfrastructureError::Backend(Box::new(
+                            std::io::Error::other(format!(
+                                "{} suite server already running as {image_key}; \
+                                 cannot start or join as {want_key}. Use one image:tag per process.",
+                                self.engine
+                            )),
+                        )));
+                    }
+                    *refs += 1;
+                    (host.clone(), *port)
+                }
+            };
+            drop(guard);
+
+            let connection_url = format!("redis://{host}:{port}");
+            self.host = Some(host.clone());
+            self.port = Some(port);
+            self.connection_url = Some(connection_url.clone());
+            self.holds_suite_ref = true;
+
+            Ok(vec![ResourceHandle {
+                id: format!("{}_{scenario_id}", self.engine),
+                connection_string: connection_url.clone(),
+                metadata: Some(serde_json::json!({
+                    "engine": self.engine,
+                    "host": host,
+                    "port": port,
+                    "connection_url": connection_url,
+                    "key_prefix": self.key_prefix,
+                })),
+            }])
+        }
+
+        async fn check_ready(&self) -> Result<(), InfrastructureError> {
+            let url = self.connection_url_display()?;
+            let client =
+                redis::Client::open(url).map_err(|error| InfrastructureError::Readiness {
+                    resource: self.engine.into(),
+                    source: Box::new(std::io::Error::other(error.to_string())),
+                })?;
+
+            const ATTEMPTS: u32 = 30;
+            for attempt in 0..ATTEMPTS {
+                match client.get_multiplexed_async_connection().await {
+                    Ok(mut connection) => match redis::cmd("PING")
+                        .query_async::<String>(&mut connection)
+                        .await
+                    {
+                        Ok(response) if response.eq_ignore_ascii_case("PONG") => return Ok(()),
+                        Ok(_) | Err(_) if attempt + 1 == ATTEMPTS => {
+                            return Err(InfrastructureError::Readiness {
+                                resource: self.engine.into(),
+                                source: Box::new(std::io::Error::other(
+                                    "Redis PING did not return PONG",
+                                )),
+                            });
+                        }
+                        Ok(_) | Err(_) => {}
+                    },
+                    Err(error) if attempt + 1 == ATTEMPTS => {
+                        return Err(InfrastructureError::Readiness {
+                            resource: self.engine.into(),
+                            source: Box::new(std::io::Error::other(error.to_string())),
+                        });
+                    }
+                    Err(_) => {}
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+
+            Err(InfrastructureError::Readiness {
+                resource: self.engine.into(),
+                source: Box::new(std::io::Error::other(
+                    "Redis readiness: connection attempts exhausted",
+                )),
+            })
+        }
+
+        async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+            Ok(())
+        }
+
+        async fn teardown(&mut self) -> Result<(), InfrastructureError> {
+            if !self.holds_suite_ref {
+                self.host = None;
+                self.port = None;
+                self.connection_url = None;
+                self.key_prefix.clear();
+                return Ok(());
+            }
+
+            let url = self
+                .connection_url
+                .as_deref()
+                .ok_or_else(|| InfrastructureError::NotProvisioned(self.engine.into()))?
+                .to_string();
+            let prefix = std::mem::take(&mut self.key_prefix);
+            let engine = self.engine.to_string();
+
+            delete_keys_with_prefix(url.as_str(), prefix.as_str(), engine.as_str()).await?;
+
+            let mut guard = self.suite.lock().await;
+            let mut container_to_remove: Option<testcontainers::ContainerAsync<I>> = None;
+            match &mut *guard {
+                SuiteState::Idle => {}
+                SuiteState::Running { ref mut refs, .. } => {
+                    *refs = refs.saturating_sub(1);
+                    if *refs == 0 {
+                        let taken = std::mem::replace(&mut *guard, SuiteState::Idle);
+                        if let SuiteState::Running { container, .. } = taken {
+                            container_to_remove = Some(container);
+                        }
+                    }
+                }
+            }
+            drop(guard);
+
+            if let Some(container) = container_to_remove {
+                container.rm().await.map_err(Self::map_tc_err)?;
+            }
+
+            self.holds_suite_ref = false;
+            self.host = None;
+            self.port = None;
+            self.connection_url = None;
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "redis")]
+mod redis_impl {
+    use super::resp_family::{RespResource, SuiteState};
+    use super::{Resource, ResourceHandle};
+    use crate::error::{InfrastructureError, ScenarioId};
+    use async_trait::async_trait;
+    use std::sync::OnceLock;
+    use testcontainers_modules::redis::Redis;
+    use tokio::sync::Mutex;
+
+    static SUITE_REDIS: OnceLock<Mutex<SuiteState<Redis>>> = OnceLock::new();
+
+    fn suite_redis_mutex() -> &'static Mutex<SuiteState<Redis>> {
+        SUITE_REDIS.get_or_init(|| Mutex::new(SuiteState::Idle))
+    }
+
+    /// Docker-backed Redis using the official image via testcontainers-modules.
+    ///
+    /// Suite lifecycle matches Rabbit/Postgres: one container per process; refcounted teardown.
+    /// Default image tag is **`7`** (`redis:7`). Override with [`Self::with_image_tag`] or
+    /// `SHAKEDOWN_REDIS_IMAGE_TAG`.
+    #[derive(Debug)]
+    pub struct RedisResource(pub(super) RespResource<Redis>);
+
+    impl Default for RedisResource {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl RedisResource {
+        pub fn new() -> Self {
+            Self(
+                RespResource::new(
+                    Redis::default(),
+                    suite_redis_mutex(),
+                    "redis",
+                    "SHAKEDOWN_REDIS_IMAGE_TAG",
+                    Some("7"),
+                )
+                .with_image_tag_from_env(),
+            )
+        }
+
+        pub fn with_image_tag(self, tag: impl Into<String>) -> Self {
+            Self(self.0.with_image_tag(tag))
+        }
+
+        pub fn with_image_tag_from_env(self) -> Self {
+            Self(self.0.with_image_tag_from_env())
+        }
+    }
+
+    #[async_trait]
+    impl Resource for RedisResource {
+        async fn provision(
+            &mut self,
+            scenario_id: &ScenarioId,
+        ) -> Result<Vec<ResourceHandle>, InfrastructureError> {
+            self.0.provision(scenario_id).await
+        }
+
+        async fn check_ready(&self) -> Result<(), InfrastructureError> {
+            self.0.check_ready().await
+        }
+
+        async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+            self.0.apply_default_seed().await
+        }
+
+        async fn teardown(&mut self) -> Result<(), InfrastructureError> {
+            self.0.teardown().await
+        }
+    }
+}
+
+#[cfg(feature = "valkey")]
+mod valkey_impl {
+    use super::resp_family::{RespResource, SuiteState};
+    use super::{Resource, ResourceHandle};
+    use crate::error::{InfrastructureError, ScenarioId};
+    use async_trait::async_trait;
+    use std::sync::OnceLock;
+    use testcontainers_modules::valkey::Valkey;
+    use tokio::sync::Mutex;
+
+    static SUITE_VALKEY: OnceLock<Mutex<SuiteState<Valkey>>> = OnceLock::new();
+
+    fn suite_valkey_mutex() -> &'static Mutex<SuiteState<Valkey>> {
+        SUITE_VALKEY.get_or_init(|| Mutex::new(SuiteState::Idle))
+    }
+
+    /// Docker-backed Valkey using the official image via testcontainers-modules.
+    ///
+    /// Default tag follows the module image (Valkey 8.x). Override with [`Self::with_image_tag`] or
+    /// `SHAKEDOWN_VALKEY_IMAGE_TAG`.
+    #[derive(Debug)]
+    pub struct ValkeyResource(pub(super) RespResource<Valkey>);
+
+    impl Default for ValkeyResource {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl ValkeyResource {
+        pub fn new() -> Self {
+            Self(
+                RespResource::new(
+                    Valkey::default(),
+                    suite_valkey_mutex(),
+                    "valkey",
+                    "SHAKEDOWN_VALKEY_IMAGE_TAG",
+                    Some("8"),
+                )
+                .with_image_tag_from_env(),
+            )
+        }
+
+        pub fn with_image_tag(self, tag: impl Into<String>) -> Self {
+            Self(self.0.with_image_tag(tag))
+        }
+
+        pub fn with_image_tag_from_env(self) -> Self {
+            Self(self.0.with_image_tag_from_env())
+        }
+    }
+
+    #[async_trait]
+    impl Resource for ValkeyResource {
+        async fn provision(
+            &mut self,
+            scenario_id: &ScenarioId,
+        ) -> Result<Vec<ResourceHandle>, InfrastructureError> {
+            self.0.provision(scenario_id).await
+        }
+
+        async fn check_ready(&self) -> Result<(), InfrastructureError> {
+            self.0.check_ready().await
+        }
+
+        async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+            self.0.apply_default_seed().await
+        }
+
+        async fn teardown(&mut self) -> Result<(), InfrastructureError> {
+            self.0.teardown().await
         }
     }
 }
@@ -2374,6 +2924,12 @@ pub use mysql_impl::MysqlResource;
 #[cfg(feature = "sqlite")]
 pub use sqlite_impl::SqliteResource;
 
+#[cfg(feature = "redis")]
+pub use redis_impl::RedisResource;
+
+#[cfg(feature = "valkey")]
+pub use valkey_impl::ValkeyResource;
+
 /// Connection and naming details extracted after Kafka provision for a scenario.
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from [`crate::lifecycle::Context::kafka_bindings`]
@@ -2547,6 +3103,21 @@ pub struct MysqlBindings {
 pub struct SqliteBindings {
     /// URI string for this scenario's database (named in-memory with shared cache; see feature SPECS).
     pub database_url: String,
+}
+
+/// Redis or Valkey connection details and scenario-scoped key prefix.
+///
+/// Populated from provision metadata for both `redis` and `valkey` engine handles; use
+/// [`crate::lifecycle::Context::redis_bindings`] after provision.
+#[cfg(any(feature = "redis", feature = "valkey"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedisBindings {
+    /// `redis://` URL without authentication (default suite images).
+    pub connection_url: String,
+    pub host: String,
+    pub port: u16,
+    /// Prefix prepended to logical keys for isolation (`shakedown:<scenario>:`).
+    pub key_prefix: String,
 }
 
 /// A marker trait for resources that can be cloned.
@@ -2820,6 +3391,15 @@ mod tests {
         let ns = sanitize_resource_namespace(&long, 40);
         assert!(ns.len() <= 40);
         assert!(ns.starts_with("shakedown_"));
+    }
+
+    #[test]
+    fn sanitize_redis_key_prefix_colon_segments() {
+        assert_eq!(
+            sanitize_redis_key_prefix("MyScenario_1"),
+            "shakedown:myscenario_1:"
+        );
+        assert_eq!(sanitize_redis_key_prefix(""), "shakedown:scenario:");
     }
 
     #[test]
