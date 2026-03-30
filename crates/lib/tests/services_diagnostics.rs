@@ -26,6 +26,7 @@ mod diagnostics_service_tests {
     #[tokio::test]
     #[ignore = "requires Docker; run: cargo test -p shakedown --features services --test services_diagnostics -- --ignored"]
     async fn service_container_appears_in_merged_diagnostics() {
+        // Given stats interval tightened and a labeled whoami service registered for the scenario
         std::env::set_var("SHAKEDOWN_STATS_INTERVAL_MS", "150");
 
         let specification = ServiceUnderTest::docker("traefik/whoami:v1.10")
@@ -34,10 +35,12 @@ mod diagnostics_service_tests {
             .health_check(HealthCheck::http("/"))
             .auto_inject(false)
             .build()
-            .expect("valid spec");
+            .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
 
         let mut context = Context::new();
-        context.register_service(specification).expect("register");
+        context
+            .register_service(specification)
+            .unwrap_or_else(|error| panic!("register_service: {error:?}"));
         let mut event_log = EventLog::new();
 
         run_scenario(
@@ -91,8 +94,9 @@ mod diagnostics_service_tests {
             &mut event_log,
         )
         .await
-        .expect("run_scenario");
+        .unwrap_or_else(|error| panic!("run_scenario: {error:?}"));
 
+        // Then merged event log and timeline include the logical service name
         let mut saw_sample = false;
         let mut saw_log = false;
         for entry in event_log.entries() {

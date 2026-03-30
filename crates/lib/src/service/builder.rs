@@ -164,18 +164,23 @@ mod tests {
 
     #[test]
     fn docker_starts_builder_with_image() {
+        // Given a docker image reference
+        // When we start a builder from it
         let builder = ServiceUnderTest::docker("alpine:3.20");
+        // Then the image string is stored
         assert_eq!(builder.image, "alpine:3.20");
     }
 
     #[test]
     fn build_happy_path_minimal() {
+        // Given name + port + image
         let spec = ServiceUnderTest::docker("traefik/whoami:v1.10")
             .name("orders")
             .port(80)
             .build()
-            .expect("build");
+            .unwrap_or_else(|error| panic!("minimal spec must build: {error:?}"));
 
+        // Then defaults match: TCP health, auto_inject, IfNotPresent pull
         assert_eq!(spec.name, "orders");
         assert_eq!(spec.image, "traefik/whoami:v1.10");
         assert_eq!(
@@ -195,6 +200,7 @@ mod tests {
 
     #[test]
     fn build_happy_path_full_fluent_chain() {
+        // Given a fully chained builder
         let spec = ServiceUnderTest::docker("my/app:1")
             .name("api")
             .env("RUST_LOG", "info")
@@ -205,8 +211,9 @@ mod tests {
             .auto_inject(false)
             .pull_policy(PullPolicy::Always)
             .build()
-            .expect("build");
+            .unwrap_or_else(|error| panic!("fluent spec must build: {error:?}"));
 
+        // Then every option is reflected on the spec
         assert_eq!(spec.name, "api");
         assert_eq!(
             spec.env_vars.get("RUST_LOG").map(String::as_str),
@@ -224,6 +231,7 @@ mod tests {
 
     #[test]
     fn build_fails_without_name() {
+        // Given a builder with port but no name
         let err = ServiceUnderTest::docker("x:y")
             .port(80)
             .build()
@@ -242,6 +250,7 @@ mod tests {
 
     #[test]
     fn build_fails_without_port() {
+        // Given a builder with name but no port
         let err = ServiceUnderTest::docker("x:y")
             .name("svc")
             .build()
@@ -260,6 +269,7 @@ mod tests {
 
     #[test]
     fn build_fails_on_empty_name() {
+        // Given a whitespace-only name
         let err = ServiceUnderTest::docker("x:y")
             .name("   ")
             .port(1)
@@ -279,6 +289,7 @@ mod tests {
 
     #[test]
     fn build_fails_on_duplicate_depends_on() {
+        // Given duplicate depends_on entries for the same upstream
         let err = ServiceUnderTest::docker("x:y")
             .name("b")
             .port(80)
@@ -300,6 +311,7 @@ mod tests {
 
     #[test]
     fn build_fails_on_self_dependency() {
+        // Given depends_on pointing at the same service name
         let err = ServiceUnderTest::docker("x:y")
             .name("api")
             .port(80)
@@ -320,13 +332,15 @@ mod tests {
 
     #[test]
     fn env_last_write_wins_same_key() {
+        // Given two .env calls for the same key
         let spec = ServiceUnderTest::docker("x:y")
             .name("s")
             .port(1)
             .env("K", "first")
             .env("K", "second")
             .build()
-            .expect("build");
+            .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
+        // Then the last value wins
         assert_eq!(spec.env_vars.get("K").map(String::as_str), Some("second"));
     }
 }

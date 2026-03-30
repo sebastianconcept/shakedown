@@ -128,11 +128,15 @@ mod tests {
 
     #[test]
     fn pull_policy_default_matches_docker_if_not_present() {
+        // Given PullPolicy::default
+        // Then it matches IfNotPresent (D-brief-12)
         assert_eq!(PullPolicy::default(), PullPolicy::IfNotPresent);
     }
 
     #[test]
     fn pull_policy_variants_distinct() {
+        // Given the three pull policy variants
+        // Then they are pairwise distinct
         assert_ne!(PullPolicy::Always, PullPolicy::IfNotPresent);
         assert_ne!(PullPolicy::IfNotPresent, PullPolicy::Never);
         assert_ne!(PullPolicy::Always, PullPolicy::Never);
@@ -140,7 +144,9 @@ mod tests {
 
     #[test]
     fn env_mapping_kafka() {
+        // Given kafka("CUSTOM_KAFKA")
         let mapping = EnvMapping::kafka("CUSTOM_KAFKA");
+        // Then the enum holds the expected variant
         assert_eq!(mapping, EnvMapping::Kafka("CUSTOM_KAFKA".to_string()));
     }
 
@@ -152,6 +158,7 @@ mod tests {
 
     #[test]
     fn env_mapping_mariadb() {
+        // Given mariadb rename factory
         let mapping = EnvMapping::mariadb("MARIADB_JDBC");
         assert_eq!(mapping, EnvMapping::MariaDb("MARIADB_JDBC".to_string()));
     }

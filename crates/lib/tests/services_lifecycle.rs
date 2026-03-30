@@ -9,18 +9,22 @@ use shakedown::{run_scenario, Context, EventLog, HealthCheck, ServiceUnderTest};
 #[tokio::test]
 #[ignore = "requires Docker; run: cargo test -p shakedown --features services --test services_lifecycle -- --ignored"]
 async fn traefik_whoami_single_service_http_health_and_teardown() {
+    // Given a whoami service spec with HTTP health and no convention injection
     let specification = ServiceUnderTest::docker("traefik/whoami:v1.10")
         .name("web")
         .port(80)
         .health_check(HealthCheck::http("/"))
         .auto_inject(false)
         .build()
-        .expect("valid spec");
+        .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
 
     let mut context = Context::new();
-    context.register_service(specification).expect("register");
+    context
+        .register_service(specification)
+        .unwrap_or_else(|error| panic!("register_service: {error:?}"));
     let mut event_log = EventLog::new();
 
+    // When we run the full scenario lifecycle
     run_scenario(
         &mut context,
         "services_lifecycle_whoami",
@@ -51,5 +55,5 @@ async fn traefik_whoami_single_service_http_health_and_teardown() {
         &mut event_log,
     )
     .await
-    .expect("run_scenario");
+    .unwrap_or_else(|error| panic!("run_scenario: {error:?}"));
 }

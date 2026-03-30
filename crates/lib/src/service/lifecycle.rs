@@ -492,13 +492,16 @@ mod tests {
 
     #[test]
     fn split_image_basic_tag() {
+        // Given a normal image:tag reference
         let (repository, tag) = split_image_repository_and_tag("traefik/whoami:v1.10");
+        // Then repository and tag split on the last non-path colon
         assert_eq!(repository, "traefik/whoami");
         assert_eq!(tag, "v1.10");
     }
 
     #[test]
     fn split_image_registry_with_port_no_tag() {
+        // Given registry host:port without a tag (colon is not a tag delimiter)
         let (repository, tag) = split_image_repository_and_tag("localhost:5000/foo");
         assert_eq!(repository, "localhost:5000/foo");
         assert_eq!(tag, "latest");
@@ -506,6 +509,7 @@ mod tests {
 
     #[test]
     fn split_image_registry_with_port_and_tag() {
+        // Given registry:port/repo:tag
         let (repository, tag) = split_image_repository_and_tag("localhost:5000/foo:1.0");
         assert_eq!(repository, "localhost:5000/foo");
         assert_eq!(tag, "1.0");

@@ -368,15 +368,18 @@ mod tests {
             .name(name)
             .port(80)
             .build()
-            .expect("valid spec")
+            .unwrap_or_else(|error| panic!("test fixture spec must build: {error:?}"))
     }
 
     #[test]
     fn kafka_default_injection() {
+        // Given Kafka bindings on context and a service spec
         let mut context = Context::new();
         context.set_kafka_bindings(KafkaBindings::new("127.0.0.1:9092", "scenario_"));
         let specification = spec_named("api");
+        // When we build the injection map
         let environment = inject_service_env(&context, &specification);
+        // Then bootstrap servers use host.docker.internal for the container
         let expected_kafka = format!("{HOST_DOCKER_INTERNAL}:9092");
         assert_eq!(
             environment.get("KAFKA_BOOTSTRAP_SERVERS"),
@@ -386,6 +389,7 @@ mod tests {
 
     #[test]
     fn env_mapping_renames_kafka() {
+        // Given EnvMapping::kafka for a custom variable name
         let mut context = Context::new();
         context.set_kafka_bindings(KafkaBindings::new("localhost:9092", "pfx_"));
         let specification = ServiceUnderTest::docker("alpine:3.20")
@@ -393,7 +397,7 @@ mod tests {
             .port(80)
             .env_mapping(EnvMapping::kafka("CUSTOM_KAFKA"))
             .build()
-            .expect("valid spec");
+            .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
         let environment = inject_service_env(&context, &specification);
         assert!(!environment.contains_key("KAFKA_BOOTSTRAP_SERVERS"));
         let expected_custom = format!("{HOST_DOCKER_INTERNAL}:9092");
@@ -402,6 +406,7 @@ mod tests {
 
     #[test]
     fn auto_inject_false_only_explicit_and_mapping() {
+        // Given auto_inject(false) and only mapping + explicit env
         let mut context = Context::new();
         context.set_kafka_bindings(KafkaBindings::new("127.0.0.1:9092", "t_"));
         let specification = ServiceUnderTest::docker("alpine:3.20")
@@ -411,7 +416,7 @@ mod tests {
             .env_mapping(EnvMapping::kafka("ONLY_KAFKA"))
             .env("EXTRA", "1")
             .build()
-            .expect("valid spec");
+            .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
         let environment = inject_service_env(&context, &specification);
         assert!(!environment.contains_key("KAFKA_BOOTSTRAP_SERVERS"));
         let expected_only = format!("{HOST_DOCKER_INTERNAL}:9092");
@@ -421,6 +426,7 @@ mod tests {
 
     #[test]
     fn explicit_env_overrides_convention() {
+        // Given .env on the builder for the same key as convention injection
         let mut context = Context::new();
         context.set_kafka_bindings(KafkaBindings::new("127.0.0.1:9092", "t_"));
         let specification = ServiceUnderTest::docker("alpine:3.20")
@@ -428,7 +434,7 @@ mod tests {
             .port(80)
             .env("KAFKA_BOOTSTRAP_SERVERS", "override:9093")
             .build()
-            .expect("valid spec");
+            .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
         let environment = inject_service_env(&context, &specification);
         assert_eq!(
             environment
@@ -440,12 +446,14 @@ mod tests {
 
     #[test]
     fn upper_snake_case_formats_bridge_and_service_keys() {
+        // Given bridge and service names with hyphens
         assert_eq!(default_bridge_env_key("payments-api"), "PAYMENTS_API_URL");
         assert_eq!(default_service_env_key("order-svc"), "ORDER_SVC_URL");
     }
 
     #[test]
     fn inter_service_urls_only_inject_declared_depends_on() {
+        // Given two services registered and handles set; worker depends_on api
         let mut context = Context::new();
         context.register_service(spec_named("api")).unwrap();
         context.register_service(spec_named("worker")).unwrap();
@@ -482,7 +490,7 @@ mod tests {
             .port(80)
             .depends_on("api")
             .build()
-            .expect("build");
+            .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
         let environment_worker = inject_service_env(&context, &specification_worker);
         let expected_upstream = format!("http://127.0.0.1:1111");
         let expected_upstream_container =
@@ -495,7 +503,10 @@ mod tests {
 
     #[test]
     fn replace_database_path_updates_segment() {
+        // Given a Postgres URL with a database path segment
         let url = "postgresql://u:p@127.0.0.1:5432/scenario_db";
+        // When we replace the database name in the path
+        // Then only the final segment changes
         assert_eq!(
             replace_database_path(url, "scenario_db", "scenario_db_api"),
             "postgresql://u:p@127.0.0.1:5432/scenario_db_api"

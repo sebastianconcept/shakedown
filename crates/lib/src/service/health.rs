@@ -213,7 +213,10 @@ mod tests {
 
     #[test]
     fn http_defaults() {
+        // Given the http("/health") convenience constructor
         let check = HealthCheck::http("/health");
+        // When we destructure the Http variant
+        // Then defaults are path /health, 200, and standard timeout/interval
         match check {
             HealthCheck::Http {
                 path,
@@ -232,6 +235,7 @@ mod tests {
 
     #[test]
     fn http_status_defaults() {
+        // Given http_status with a non-200 expected code
         let check = HealthCheck::http_status("/ready", 204);
         match check {
             HealthCheck::Http {
@@ -251,6 +255,7 @@ mod tests {
 
     #[test]
     fn grpc_defaults() {
+        // Given grpc() with no service name
         let check = HealthCheck::grpc();
         match check {
             HealthCheck::Grpc {
@@ -268,6 +273,7 @@ mod tests {
 
     #[test]
     fn grpc_service_defaults() {
+        // Given grpc_service with a concrete service name
         let check = HealthCheck::grpc_service("payments.v1.Payments");
         match check {
             HealthCheck::Grpc {
@@ -285,6 +291,7 @@ mod tests {
 
     #[test]
     fn tcp_defaults() {
+        // Given tcp() readiness probe
         let check = HealthCheck::tcp();
         match check {
             HealthCheck::Tcp { timeout, interval } => {
@@ -297,6 +304,7 @@ mod tests {
 
     #[test]
     fn command_defaults() {
+        // Given command() with argv
         let check = HealthCheck::command(["/bin/sh", "-c", "true"]);
         match check {
             HealthCheck::Command {
@@ -314,6 +322,7 @@ mod tests {
 
     #[test]
     fn composite_defaults_and_nesting() {
+        // Given nested checks inside composite()
         let inner_http = HealthCheck::http("/live");
         let inner_tcp = HealthCheck::tcp().with_timeout(Duration::from_secs(5));
         let composite = HealthCheck::composite([inner_http.clone(), inner_tcp.clone()]);
@@ -341,6 +350,7 @@ mod tests {
 
     #[test]
     fn with_timeout_and_interval() {
+        // Given an Http check with overridden timeout and interval
         let check = HealthCheck::http("/")
             .with_timeout(Duration::from_secs(60))
             .with_interval(Duration::from_millis(250));
@@ -351,7 +361,9 @@ mod tests {
 
     #[test]
     fn accessors_match_variant() {
+        // Given grpc_service("svc")
         let grpc = HealthCheck::grpc_service("svc");
+        // Then timeout() and interval() match the variant fields
         assert_eq!(grpc.timeout(), DEFAULT_HEALTH_CHECK_TIMEOUT);
         assert_eq!(grpc.interval(), DEFAULT_HEALTH_CHECK_INTERVAL);
     }
