@@ -3,11 +3,8 @@
 use mysql_async::prelude::Queryable;
 use mysql_async::{Params, Row};
 
-use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
-
-fn map_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> ShakedownError {
-    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
-}
+use crate::error::{AssertionError, ScenarioError, ShakedownError};
+use crate::helpers::map_backend_error;
 
 /// Run `INSERT` / `UPDATE` / `DELETE` / DDL, or `SELECT`; returns affected rows or selected row count.
 pub(crate) async fn execute(
@@ -104,7 +101,7 @@ pub(crate) async fn query_one(
         .exec_iter(query, params)
         .await
         .map_err(map_backend_error)?;
-    let rows = result
+    let mut rows = result
         .collect_and_drop::<Row>()
         .await
         .map_err(map_backend_error)?;
@@ -116,7 +113,7 @@ pub(crate) async fn query_one(
                 detail: "query_one: expected exactly one row, got zero".to_string(),
             },
         ))),
-        1 => Ok(rows.into_iter().next().expect("length checked")),
+        1 => Ok(rows.remove(0)),
         n => Err(ShakedownError::Scenario(ScenarioError::Assertion(
             AssertionError::Unspecified {
                 detail: format!("query_one: expected exactly one row, got {n}"),

@@ -13,13 +13,9 @@ use serde::Serialize;
 pub use lapin::ExchangeKind;
 
 use crate::error::{InfrastructureError, ShakedownError};
-use crate::helpers::{ConsumedMessage, DEFAULT_HELPER_CONSUME_TIMEOUT};
+use crate::helpers::{map_backend_error, ConsumedMessage, DEFAULT_HELPER_CONSUME_TIMEOUT};
 use crate::lifecycle::Context;
 use crate::resources::RabbitBindings;
-
-fn map_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> ShakedownError {
-    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
-}
 
 /// Facade for RabbitMQ publish helpers bound to [`Context`].
 pub struct RabbitHelpers<'ctx> {
@@ -93,7 +89,7 @@ impl<'ctx> RabbitHelpers<'ctx> {
         value: &impl Serialize,
     ) -> Result<(), ShakedownError> {
         let payload = serde_json::to_vec(value)
-            .map_err(|error| ShakedownError::PayloadDeserialisation(error.to_string()))?;
+            .map_err(|error| ShakedownError::PayloadSerialisation(error.to_string()))?;
         self.publish(exchange, routing_key, payload).await
     }
 
@@ -239,6 +235,13 @@ impl<'ctx> RabbitHelpers<'ctx> {
                     )
                     .await
                     .map_err(map_backend_error)?;
+
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let wait_slice = remaining.min(Duration::from_millis(50));
+                if wait_slice.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(wait_slice).await;
             } else {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 let wait_slice = remaining.min(Duration::from_millis(200));
