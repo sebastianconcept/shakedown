@@ -47,6 +47,7 @@ struct MappingOverrides {
     rabbitmq: Option<String>,
     redis: Option<String>,
     mongo: Option<String>,
+    nats: Option<String>,
     bridges: HashMap<String, String>,
     services: HashMap<String, String>,
 }
@@ -61,6 +62,7 @@ impl MappingOverrides {
             rabbitmq: None,
             redis: None,
             mongo: None,
+            nats: None,
             bridges: HashMap::new(),
             services: HashMap::new(),
         };
@@ -73,6 +75,7 @@ impl MappingOverrides {
                 EnvMapping::Rabbitmq(name) => overrides.rabbitmq = Some(name.clone()),
                 EnvMapping::Redis(name) => overrides.redis = Some(name.clone()),
                 EnvMapping::Mongo(name) => overrides.mongo = Some(name.clone()),
+                EnvMapping::Nats(name) => overrides.nats = Some(name.clone()),
                 EnvMapping::Bridge {
                     bridge_name,
                     env_var,
@@ -175,6 +178,12 @@ fn inject_conventions(
             partition_relational,
         );
         environment.insert(key.to_string(), url);
+    }
+
+    #[cfg(feature = "nats")]
+    if let Some(bindings) = context.nats_bindings() {
+        let key = overrides.nats.as_deref().unwrap_or("NATS_URL");
+        environment.insert(key.to_string(), bindings.connection_url.clone());
     }
 
     // Bridge URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::Bridge`.
@@ -311,6 +320,12 @@ fn resolve_env_mapping(
         }),
         #[cfg(not(feature = "mongodb"))]
         EnvMapping::Mongo(_) => None,
+        #[cfg(feature = "nats")]
+        EnvMapping::Nats(key) => context
+            .nats_bindings()
+            .map(|bindings| (key.clone(), bindings.connection_url.clone())),
+        #[cfg(not(feature = "nats"))]
+        EnvMapping::Nats(_) => None,
         EnvMapping::Bridge {
             bridge_name,
             env_var,
@@ -551,7 +566,7 @@ mod tests {
             .build()
             .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
         let environment_worker = inject_service_env(&context, &specification_worker);
-        let expected_upstream = format!("http://127.0.0.1:1111");
+        let expected_upstream = "http://127.0.0.1:1111".to_string();
         let expected_upstream_container =
             rewrite_injected_addresses_for_service_container(expected_upstream.as_str());
         assert_eq!(
@@ -626,5 +641,36 @@ mod tests {
         let environment = inject_service_env(&context, &specification);
         let expected_url = rewrite_injected_addresses_for_service_container(url);
         assert_eq!(environment.get("DATABASE_URL"), Some(&expected_url));
+    }
+
+    #[cfg(all(feature = "services", feature = "nats"))]
+    #[test]
+    fn nats_default_injection_and_mapping_rename() {
+        use crate::resources::NatsBindings;
+
+        let mut context = Context::new();
+        let bindings = NatsBindings {
+            connection_url: "nats://127.0.0.1:4222".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 4222,
+            subject_prefix: "shakedown.scenario.".to_string(),
+        };
+        context.set_nats_bindings(bindings);
+
+        let specification_default = spec_named("api");
+        let environment_default = inject_service_env(&context, &specification_default);
+        let expected_nats =
+            rewrite_injected_addresses_for_service_container("nats://127.0.0.1:4222");
+        assert_eq!(environment_default.get("NATS_URL"), Some(&expected_nats));
+
+        let specification_custom = ServiceUnderTest::docker("alpine:3.20")
+            .name("api")
+            .port(80)
+            .env_mapping(EnvMapping::nats("CUSTOM_NATS"))
+            .build()
+            .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
+        let environment_custom = inject_service_env(&context, &specification_custom);
+        assert!(!environment_custom.contains_key("NATS_URL"));
+        assert_eq!(environment_custom.get("CUSTOM_NATS"), Some(&expected_nats));
     }
 }

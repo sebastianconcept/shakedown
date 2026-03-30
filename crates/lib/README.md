@@ -124,6 +124,7 @@ These need a running Docker engine. They are **skipped** in a normal `cargo test
 | Redis vertical + helpers | `cargo test -p shakedown --features redis --test redis_vertical --test helpers_redis -- --ignored` | — |
 | Valkey vertical | `cargo test -p shakedown --features valkey --test valkey_vertical -- --ignored` | — |
 | MongoDB vertical + helpers | `cargo test -p shakedown --features mongodb --test mongo_vertical --test helpers_mongo -- --ignored` | — |
+| NATS vertical + helpers | `cargo test -p shakedown --features nats --test nats_vertical --test helpers_nats -- --ignored` | — |
 
 **Note:** `tests/diagnostics_integration.rs` also has a **non-ignored** test (`try_connect_graceful_when_docker_unreachable`); it runs with `cargo test -p shakedown --features kafka` without `--ignored`.
 
@@ -279,15 +280,21 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 - **Image tag:** [`MongoResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_MONGO_IMAGE_TAG`** via [`MongoResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`7`** (`mongo:7`). The suite container sets **`MONGO_INITDB_ROOT_USERNAME`/`PASSWORD`** to fixed test credentials (`root` / `root`); connection URIs include **`authSource=admin`**.
 - [`MongoBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: mongodb` in handle metadata). Use [`Context::mongo()`](src/lifecycle/mod.rs) for [`MongoHelpers`](src/helpers/mongo.rs) (`insert_document`, `find_documents`, assertions).
 
-**Service injection:** with the **`services`** feature, [`EnvMapping::redis`](src/service/types.rs) and convention injection default to **`REDIS_URL`** for [`RedisBindings::connection_url`](src/resources.rs) (shared name for Redis and Valkey). [`EnvMapping::mongo`](src/service/types.rs) and convention injection default to **`MONGODB_URI`** for [`MongoBindings::connection_url`](src/resources.rs) (per-service URL partitioning matches relational DBs when multiple services are registered).
+**NATS (`nats` feature, `testcontainers-modules::nats`, default tag `2`):**
 
-Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, Redis, Valkey, MongoDB, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
+- [`NatsResource`](src/resources.rs) uses a **suite-level** broker: first provision starts one container; refcounted teardown removes it when the last scenario ends. Each scenario gets a [`sanitize_nats_subject_prefix`](src/resources.rs) (`shakedown.<scenario>.`) applied by [`NatsHelpers`](src/helpers/nats.rs) to logical subjects. Core **pub/sub only** — JetStream is not enabled on the default server command.
+- **Image tag:** [`NatsResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_NATS_IMAGE_TAG`** via [`NatsResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`2`** (`nats:2`).
+- [`NatsBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: nats` in handle metadata). Use [`Context::nats()`](src/lifecycle/mod.rs) for [`NatsHelpers`](src/helpers/nats.rs) (`publish`, `subscribe_until` → [`ConsumedMessage`](src/helpers/mod.rs) list). Readiness uses **`async_nats`** connect + **`flush`** (client handshake to the broker).
+
+**Service injection:** with the **`services`** feature, [`EnvMapping::redis`](src/service/types.rs) and convention injection default to **`REDIS_URL`** for [`RedisBindings::connection_url`](src/resources.rs) (shared name for Redis and Valkey). [`EnvMapping::mongo`](src/service/types.rs) and convention injection default to **`MONGODB_URI`** for [`MongoBindings::connection_url`](src/resources.rs) (per-service URL partitioning matches relational DBs when multiple services are registered). [`EnvMapping::nats`](src/service/types.rs) and convention injection default to **`NATS_URL`** for [`NatsBindings::connection_url`](src/resources.rs).
+
+Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, Redis, Valkey, MongoDB, NATS, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
 
 Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
 
 ## Infrastructure diagnostics (bollard)
 
-When you enable any **Docker-backed** resource feature (`kafka`, `postgres`, `mariadb`, `mysql`, `redis`, `valkey`, `mongodb`), the crate also enables the **`diagnostics`** feature unless you opt out with **`no-diagnostics`**.
+When you enable any **Docker-backed** resource feature (`kafka`, `postgres`, `mariadb`, `mysql`, `redis`, `valkey`, `mongodb`, `nats`), the crate also enables the **`diagnostics`** feature unless you opt out with **`no-diagnostics`**.
 
 What it provides (read-only — never starts or stops containers; testcontainers owns lifecycle):
 
@@ -325,7 +332,7 @@ If the Docker socket is missing or unusable, [`try_connect`](src/diagnostics/con
 
 ## Typed helpers
 
-The harness always exposes **structured bindings** on [`Context`] after provisioning (for example [`KafkaBindings`](src/resources.rs), [`RabbitBindings`](src/resources.rs), [`PostgresBindings`](src/resources.rs), [`RedisBindings`](src/resources.rs) for Redis/Valkey, [`MongoBindings`](src/resources.rs) for MongoDB). On top of that, Shakedown offers **optional typed helpers** — thin facades that apply scenario isolation (topic prefixes, namespaced AMQP names, scoped database URLs, Redis key prefixes, MongoDB database names) so common steps stay short.
+The harness always exposes **structured bindings** on [`Context`] after provisioning (for example [`KafkaBindings`](src/resources.rs), [`RabbitBindings`](src/resources.rs), [`PostgresBindings`](src/resources.rs), [`RedisBindings`](src/resources.rs) for Redis/Valkey, [`MongoBindings`](src/resources.rs) for MongoDB, [`NatsBindings`](src/resources.rs) for NATS). On top of that, Shakedown offers **optional typed helpers** — thin facades that apply scenario isolation (topic prefixes, namespaced AMQP names, scoped database URLs, Redis key prefixes, MongoDB database names, NATS subject prefixes) so common steps stay short.
 
 There are **three patterns**; pick based on what you are proving:
 
@@ -357,8 +364,9 @@ Helpers are gated behind the **same** resource features as the underlying provid
 | `ctx.sqlite()` → [`SqliteHelpers`](src/helpers/sqlite.rs) | `sqlite` | `rusqlite` (via `spawn_blocking` inside helpers) |
 | `ctx.redis()` → [`RedisHelpers`](src/helpers/redis.rs) | `redis` or `valkey` | `redis` crate (RESP) |
 | `ctx.mongo()` → [`MongoHelpers`](src/helpers/mongo.rs) | `mongodb` | `mongodb` official driver |
+| `ctx.nats()` → [`NatsHelpers`](src/helpers/nats.rs) | `nats` | `async-nats` |
 
-[`ConsumedMessage`](src/helpers/mod.rs) (key, payload, `source` namespaced topic or queue) is re-exported from the crate root for Kafka and Rabbit consume helpers.
+[`ConsumedMessage`](src/helpers/mod.rs) (key, payload, `source` namespaced topic, queue, or NATS subject) is re-exported from the crate root for Kafka, Rabbit, and NATS consume helpers.
 
 ### Example: Kafka (produce → consume)
 
@@ -896,10 +904,11 @@ When **[`auto_inject(true)`](src/service/builder.rs)** (the default), the harnes
 | RabbitMQ | `RABBITMQ_URL` | `rabbitmq` feature |
 | Redis / Valkey | `REDIS_URL` | `redis` or `valkey` feature (`EnvMapping::redis` renames the var) |
 | MongoDB | `MONGODB_URI` | `mongodb` feature (`EnvMapping::mongo` renames the var) |
+| NATS | `NATS_URL` | `nats` feature (`EnvMapping::nats` renames the var) |
 | HTTP/gRPC bridge | `{UPPER_SNAKE(bridge_name)}_URL` | e.g. bridge `"order-gateway"` → `ORDER_GATEWAY_URL` (`bridges` + `services`) |
 | `depends_on` peer | `{UPPER_SNAKE(service_name)}_URL` | Only for names listed in [`.depends_on`](src/service/builder.rs) (§3) |
 
-**Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`redis`](src/service/types.rs), [`mongo`](src/service/types.rs), [`bridge`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
+**Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`redis`](src/service/types.rs), [`mongo`](src/service/types.rs), [`nats`](src/service/types.rs), [`bridge`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
 
 **Opt out:** [`.auto_inject(false)`](src/service/builder.rs) skips the table above; only `.env` and resolved `.env_mapping` entries are injected.
 

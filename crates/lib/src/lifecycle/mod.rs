@@ -66,6 +66,8 @@ use crate::helpers::MariaDbHelpers;
 use crate::helpers::MongoHelpers;
 #[cfg(feature = "mysql")]
 use crate::helpers::MysqlHelpers;
+#[cfg(feature = "nats")]
+use crate::helpers::NatsHelpers;
 #[cfg(feature = "postgres")]
 use crate::helpers::PostgresHelpers;
 #[cfg(feature = "rabbitmq")]
@@ -90,6 +92,8 @@ use crate::resources::MariaDBBindings;
 use crate::resources::MongoBindings;
 #[cfg(feature = "mysql")]
 use crate::resources::MysqlBindings;
+#[cfg(feature = "nats")]
+use crate::resources::NatsBindings;
 #[cfg(feature = "postgres")]
 use crate::resources::PostgresBindings;
 #[cfg(feature = "rabbitmq")]
@@ -207,8 +211,9 @@ impl std::fmt::Display for ScenarioKind {
 /// `&mut Context` to register extras or read [`Context::scenario_id`], [`Context::kafka_bindings`],
 /// [`Context::rabbit_bindings`] (with the `rabbitmq` feature), [`Context::redis_bindings`] /
 /// [`Context::redis`] (with the `redis` / `valkey` features), [`Context::mongo_bindings`] /
-/// [`Context::mongo`] (with the `mongodb` feature), and (with the `postgres` / `mariadb` /
-/// `mysql` / `sqlite` features) relational bindings accessors.
+/// [`Context::mongo`] (with the `mongodb` feature), [`Context::nats_bindings`] / [`Context::nats`]
+/// (with the `nats` feature), and (with the `postgres` / `mariadb` / `mysql` / `sqlite` features)
+/// relational bindings accessors.
 pub struct Context {
     /// Registered resources
     resources: Vec<RegisteredResource>,
@@ -239,6 +244,9 @@ pub struct Context {
     /// MongoDB bindings when a Mongo resource populated them (`mongodb` feature).
     #[cfg(feature = "mongodb")]
     mongo_bindings: Option<MongoBindings>,
+    /// NATS bindings when a NATS resource populated them (`nats` feature).
+    #[cfg(feature = "nats")]
+    nats_bindings: Option<NatsBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -266,6 +274,7 @@ pub struct Context {
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -317,6 +326,8 @@ impl Context {
             redis_bindings: None,
             #[cfg(feature = "mongodb")]
             mongo_bindings: None,
+            #[cfg(feature = "nats")]
+            nats_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -337,6 +348,7 @@ impl Context {
                     feature = "redis",
                     feature = "valkey",
                     feature = "mongodb",
+                    feature = "nats",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -381,6 +393,8 @@ impl Context {
             redis_bindings: None,
             #[cfg(feature = "mongodb")]
             mongo_bindings: None,
+            #[cfg(feature = "nats")]
+            nats_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -401,6 +415,7 @@ impl Context {
                     feature = "redis",
                     feature = "valkey",
                     feature = "mongodb",
+                    feature = "nats",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -445,6 +460,8 @@ impl Context {
             redis_bindings: None,
             #[cfg(feature = "mongodb")]
             mongo_bindings: None,
+            #[cfg(feature = "nats")]
+            nats_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -465,6 +482,7 @@ impl Context {
                     feature = "redis",
                     feature = "valkey",
                     feature = "mongodb",
+                    feature = "nats",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -616,6 +634,18 @@ impl Context {
     #[cfg(feature = "mongodb")]
     pub fn mongo_bindings(&self) -> Option<&MongoBindings> {
         self.mongo_bindings.as_ref()
+    }
+
+    /// Set NATS bindings for this scenario (typically after NATS provision).
+    #[cfg(feature = "nats")]
+    pub fn set_nats_bindings(&mut self, nats_bindings: NatsBindings) {
+        self.nats_bindings = Some(nats_bindings);
+    }
+
+    /// NATS connection details when a NATS resource populated them (`nats` feature).
+    #[cfg(feature = "nats")]
+    pub fn nats_bindings(&self) -> Option<&NatsBindings> {
+        self.nats_bindings.as_ref()
     }
 
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
@@ -781,6 +811,12 @@ impl Context {
         MongoHelpers::new(self)
     }
 
+    /// NATS core pub/sub helpers (`nats` feature).
+    #[cfg(feature = "nats")]
+    pub fn nats(&self) -> NatsHelpers<'_> {
+        NatsHelpers::new(self)
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -889,6 +925,7 @@ impl Context {
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -911,6 +948,7 @@ impl Context {
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -934,6 +972,7 @@ impl Context {
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1433,6 +1472,39 @@ fn apply_resource_handles_to_mongo_bindings(ctx: &mut Context, handles: &[Resour
     }
 }
 
+#[cfg(feature = "nats")]
+/// If any handle metadata carries NATS engine fields, set [`Context::set_nats_bindings`].
+fn apply_resource_handles_to_nats_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if engine != "nats" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|value| value.as_str());
+        let port = meta
+            .get("port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let connection_url = meta.get("connection_url").and_then(|value| value.as_str());
+        let subject_prefix = meta.get("subject_prefix").and_then(|value| value.as_str());
+        if let (Some(host), Some(port), Some(connection_url), Some(subject_prefix)) =
+            (host, port, connection_url, subject_prefix)
+        {
+            ctx.set_nats_bindings(NatsBindings {
+                host: host.to_string(),
+                port,
+                connection_url: connection_url.to_string(),
+                subject_prefix: subject_prefix.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(any(feature = "redis", feature = "valkey"))]
 /// If any handle metadata carries Redis or Valkey engine fields, set [`Context::set_redis_bindings`].
 fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
@@ -1596,6 +1668,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "redis",
         feature = "valkey",
         feature = "mongodb",
+        feature = "nats",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -1624,6 +1697,7 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "redis",
         feature = "valkey",
         feature = "mongodb",
+        feature = "nats",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -1942,6 +2016,7 @@ where
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1959,6 +2034,7 @@ where
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2064,6 +2140,8 @@ where
                 apply_resource_handles_to_redis_bindings(ctx, &handles);
                 #[cfg(feature = "mongodb")]
                 apply_resource_handles_to_mongo_bindings(ctx, &handles);
+                #[cfg(feature = "nats")]
+                apply_resource_handles_to_nats_bindings(ctx, &handles);
                 #[cfg(feature = "fault-injection")]
                 install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
@@ -2147,6 +2225,7 @@ where
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2197,6 +2276,7 @@ where
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2315,6 +2395,7 @@ where
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2365,6 +2446,7 @@ where
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2383,6 +2465,7 @@ where
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2414,6 +2497,7 @@ where
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2435,6 +2519,7 @@ where
             feature = "redis",
             feature = "valkey",
             feature = "mongodb",
+            feature = "nats",
             feature = "services",
         ),
         feature = "diagnostics",

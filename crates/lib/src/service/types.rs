@@ -65,6 +65,8 @@ pub enum EnvMapping {
     Redis(String),
     /// MongoDB connection URI (`mongodb` feature) → custom env var name.
     Mongo(String),
+    /// NATS server URL (`nats` feature) → custom env var name.
+    Nats(String),
     /// Named HTTP/gRPC bridge base URL → custom env var name.
     Bridge {
         bridge_name: String,
@@ -111,6 +113,11 @@ impl EnvMapping {
     /// Map MongoDB bindings to `environment_variable_name`.
     pub fn mongo(environment_variable_name: impl Into<String>) -> Self {
         Self::Mongo(environment_variable_name.into())
+    }
+
+    /// Map NATS bindings to `environment_variable_name`.
+    pub fn nats(environment_variable_name: impl Into<String>) -> Self {
+        Self::Nats(environment_variable_name.into())
     }
 
     /// Map the bridge named `bridge_name` to `environment_variable_name`.
@@ -199,6 +206,12 @@ mod tests {
     fn env_mapping_mongo() {
         let mapping = EnvMapping::mongo("MONGO_DSN");
         assert_eq!(mapping, EnvMapping::Mongo("MONGO_DSN".to_string()));
+    }
+
+    #[test]
+    fn env_mapping_nats() {
+        let mapping = EnvMapping::nats("MSG_BUS_URL");
+        assert_eq!(mapping, EnvMapping::Nats("MSG_BUS_URL".to_string()));
     }
 
     #[test]

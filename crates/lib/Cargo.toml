@@ -45,6 +45,9 @@ redis = { version = "1.1", optional = true, default-features = false, features =
 # MongoDB official async driver (`mongodb` feature)
 mongodb = { version = "3.4", optional = true }
 
+# NATS async client (`nats` feature)
+async-nats = { version = "0.46", optional = true }
+
 # RabbitMQ client for readiness and publication verification (`rabbitmq` feature)
 lapin = { version = "4.3", optional = true }
 
@@ -57,7 +60,7 @@ reqwest = { version = "0.11", optional = true, default-features = false, feature
 # Align with testcontainers' bollard to avoid duplicate bollard-stubs versions in the lockfile.
 bollard = { version = "0.20", optional = true, default-features = false, features = ["ssl"] }
 # Stream combinators for bollard `/events` (diagnostics only)
-futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"], optional = true }
 
 # Structured logging for diagnostics connection and future ShakedownLayer (SPECS §1)
 tracing = "0.1"
@@ -77,7 +80,9 @@ tower = { version = "0.5", optional = true, default-features = false, features =
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
+async-nats = "0.46"
 async-trait = "0.1"
+bytes = "1"
 bollard = { version = "0.20", default-features = false, features = ["ssl"] }
 lapin = { version = "4.3" }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
@@ -187,6 +192,16 @@ mongodb = [
     "dep:testcontainers",
     "dep:testcontainers-modules",
     "testcontainers-modules/mongo",
+    "diagnostics",
+]
+# NATS core pub/sub (`nats` image via testcontainers-modules)
+nats = [
+    "dep:async-nats",
+    "dep:bytes",
+    "dep:futures-util",
+    "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/nats",
     "diagnostics",
 ]
 # MCP server support (post-MVP, optional)
@@ -356,3 +371,15 @@ required-features = ["mongodb"]
 name = "helpers_mongo"
 path = "tests/helpers_mongo.rs"
 required-features = ["mongodb"]
+
+# NATS suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "nats_vertical"
+path = "tests/nats_vertical.rs"
+required-features = ["nats"]
+
+# NATS helpers publish/subscribe (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_nats"
+path = "tests/helpers_nats.rs"
+required-features = ["nats"]

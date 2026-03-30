@@ -19,6 +19,7 @@ pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
     feature = "redis",
     feature = "valkey",
     feature = "mongodb",
+    feature = "nats",
 ))]
 pub(crate) fn map_backend_error(
     error: impl std::error::Error + Send + Sync + 'static,
@@ -26,14 +27,15 @@ pub(crate) fn map_backend_error(
     ShakedownError::Infrastructure(crate::error::InfrastructureError::Backend(Box::new(error)))
 }
 
-/// A message consumed by [`crate::helpers::kafka::KafkaHelpers::consume_until`] or
-/// [`crate::helpers::rabbit::RabbitHelpers::consume_until`]: key/payload bytes plus the fully
-/// qualified Kafka topic or AMQP queue name.
+/// A message consumed by [`crate::helpers::kafka::KafkaHelpers::consume_until`],
+/// [`crate::helpers::rabbit::RabbitHelpers::consume_until`], or
+/// [`crate::helpers::nats::NatsHelpers::subscribe_until`]: key/payload bytes plus the fully
+/// qualified Kafka topic, AMQP queue name, or NATS subject.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsumedMessage {
     pub key: Option<Vec<u8>>,
     pub payload: Option<Vec<u8>>,
-    /// Full Kafka topic or AMQP queue name (namespaced).
+    /// Full Kafka topic, AMQP queue name, or NATS subject (namespaced).
     pub source: String,
 }
 
@@ -90,6 +92,9 @@ pub mod redis;
 #[cfg(feature = "mongodb")]
 pub mod mongo;
 
+#[cfg(feature = "nats")]
+pub mod nats;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
@@ -113,3 +118,6 @@ pub use redis::RedisHelpers;
 
 #[cfg(feature = "mongodb")]
 pub use mongo::MongoHelpers;
+
+#[cfg(feature = "nats")]
+pub use nats::NatsHelpers;

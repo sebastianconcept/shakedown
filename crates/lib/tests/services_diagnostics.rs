@@ -132,5 +132,5 @@ mod diagnostics_service_tests {
 #[cfg(feature = "no-diagnostics")]
 #[test]
 fn services_diagnostics_skipped_when_compiled_without_docker_observability() {
-    assert!(true);
+    // Compiles with `no-diagnostics` + `services` to ensure the integration test target stays valid.
 }
