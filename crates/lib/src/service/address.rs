@@ -132,6 +132,9 @@ mod tests {
 
     #[test]
     fn ipv4_rewrites_bootstrap_and_jdbc_urls() {
+        // Given connection strings containing 127.0.0.1
+        // When we rewrite for a service container
+        // Then loopback becomes host.docker.internal
         assert_eq!(
             rewrite_injected_addresses_for_service_container("127.0.0.1:9092"),
             format!("{HOST_DOCKER_INTERNAL}:9092")
@@ -146,6 +149,7 @@ mod tests {
 
     #[test]
     fn ipv4_does_not_corrupt_127_0_0_10() {
+        // Given an IP that is not loopback but shares a prefix with 127.0.0.1
         assert_eq!(
             rewrite_injected_addresses_for_service_container("127.0.0.10:9092"),
             "127.0.0.10:9092"
@@ -154,6 +158,7 @@ mod tests {
 
     #[test]
     fn localhost_http_and_userinfo() {
+        // Given localhost in authority and userinfo
         assert_eq!(
             rewrite_injected_addresses_for_service_container("http://localhost:8080/v1"),
             format!("http://{HOST_DOCKER_INTERNAL}:8080/v1")
@@ -166,6 +171,7 @@ mod tests {
 
     #[test]
     fn ipv6_bracket_loopback() {
+        // Given [::1] in a URL
         assert_eq!(
             rewrite_injected_addresses_for_service_container("http://[::1]:8080/"),
             format!("http://{HOST_DOCKER_INTERNAL}:8080/")
@@ -174,6 +180,7 @@ mod tests {
 
     #[test]
     fn kafka_comma_separated_bootstrap() {
+        // Given comma-separated broker list
         assert_eq!(
             rewrite_injected_addresses_for_service_container("127.0.0.1:9092,localhost:9093"),
             format!("{HOST_DOCKER_INTERNAL}:9092,{HOST_DOCKER_INTERNAL}:9093")
@@ -182,6 +189,7 @@ mod tests {
 
     #[test]
     fn bare_localhost_bootstrap_includes_colon_before_port() {
+        // Given bootstrap form without scheme
         assert_eq!(
             rewrite_injected_addresses_for_service_container("localhost:9092"),
             format!("{HOST_DOCKER_INTERNAL}:9092")
@@ -190,6 +198,8 @@ mod tests {
 
     #[test]
     fn linux_gate_mapping_flag_matches_platform() {
+        // Given the compile-time OS
+        // Then linux_host_gateway_mapping_required matches cfg!(target_os = "linux")
         assert_eq!(
             linux_host_gateway_mapping_required(),
             cfg!(target_os = "linux")

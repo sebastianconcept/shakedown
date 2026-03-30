@@ -31,7 +31,14 @@ pub(crate) fn service_startup_order(
                 .entry(dependency.clone())
                 .or_default()
                 .push(service_name.clone());
-            *indegree.get_mut(service_name).expect("service in map") += 1;
+            let Some(entry) = indegree.get_mut(service_name) else {
+                return Err(ShakedownError::Internal(
+                    InternalError::InvalidConfiguration(
+                        "internal: service indegree map missing registered service".to_string(),
+                    ),
+                ));
+            };
+            *entry += 1;
         }
     }
 
@@ -46,9 +53,14 @@ pub(crate) fn service_startup_order(
         ordered.push(node.clone());
         if let Some(neighbors) = adjacency.get(&node) {
             for neighbor in neighbors {
-                let entry = indegree
-                    .get_mut(neighbor)
-                    .expect("neighbor must exist in indegree map");
+                let Some(entry) = indegree.get_mut(neighbor) else {
+                    return Err(ShakedownError::Internal(
+                        InternalError::InvalidConfiguration(
+                            "internal: dependency graph indegree missing neighbor entry"
+                                .to_string(),
+                        ),
+                    ));
+                };
                 *entry -= 1;
                 if *entry == 0 {
                     queue.push_back(neighbor.clone());
@@ -78,15 +90,22 @@ mod tests {
         for dependency in depends_on {
             builder = builder.depends_on(*dependency);
         }
-        ServiceState::new(builder.build().expect("build"))
+        ServiceState::new(
+            builder
+                .build()
+                .unwrap_or_else(|error| panic!("test fixture spec must build: {error:?}")),
+        )
     }
 
     #[test]
     fn linear_order() {
+        // Given services `a` (no deps) and `b` depending on `a`
         let mut map = HashMap::new();
         map.insert("a".to_string(), spec_named("a", &[]));
         map.insert("b".to_string(), spec_named("b", &["a"]));
-        let order = service_startup_order(&map).expect("order");
+        // When we compute startup order
+        let order = service_startup_order(&map).expect("startup order");
+        // Then `a` appears before `b`
         assert!(
             order.iter().position(|s| s == "a").unwrap()
                 < order.iter().position(|s| s == "b").unwrap()
@@ -95,12 +114,15 @@ mod tests {
 
     #[test]
     fn diamond_order() {
+        // Given a diamond: root → left/right → join
         let mut map = HashMap::new();
         map.insert("root".to_string(), spec_named("root", &[]));
         map.insert("left".to_string(), spec_named("left", &["root"]));
         map.insert("right".to_string(), spec_named("right", &["root"]));
         map.insert("join".to_string(), spec_named("join", &["left", "right"]));
-        let order = service_startup_order(&map).expect("order");
+        // When we compute startup order
+        let order = service_startup_order(&map).expect("startup order");
+        // Then dependencies always precede dependents
         let pos = |name: &str| order.iter().position(|s| s == name).unwrap();
         assert!(pos("root") < pos("left"));
         assert!(pos("root") < pos("right"));
@@ -110,10 +132,13 @@ mod tests {
 
     #[test]
     fn cycle_errors() {
+        // Given a two-node cycle between `a` and `b`
         let mut map = HashMap::new();
         map.insert("a".to_string(), spec_named("a", &["b"]));
         map.insert("b".to_string(), spec_named("b", &["a"]));
-        let error = service_startup_order(&map).expect_err("cycle");
+        // When we compute startup order
+        let error = service_startup_order(&map).expect_err("cycle must error");
+        // Then we get InvalidConfiguration mentioning circular dependency
         match error {
             ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
                 assert!(message.contains("circular"), "{message}");
@@ -124,9 +149,12 @@ mod tests {
 
     #[test]
     fn missing_dependency_errors() {
+        // Given a service that depends on a name not present in the map
         let mut map = HashMap::new();
         map.insert("only".to_string(), spec_named("only", &["ghost"]));
-        let error = service_startup_order(&map).expect_err("missing");
+        // When we compute startup order
+        let error = service_startup_order(&map).expect_err("missing dependency must error");
+        // Then the error names the missing dependency
         match error {
             ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
                 assert!(message.contains("ghost"), "{message}");
@@ -137,10 +165,13 @@ mod tests {
 
     #[test]
     fn two_independent_services_valid_ordering() {
+        // Given two services with no edges between them
         let mut map = HashMap::new();
         map.insert("left".to_string(), spec_named("left", &[]));
         map.insert("right".to_string(), spec_named("right", &[]));
-        let order = service_startup_order(&map).expect("order");
+        // When we compute startup order
+        let order = service_startup_order(&map).expect("startup order");
+        // Then both names appear exactly once
         assert_eq!(order.len(), 2);
         assert!(order.contains(&"left".to_string()));
         assert!(order.contains(&"right".to_string()));
