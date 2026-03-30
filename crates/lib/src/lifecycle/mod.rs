@@ -60,6 +60,8 @@ use crate::event::Event;
 use crate::event::{EventLevel, EventLog};
 #[cfg(feature = "kafka")]
 use crate::helpers::KafkaHelpers;
+#[cfg(feature = "rabbitmq")]
+use crate::helpers::RabbitHelpers;
 #[cfg(all(
     feature = "outbox",
     any(
@@ -648,6 +650,12 @@ impl Context {
     #[cfg(feature = "kafka")]
     pub fn kafka(&self) -> KafkaHelpers<'_> {
         KafkaHelpers::new(self)
+    }
+
+    /// RabbitMQ publish/topology helpers (`rabbitmq` feature).
+    #[cfg(feature = "rabbitmq")]
+    pub fn rabbit(&self) -> RabbitHelpers<'_> {
+        RabbitHelpers::new(self)
     }
 
     /// Check if the context has any registered resources.
