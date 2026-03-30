@@ -161,7 +161,8 @@ fault-injection = [
 # MCP server support (post-MVP, optional)
 mcp = []
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
-services = ["dep:testcontainers", "dep:reqwest"]
+# `diagnostics` enables bollard log/stats/events for labeled service containers (US-010).
+services = ["dep:testcontainers", "dep:reqwest", "diagnostics"]
 
 # Optional macro + Kafka runtime test (Docker); avoids compiling `resources = [Kafka]` without rdkafka
 [[test]]
@@ -263,6 +264,12 @@ required-features = ["services"]
 [[test]]
 name = "services_lifecycle"
 path = "tests/services_lifecycle.rs"
+required-features = ["services"]
+
+# Service container labels + bollard diagnostics merge (Docker); ignored unless --ignored
+[[test]]
+name = "services_diagnostics"
+path = "tests/services_diagnostics.rs"
 required-features = ["services"]
 
 # Postgres + RabbitMQ outbox + AMQP publication proof (Docker); no `kafka` feature

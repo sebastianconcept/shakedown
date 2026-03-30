@@ -27,7 +27,7 @@ use crate::error::{InternalError, ShakedownError};
 use crate::event::InfraEvent;
 use crate::phase::Phase;
 
-use super::labels::shakedown_docker_label_filter;
+use super::labels::{correlation_name_from_container_summary, shakedown_docker_label_filter};
 use super::ring_buffer::RingBuffer;
 
 /// Shared map from Docker container id → bounded sample ring, shared by the stats task and [`crate::lifecycle::Context`].
@@ -156,7 +156,7 @@ async fn run_resource_stats_loop(
             let Some(container_id) = summary.id.clone() else {
                 continue;
             };
-            let display_name = container_display_name(&summary);
+            let display_name = correlation_name_from_container_summary(&summary);
             match sample_container_stats(&docker, &container_id, &display_name, phase, &scenario_id)
                 .await
             {
@@ -188,17 +188,6 @@ async fn run_resource_stats_loop(
             }
         }
     }
-}
-
-fn container_display_name(summary: &bollard::models::ContainerSummary) -> String {
-    summary
-        .names
-        .as_ref()
-        .and_then(|names| names.first())
-        .map(|name| name.trim_start_matches('/').to_string())
-        .filter(|name| !name.is_empty())
-        .or_else(|| summary.id.clone())
-        .unwrap_or_else(|| "unknown".to_string())
 }
 
 async fn list_shakedown_running_containers(

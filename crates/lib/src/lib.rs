@@ -100,13 +100,14 @@ mod docker_labels;
 /// Service bridge types and traits (`bridges` feature, default).
 #[cfg(feature = "bridges")]
 pub mod bridge;
-/// Docker Engine diagnostics (bollard) when a Docker-backed resource feature is enabled.
+/// Docker Engine diagnostics (bollard) when a Docker-backed resource or `services` is enabled.
 #[cfg(any(
     feature = "kafka",
     feature = "rabbitmq",
     feature = "postgres",
     feature = "mariadb",
     feature = "mysql",
+    feature = "services",
 ))]
 pub mod diagnostics;
 /// Structured errors: scenario vs infrastructure vs internal framework failures.
@@ -206,6 +207,7 @@ pub use crate::timeline::{
     feature = "postgres",
     feature = "mariadb",
     feature = "mysql",
+    feature = "services",
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
 
@@ -218,6 +220,7 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
+        feature = "services",
     ),
 ))]
 pub use crate::diagnostics::ResourceAssertBuilder;

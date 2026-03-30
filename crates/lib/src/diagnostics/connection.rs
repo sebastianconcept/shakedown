@@ -92,14 +92,17 @@ static SUITE_DIAGNOSTICS: LazyLock<Mutex<Option<Option<DiagnosticsHandle>>>> =
 pub async fn try_connect() -> Option<DiagnosticsHandle> {
     #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
     {
-        match Docker::connect_with_local_defaults() {
+        // Use `connect_with_defaults` (not `connect_with_local_defaults`) so `DOCKER_HOST` matches
+        // testcontainers and other tooling: `tcp://` / `http://` point at the same engine as
+        // `unix://` when unset (US-010).
+        match Docker::connect_with_defaults() {
             Ok(docker) => match docker.ping().await {
                 Ok(_) => Some(DiagnosticsHandle::new(docker)),
                 Err(error) => {
                     tracing::warn!(
                         target: "shakedown::harness",
                         error = %error,
-                        "shakedown diagnostics: Docker socket reachable but ping failed; infrastructure diagnostics disabled for this run"
+                        "shakedown diagnostics: Docker engine reachable but ping failed; infrastructure diagnostics disabled for this run"
                     );
                     None
                 }
@@ -108,7 +111,7 @@ pub async fn try_connect() -> Option<DiagnosticsHandle> {
                 tracing::warn!(
                     target: "shakedown::harness",
                     error = %error,
-                    "shakedown diagnostics: Docker socket unavailable; infrastructure diagnostics disabled for this run"
+                    "shakedown diagnostics: Docker engine unavailable; infrastructure diagnostics disabled for this run"
                 );
                 None
             }
