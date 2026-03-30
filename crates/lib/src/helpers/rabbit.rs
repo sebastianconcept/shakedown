@@ -1,15 +1,19 @@
 //! RabbitMQ typed helpers — [`RabbitHelpers`] for scenario-scoped publish and topology setup.
 
+use std::time::{Duration, Instant};
+
 use lapin::options::{
-    BasicPublishOptions, ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
+    BasicAckOptions, BasicGetOptions, BasicNackOptions, BasicPublishOptions,
+    ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
 };
-use lapin::types::FieldTable;
+use lapin::types::{FieldTable, ShortString};
 use lapin::{BasicProperties, Connection, ConnectionProperties};
 use serde::Serialize;
 
 pub use lapin::ExchangeKind;
 
 use crate::error::{InfrastructureError, ShakedownError};
+use crate::helpers::{ConsumedMessage, DEFAULT_HELPER_CONSUME_TIMEOUT};
 use crate::lifecycle::Context;
 use crate::resources::RabbitBindings;
 
@@ -159,5 +163,113 @@ impl<'ctx> RabbitHelpers<'ctx> {
             .close(200, "shakedown_helpers_topology".into())
             .await;
         Ok(())
+    }
+
+    /// Poll until a message matching `predicate` arrives on the scenario-scoped queue, or the
+    /// timeout expires.
+    ///
+    /// `queue` is the logical name; the AMQP queue name is [`RabbitBindings::namespaced_name`].
+    /// The queue must already exist (see [`Self::declare_topology`]). When `timeout` is `None`,
+    /// uses [`DEFAULT_HELPER_CONSUME_TIMEOUT`] (20 seconds).
+    ///
+    /// Non-matching messages are nacked with requeue so they remain available for other consumers
+    /// or a later poll (same behaviour as [`crate::publication::RabbitMqPublicationVerifier`]).
+    pub async fn consume_until<F>(
+        &self,
+        queue: &str,
+        predicate: F,
+        timeout: Option<Duration>,
+    ) -> Result<ConsumedMessage, ShakedownError>
+    where
+        F: Fn(&ConsumedMessage) -> bool,
+    {
+        let rabbit_bindings = self.rabbit_bindings()?;
+        let queue_name = rabbit_bindings.namespaced_name(queue);
+        let limit = timeout.unwrap_or(DEFAULT_HELPER_CONSUME_TIMEOUT);
+        let started_at = Instant::now();
+        let deadline = started_at + limit;
+
+        let connection = Connection::connect(
+            rabbit_bindings.amqp_uri.as_str(),
+            ConnectionProperties::default(),
+        )
+        .await
+        .map_err(map_backend_error)?;
+        let channel = connection
+            .create_channel()
+            .await
+            .map_err(map_backend_error)?;
+
+        while Instant::now() < deadline {
+            let maybe_message = channel
+                .basic_get(
+                    ShortString::from(queue_name.as_str()),
+                    BasicGetOptions::default(),
+                )
+                .await
+                .map_err(map_backend_error)?;
+
+            if let Some(basic_get) = maybe_message {
+                let delivery = basic_get.delivery;
+                let routing_key = delivery.routing_key.as_str();
+                let consumed = ConsumedMessage {
+                    key: Some(routing_key.as_bytes().to_vec()),
+                    payload: Some(delivery.data.to_vec()),
+                    source: queue_name.clone(),
+                };
+
+                if predicate(&consumed) {
+                    channel
+                        .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
+                        .await
+                        .map_err(map_backend_error)?;
+                    let _ = connection
+                        .close(200, "shakedown_helpers_consume_ok".into())
+                        .await;
+                    return Ok(consumed);
+                }
+
+                channel
+                    .basic_nack(
+                        delivery.delivery_tag,
+                        BasicNackOptions {
+                            multiple: false,
+                            requeue: true,
+                        },
+                    )
+                    .await
+                    .map_err(map_backend_error)?;
+            } else {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let wait_slice = remaining.min(Duration::from_millis(200));
+                if wait_slice.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(wait_slice).await;
+            }
+        }
+
+        let _ = connection
+            .close(200, "shakedown_helpers_consume_timeout".into())
+            .await;
+
+        let elapsed = started_at.elapsed();
+        Err(ShakedownError::HelperTimeout {
+            resource: queue_name,
+            operation: "rabbit.consume_until",
+            timeout: limit,
+            elapsed,
+        })
+    }
+
+    /// Return the first message observed on the scenario-scoped queue (no predicate filtering).
+    ///
+    /// Shorthand for [`Self::consume_until`] with `|_| true`.
+    pub async fn consume_one(
+        &self,
+        queue: &str,
+        timeout: Option<Duration>,
+    ) -> Result<ConsumedMessage, ShakedownError> {
+        self.consume_until(queue, |_| true, timeout).await
     }
 }
