@@ -110,6 +110,7 @@ pub mod bridge;
     feature = "redis",
     feature = "valkey",
     feature = "mongodb",
+    feature = "nats",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -213,6 +214,7 @@ pub use crate::timeline::{
     feature = "redis",
     feature = "valkey",
     feature = "mongodb",
+    feature = "nats",
     feature = "services",
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
@@ -229,6 +231,7 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
         feature = "redis",
         feature = "valkey",
         feature = "mongodb",
+        feature = "nats",
         feature = "services",
     ),
 ))]
@@ -237,8 +240,8 @@ pub use crate::diagnostics::ResourceAssertBuilder;
 /// First-party resource implementations.
 #[doc(inline)]
 pub use crate::resources::{
-    sanitize_redis_key_prefix, sanitize_resource_namespace, BuiltinResource, FakeResource,
-    KafkaBindings, RegisteredResource, Resource,
+    sanitize_nats_subject_prefix, sanitize_redis_key_prefix, sanitize_resource_namespace,
+    BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
 };
 
 #[cfg(feature = "postgres")]
@@ -262,6 +265,8 @@ pub use crate::helpers::MariaDbHelpers;
 pub use crate::helpers::MongoHelpers;
 #[cfg(feature = "mysql")]
 pub use crate::helpers::MysqlHelpers;
+#[cfg(feature = "nats")]
+pub use crate::helpers::NatsHelpers;
 #[cfg(feature = "postgres")]
 pub use crate::helpers::PostgresHelpers;
 #[cfg(any(feature = "redis", feature = "valkey"))]
@@ -296,6 +301,9 @@ pub use crate::resources::ValkeyResource;
 
 #[cfg(feature = "mongodb")]
 pub use crate::resources::{MongoBindings, MongoResource};
+
+#[cfg(feature = "nats")]
+pub use crate::resources::{NatsBindings, NatsResource};
 
 #[cfg(all(
     feature = "outbox",

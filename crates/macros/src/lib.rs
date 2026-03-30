@@ -558,6 +558,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Nats" => Ok(quote! {
+            #[cfg(feature = "nats")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Nats(
+                    ::shakedown::NatsResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "nats"))]
+            {
+                ::core::compile_error!(
+                    "Nats in #[shakedown::test(resources = [...])] requires `nats` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Toxiproxy" => Ok(quote! {
             #[cfg(feature = "fault-injection")]
             {
@@ -575,7 +589,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `Redis`, `Valkey`, `Mongo`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `Redis`, `Valkey`, `Mongo`, `Nats`, and `Toxiproxy`"
             ),
         )),
     }
