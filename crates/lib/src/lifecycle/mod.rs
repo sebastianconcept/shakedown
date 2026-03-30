@@ -52,12 +52,14 @@ use crate::bridge::{
 };
 #[cfg(feature = "bridges")]
 use crate::bridge::{BridgeHandle, BridgeResources, HttpBridge};
-use crate::error::{
-    InfrastructureError, InternalError, ResourceHandle, ScenarioId, ShakedownError,
-};
+#[cfg(feature = "bridges")]
+use crate::error::InternalError;
+use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownError};
 #[cfg(feature = "bridges")]
 use crate::event::Event;
 use crate::event::{EventLevel, EventLog};
+#[cfg(feature = "kafka")]
+use crate::helpers::KafkaHelpers;
 #[cfg(all(
     feature = "outbox",
     any(
@@ -640,6 +642,12 @@ impl Context {
     ))]
     pub fn outbox(&self) -> Outbox<'_> {
         Outbox::new(self)
+    }
+
+    /// Kafka produce/consume helpers (`kafka` feature).
+    #[cfg(feature = "kafka")]
+    pub fn kafka(&self) -> KafkaHelpers<'_> {
+        KafkaHelpers::new(self)
     }
 
     /// Check if the context has any registered resources.

@@ -114,6 +114,8 @@ pub mod event;
 /// Toxiproxy fault-injection control API (`fault-injection` feature).
 #[cfg(feature = "fault-injection")]
 pub mod fault_injection;
+/// Typed helpers on [`lifecycle::Context`] for Kafka, RabbitMQ, and relational resources (feature-gated submodules).
+pub mod helpers;
 /// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
 /// Outbox table setup and assertions (`outbox` + at least one relational feature).
@@ -226,6 +228,8 @@ pub use crate::resources::{MysqlBindings, MysqlResource};
 #[cfg(feature = "sqlite")]
 pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResource};
 
+#[cfg(feature = "kafka")]
+pub use crate::helpers::KafkaHelpers;
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
 
