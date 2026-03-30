@@ -253,6 +253,12 @@ name = "bridge_grpc"
 path = "tests/bridge_grpc.rs"
 required-features = ["grpc-bridges"]
 
+# Service container → host.docker.internal connectivity (Docker); ignored in test body
+[[test]]
+name = "service_host_resolution"
+path = "tests/service_host_resolution.rs"
+required-features = ["services"]
+
 # Postgres + RabbitMQ outbox + AMQP publication proof (Docker); no `kafka` feature
 [[test]]
 name = "outbox_rabbit"

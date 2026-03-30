@@ -179,8 +179,10 @@ pub use crate::publication::{
 
 #[cfg(feature = "services")]
 pub use crate::service::{
-    EnvMapping, HealthCheck, PullPolicy, ServiceHandle, ServiceSpec, ServiceUnderTest,
-    DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_TIMEOUT,
+    ensure_host_docker_internal_resolution, linux_host_gateway_mapping_required,
+    rewrite_injected_addresses_for_service_container, EnvMapping, HealthCheck, PullPolicy,
+    ServiceHandle, ServiceSpec, ServiceUnderTest, DEFAULT_HEALTH_CHECK_INTERVAL,
+    DEFAULT_HEALTH_CHECK_TIMEOUT, HOST_DOCKER_INTERNAL,
 };
 
 #[cfg(all(feature = "outbox", feature = "kafka"))]

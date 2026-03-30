@@ -1,7 +1,8 @@
 //! Convention-based environment variable injection for service containers (`services` feature).
 //!
 //! Pure function from [`crate::lifecycle::Context`] + [`crate::service::ServiceSpec`] → env map.
-//! Host ↔ container address rewriting (`host.docker.internal`) is US-008.
+//! All values are rewritten for service containers via
+//! [`crate::service::address::rewrite_injected_addresses_for_service_container`].
 //!
 //! `inject_service_env` is consumed by service container lifecycle (`run_scenario`, US-009). The
 //! library build does not reference it until that wiring lands; keep `dead_code` allowed here.
@@ -11,6 +12,7 @@ use std::collections::HashMap;
 
 use crate::lifecycle::Context;
 use crate::resources::KafkaBindings;
+use crate::service::address::rewrite_injected_addresses_for_service_container;
 use crate::service::types::{EnvMapping, ServiceSpec};
 
 /// Build the effective environment map for a service container: convention injection,
@@ -30,6 +32,10 @@ pub(crate) fn inject_service_env(
 
     for (key, value) in &service_spec.env_vars {
         environment.insert(key.clone(), value.clone());
+    }
+
+    for value in environment.values_mut() {
+        *value = rewrite_injected_addresses_for_service_container(value.as_str());
     }
 
     environment
@@ -351,6 +357,9 @@ fn upper_snake_case(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::lifecycle::Context;
+    #[cfg(feature = "postgres")]
+    use crate::service::address::rewrite_injected_addresses_for_service_container;
+    use crate::service::address::HOST_DOCKER_INTERNAL;
     use crate::service::ServiceUnderTest;
 
     fn spec_named(name: &str) -> ServiceSpec {
@@ -367,11 +376,10 @@ mod tests {
         context.set_kafka_bindings(KafkaBindings::new("127.0.0.1:9092", "scenario_"));
         let specification = spec_named("api");
         let environment = inject_service_env(&context, &specification);
+        let expected_kafka = format!("{HOST_DOCKER_INTERNAL}:9092");
         assert_eq!(
-            environment
-                .get("KAFKA_BOOTSTRAP_SERVERS")
-                .map(String::as_str),
-            Some("127.0.0.1:9092")
+            environment.get("KAFKA_BOOTSTRAP_SERVERS"),
+            Some(&expected_kafka)
         );
     }
 
@@ -387,10 +395,8 @@ mod tests {
             .expect("valid spec");
         let environment = inject_service_env(&context, &specification);
         assert!(!environment.contains_key("KAFKA_BOOTSTRAP_SERVERS"));
-        assert_eq!(
-            environment.get("CUSTOM_KAFKA").map(String::as_str),
-            Some("localhost:9092")
-        );
+        let expected_custom = format!("{HOST_DOCKER_INTERNAL}:9092");
+        assert_eq!(environment.get("CUSTOM_KAFKA"), Some(&expected_custom));
     }
 
     #[test]
@@ -407,10 +413,8 @@ mod tests {
             .expect("valid spec");
         let environment = inject_service_env(&context, &specification);
         assert!(!environment.contains_key("KAFKA_BOOTSTRAP_SERVERS"));
-        assert_eq!(
-            environment.get("ONLY_KAFKA").map(String::as_str),
-            Some("127.0.0.1:9092")
-        );
+        let expected_only = format!("{HOST_DOCKER_INTERNAL}:9092");
+        assert_eq!(environment.get("ONLY_KAFKA"), Some(&expected_only));
         assert_eq!(environment.get("EXTRA").map(String::as_str), Some("1"));
     }
 
@@ -471,13 +475,13 @@ mod tests {
         let specification_worker = spec_named("worker");
         let environment_worker = inject_service_env(&context, &specification_worker);
 
+        let expected_api = format!("postgresql://u:p@{HOST_DOCKER_INTERNAL}:5432/scenario_db_api");
+        let expected_worker =
+            format!("postgresql://u:p@{HOST_DOCKER_INTERNAL}:5432/scenario_db_worker");
+        assert_eq!(environment_api.get("DATABASE_URL"), Some(&expected_api));
         assert_eq!(
-            environment_api.get("DATABASE_URL").map(String::as_str),
-            Some("postgresql://u:p@127.0.0.1:5432/scenario_db_api")
-        );
-        assert_eq!(
-            environment_worker.get("DATABASE_URL").map(String::as_str),
-            Some("postgresql://u:p@127.0.0.1:5432/scenario_db_worker")
+            environment_worker.get("DATABASE_URL"),
+            Some(&expected_worker)
         );
     }
 
@@ -500,9 +504,7 @@ mod tests {
         context.register_service(spec_named("only")).unwrap();
         let specification = spec_named("only");
         let environment = inject_service_env(&context, &specification);
-        assert_eq!(
-            environment.get("DATABASE_URL").map(String::as_str),
-            Some(url)
-        );
+        let expected_url = rewrite_injected_addresses_for_service_container(url);
+        assert_eq!(environment.get("DATABASE_URL"), Some(&expected_url));
     }
 }
