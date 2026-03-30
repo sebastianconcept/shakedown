@@ -68,6 +68,8 @@ use crate::helpers::MysqlHelpers;
 use crate::helpers::PostgresHelpers;
 #[cfg(feature = "rabbitmq")]
 use crate::helpers::RabbitHelpers;
+#[cfg(feature = "sqlite")]
+use crate::helpers::SqliteHelpers;
 #[cfg(all(
     feature = "outbox",
     any(
@@ -680,6 +682,12 @@ impl Context {
     #[cfg(feature = "mysql")]
     pub fn mysql(&self) -> MysqlHelpers<'_> {
         MysqlHelpers::new(self)
+    }
+
+    /// SQLite execute/query helpers (`sqlite` feature).
+    #[cfg(feature = "sqlite")]
+    pub fn sqlite(&self) -> SqliteHelpers<'_> {
+        SqliteHelpers::new(self)
     }
 
     /// Check if the context has any registered resources.

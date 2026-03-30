@@ -237,6 +237,8 @@ pub use crate::helpers::MariaDbHelpers;
 pub use crate::helpers::MysqlHelpers;
 #[cfg(feature = "postgres")]
 pub use crate::helpers::PostgresHelpers;
+#[cfg(feature = "sqlite")]
+pub use crate::helpers::SqliteHelpers;
 #[cfg(feature = "rabbitmq")]
 pub use crate::helpers::{ExchangeKind, RabbitHelpers};
 #[cfg(feature = "kafka")]

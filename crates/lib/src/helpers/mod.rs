@@ -63,6 +63,9 @@ pub mod mariadb;
 #[cfg(feature = "mysql")]
 pub mod mysql;
 
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
@@ -77,3 +80,6 @@ pub use mariadb::MariaDbHelpers;
 
 #[cfg(feature = "mysql")]
 pub use mysql::MysqlHelpers;
+
+#[cfg(feature = "sqlite")]
+pub use sqlite::SqliteHelpers;
