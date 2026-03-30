@@ -160,6 +160,8 @@ fault-injection = [
 ]
 # MCP server support (post-MVP, optional)
 mcp = []
+# Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
+services = ["dep:testcontainers"]
 
 # Optional macro + Kafka runtime test (Docker); avoids compiling `resources = [Kafka]` without rdkafka
 [[test]]
