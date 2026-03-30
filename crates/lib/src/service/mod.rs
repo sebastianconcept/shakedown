@@ -3,6 +3,7 @@
 //! Opt-in module for running real services in Docker during scenarios. Concrete types and
 //! lifecycle wiring land in follow-up user stories; this module is the compile-time seam.
 
+pub mod address;
 mod builder;
 mod handle;
 mod health;
@@ -12,6 +13,10 @@ mod types;
 
 pub(crate) use state::ServiceState;
 
+pub use address::{
+    ensure_host_docker_internal_resolution, linux_host_gateway_mapping_required,
+    rewrite_injected_addresses_for_service_container, HOST_DOCKER_INTERNAL,
+};
 pub use builder::ServiceUnderTest;
 pub use handle::ServiceHandle;
 pub use health::{HealthCheck, DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_TIMEOUT};
