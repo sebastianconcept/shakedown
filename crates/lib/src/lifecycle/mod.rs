@@ -52,7 +52,7 @@ use crate::bridge::{
 };
 #[cfg(feature = "bridges")]
 use crate::bridge::{BridgeHandle, BridgeResources, HttpBridge};
-#[cfg(feature = "bridges")]
+#[cfg(any(feature = "bridges", feature = "services"))]
 use crate::error::InternalError;
 use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownError};
 #[cfg(feature = "bridges")]
@@ -93,8 +93,10 @@ use crate::resources::SqliteBindings;
 use crate::resources::{
     BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
 };
+#[cfg(feature = "services")]
+use crate::service::ServiceHandle;
 use async_trait::async_trait;
-#[cfg(feature = "bridges")]
+#[cfg(any(feature = "bridges", feature = "services"))]
 use std::collections::HashMap;
 #[cfg(feature = "bridges")]
 use std::sync::Arc;
@@ -268,6 +270,9 @@ pub struct Context {
     /// True once HTTP and gRPC bridge servers have been started for this [`run_scenario`] invocation.
     #[cfg(feature = "bridges")]
     bridge_servers_phase_complete: bool,
+    /// Staged [`crate::service::ServiceSpec`] entries; [`ServiceHandle`] filled when containers are healthy (US-009).
+    #[cfg(feature = "services")]
+    services: HashMap<String, crate::service::ServiceState>,
 }
 
 impl Context {
@@ -322,6 +327,8 @@ impl Context {
             grpc_bridge_runtimes: Vec::new(),
             #[cfg(feature = "bridges")]
             bridge_servers_phase_complete: false,
+            #[cfg(feature = "services")]
+            services: HashMap::new(),
         }
     }
 
@@ -376,6 +383,8 @@ impl Context {
             grpc_bridge_runtimes: Vec::new(),
             #[cfg(feature = "bridges")]
             bridge_servers_phase_complete: false,
+            #[cfg(feature = "services")]
+            services: HashMap::new(),
         }
     }
 
@@ -430,6 +439,8 @@ impl Context {
             grpc_bridge_runtimes: Vec::new(),
             #[cfg(feature = "bridges")]
             bridge_servers_phase_complete: false,
+            #[cfg(feature = "services")]
+            services: HashMap::new(),
         }
     }
 
@@ -841,6 +852,63 @@ impl Context {
         container_name: &'a str,
     ) -> crate::diagnostics::ResourceAssertBuilder<'a> {
         crate::diagnostics::ResourceAssertBuilder::new(self, container_name)
+    }
+
+    /// Register a built [`crate::service::ServiceSpec`] for the harness to start after infrastructure
+    /// and bridges (US-009).
+    ///
+    /// Duplicate service names return [`crate::error::InternalError::InvalidConfiguration`]. [`Self::service_url`] and
+    /// [`Self::service_handle`] remain empty until lifecycle attaches a [`ServiceHandle`] after readiness.
+    #[cfg(feature = "services")]
+    pub fn register_service(
+        &mut self,
+        service_spec: crate::service::ServiceSpec,
+    ) -> Result<(), ShakedownError> {
+        let name = service_spec.name().to_string();
+        if self.services.contains_key(&name) {
+            return Err(ShakedownError::Internal(
+                InternalError::InvalidConfiguration(format!("duplicate service name '{name}'")),
+            ));
+        }
+        self.services
+            .insert(name, crate::service::ServiceState::new(service_spec));
+        Ok(())
+    }
+
+    /// HTTP base URL for a registered service after the container is healthy (`services` feature).
+    ///
+    /// Returns [`None`] if the name is unknown or the service has not been started yet for this run.
+    #[cfg(feature = "services")]
+    pub fn service_url(&self, name: &str) -> Option<String> {
+        self.services
+            .get(name)
+            .and_then(|state| state.handle.as_ref())
+            .map(|handle| handle.base_url().to_string())
+    }
+
+    /// Read-only handle for a registered service after the container is healthy (`services` feature).
+    #[cfg(feature = "services")]
+    pub fn service_handle(&self, name: &str) -> Option<&ServiceHandle> {
+        self.services
+            .get(name)
+            .and_then(|state| state.handle.as_ref())
+    }
+
+    /// Used by lifecycle when a service container passes readiness (US-009).
+    #[cfg(feature = "services")]
+    #[allow(dead_code)] // Wired from `run_scenario` in US-009; `cfg(test)` call sites are not visible to `cargo clippy`.
+    pub(crate) fn set_service_handle(
+        &mut self,
+        name: &str,
+        handle: ServiceHandle,
+    ) -> Result<(), ShakedownError> {
+        let state = self.services.get_mut(name).ok_or_else(|| {
+            ShakedownError::Internal(InternalError::InvalidConfiguration(format!(
+                "set_service_handle: no registered service named '{name}'"
+            )))
+        })?;
+        state.handle = Some(handle);
+        Ok(())
     }
 }
 
