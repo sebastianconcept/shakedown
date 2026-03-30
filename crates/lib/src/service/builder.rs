@@ -125,6 +125,13 @@ impl ServiceUnderTest {
 
         let mut seen_dependencies = HashSet::<&str>::new();
         for dependency in &self.depends_on {
+            if dependency == &name {
+                return Err(ShakedownError::Internal(
+                    InternalError::InvalidConfiguration(format!(
+                        "service under test '{name}': cannot `.depends_on` the same service (self-dependency)"
+                    )),
+                ));
+            }
             if !seen_dependencies.insert(dependency.as_str()) {
                 return Err(ShakedownError::Internal(
                     InternalError::InvalidConfiguration(format!(
@@ -284,6 +291,26 @@ mod tests {
             ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
                 assert!(
                     message.contains("duplicate") && message.contains("depends_on"),
+                    "message: {message}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_fails_on_self_dependency() {
+        let err = ServiceUnderTest::docker("x:y")
+            .name("api")
+            .port(80)
+            .depends_on("api")
+            .build()
+            .expect_err("expected error");
+
+        match err {
+            ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
+                assert!(
+                    message.contains("self-dependency") || message.contains("same service"),
                     "message: {message}"
                 );
             }

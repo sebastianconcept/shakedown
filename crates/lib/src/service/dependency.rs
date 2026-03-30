@@ -134,4 +134,15 @@ mod tests {
             other => panic!("unexpected: {other:?}"),
         }
     }
+
+    #[test]
+    fn two_independent_services_valid_ordering() {
+        let mut map = HashMap::new();
+        map.insert("left".to_string(), spec_named("left", &[]));
+        map.insert("right".to_string(), spec_named("right", &[]));
+        let order = service_startup_order(&map).expect("order");
+        assert_eq!(order.len(), 2);
+        assert!(order.contains(&"left".to_string()));
+        assert!(order.contains(&"right".to_string()));
+    }
 }

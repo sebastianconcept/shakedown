@@ -161,18 +161,19 @@ fn inject_conventions(
         });
     }
 
-    // Inter-service URLs: `{UPPER_NAME}_URL` for each other registered service when a URL exists.
+    // Inter-service URLs: `{UPPER_NAME}_URL` for each `depends_on` target that is already healthy
+    // (topological startup order guarantees URLs exist when a dependent container is configured).
     #[cfg(feature = "services")]
     {
-        for peer_name in context.registered_service_names_except(service_spec.name()) {
-            let Some(url) = context.service_url(peer_name) else {
+        for dependency_name in service_spec.depends_on.iter() {
+            let Some(url) = context.service_url(dependency_name.as_str()) else {
                 continue;
             };
             let key = overrides
                 .services
-                .get(peer_name)
+                .get(dependency_name.as_str())
                 .cloned()
-                .unwrap_or_else(|| default_service_env_key(peer_name));
+                .unwrap_or_else(|| default_service_env_key(dependency_name.as_str()));
             environment.insert(key, url);
         }
     }
@@ -358,10 +359,9 @@ fn upper_snake_case(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::lifecycle::Context;
-    #[cfg(feature = "postgres")]
     use crate::service::address::rewrite_injected_addresses_for_service_container;
     use crate::service::address::HOST_DOCKER_INTERNAL;
-    use crate::service::ServiceUnderTest;
+    use crate::service::{ServiceHandle, ServiceUnderTest};
 
     fn spec_named(name: &str) -> ServiceSpec {
         ServiceUnderTest::docker("alpine:3.20")
@@ -442,6 +442,55 @@ mod tests {
     fn upper_snake_case_formats_bridge_and_service_keys() {
         assert_eq!(default_bridge_env_key("payments-api"), "PAYMENTS_API_URL");
         assert_eq!(default_service_env_key("order-svc"), "ORDER_SVC_URL");
+    }
+
+    #[test]
+    fn inter_service_urls_only_inject_declared_depends_on() {
+        let mut context = Context::new();
+        context.register_service(spec_named("api")).unwrap();
+        context.register_service(spec_named("worker")).unwrap();
+        context
+            .set_service_handle(
+                "api",
+                ServiceHandle::new(
+                    "api".to_string(),
+                    "http://127.0.0.1:1111".to_string(),
+                    HashMap::new(),
+                    None,
+                    true,
+                ),
+            )
+            .unwrap();
+        context
+            .set_service_handle(
+                "worker",
+                ServiceHandle::new(
+                    "worker".to_string(),
+                    "http://127.0.0.1:2222".to_string(),
+                    HashMap::new(),
+                    None,
+                    true,
+                ),
+            )
+            .unwrap();
+
+        let environment_api = inject_service_env(&context, &spec_named("api"));
+        assert!(!environment_api.contains_key("WORKER_URL"));
+
+        let specification_worker = ServiceUnderTest::docker("alpine:3.20")
+            .name("worker")
+            .port(80)
+            .depends_on("api")
+            .build()
+            .expect("build");
+        let environment_worker = inject_service_env(&context, &specification_worker);
+        let expected_upstream = format!("http://127.0.0.1:1111");
+        let expected_upstream_container =
+            rewrite_injected_addresses_for_service_container(expected_upstream.as_str());
+        assert_eq!(
+            environment_worker.get("API_URL").map(String::as_str),
+            Some(expected_upstream_container.as_str())
+        );
     }
 
     #[test]
