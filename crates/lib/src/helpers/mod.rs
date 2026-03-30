@@ -48,5 +48,11 @@ impl ConsumedMessage {
 #[cfg(feature = "kafka")]
 pub mod kafka;
 
+#[cfg(feature = "rabbitmq")]
+pub mod rabbit;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
+
+#[cfg(feature = "rabbitmq")]
+pub use rabbit::{ExchangeKind, RabbitHelpers};
