@@ -208,6 +208,15 @@ pub enum ShakedownError {
         threshold: String,
         phase: Phase,
     },
+    /// Helper timed out: resource '{resource}', operation '{operation}', waited {elapsed:?} (limit {timeout:?})
+    ///
+    /// Cause: a typed helper (Kafka consume, RabbitMQ consume, …) did not observe a matching message within the wall-clock window.
+    HelperTimeout {
+        resource: String,
+        operation: &'static str,
+        timeout: std::time::Duration,
+        elapsed: std::time::Duration,
+    },
 }
 
 // `std::error::Error` is implemented by hand for the top-level harness enums (not via `thiserror`'s
@@ -229,6 +238,7 @@ impl Error for ShakedownError {
             ShakedownError::PayloadDeserialisation(_) => None,
             ShakedownError::PayloadAssertionFailed { .. } => None,
             ShakedownError::ResourceAssertionFailed { .. } => None,
+            ShakedownError::HelperTimeout { .. } => None,
         }
     }
 }
