@@ -29,6 +29,13 @@ pub struct ServiceSpec {
     pub(crate) pull_policy: PullPolicy,
 }
 
+impl ServiceSpec {
+    /// Logical service name (URLs, labels, dependencies).
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
 /// How Docker should pull the service image before start.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum PullPolicy {
