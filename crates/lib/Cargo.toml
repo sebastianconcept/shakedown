@@ -179,6 +179,18 @@ name = "helpers_rabbit"
 path = "tests/helpers_rabbit.rs"
 required-features = ["rabbitmq"]
 
+# Postgres typed helpers execute/assert integration (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_postgres"
+path = "tests/helpers_postgres.rs"
+required-features = ["postgres"]
+
+# SQLite typed helpers execute/assert integration (no Docker)
+[[test]]
+name = "helpers_sqlite"
+path = "tests/helpers_sqlite.rs"
+required-features = ["sqlite"]
+
 # Postgres suite + bindings (Docker); ignored unless --ignored
 [[test]]
 name = "postgres_vertical"
