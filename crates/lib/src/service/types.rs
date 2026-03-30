@@ -2,6 +2,33 @@
 //!
 //! Pure configuration; applied when starting containers and building injection maps (US-004, US-007).
 
+use std::collections::HashMap;
+
+use super::health::HealthCheck;
+
+/// Container port exposure for a service-under-test (optional logical name for multi-port services).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortMapping {
+    pub(crate) name: Option<String>,
+    pub(crate) container_port: u16,
+}
+
+/// Validated description of a service container to run in a scenario (built via [`crate::service::ServiceUnderTest`]).
+///
+/// Fields are crate-private; callers pass [`ServiceSpec`] to the harness — configuration is opaque at the crate boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServiceSpec {
+    pub(crate) name: String,
+    pub(crate) image: String,
+    pub(crate) ports: Vec<PortMapping>,
+    pub(crate) env_vars: HashMap<String, String>,
+    pub(crate) env_mappings: Vec<EnvMapping>,
+    pub(crate) health_check: HealthCheck,
+    pub(crate) depends_on: Vec<String>,
+    pub(crate) auto_inject: bool,
+    pub(crate) pull_policy: PullPolicy,
+}
+
 /// How Docker should pull the service image before start.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum PullPolicy {
