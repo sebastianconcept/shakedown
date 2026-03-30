@@ -68,6 +68,8 @@ use crate::helpers::MongoHelpers;
 use crate::helpers::MysqlHelpers;
 #[cfg(feature = "nats")]
 use crate::helpers::NatsHelpers;
+#[cfg(feature = "neo4j")]
+use crate::helpers::Neo4jHelpers;
 #[cfg(feature = "postgres")]
 use crate::helpers::PostgresHelpers;
 #[cfg(feature = "rabbitmq")]
@@ -94,6 +96,8 @@ use crate::resources::MongoBindings;
 use crate::resources::MysqlBindings;
 #[cfg(feature = "nats")]
 use crate::resources::NatsBindings;
+#[cfg(feature = "neo4j")]
+use crate::resources::Neo4jBindings;
 #[cfg(feature = "postgres")]
 use crate::resources::PostgresBindings;
 #[cfg(feature = "rabbitmq")]
@@ -212,7 +216,8 @@ impl std::fmt::Display for ScenarioKind {
 /// [`Context::rabbit_bindings`] (with the `rabbitmq` feature), [`Context::redis_bindings`] /
 /// [`Context::redis`] (with the `redis` / `valkey` features), [`Context::mongo_bindings`] /
 /// [`Context::mongo`] (with the `mongodb` feature), [`Context::nats_bindings`] / [`Context::nats`]
-/// (with the `nats` feature), and (with the `postgres` / `mariadb` / `mysql` / `sqlite` features)
+/// (with the `nats` feature), [`Context::neo4j_bindings`] / [`Context::neo4j`] (with the `neo4j` feature),
+/// and (with the `postgres` / `mariadb` / `mysql` / `sqlite` features)
 /// relational bindings accessors.
 pub struct Context {
     /// Registered resources
@@ -247,6 +252,9 @@ pub struct Context {
     /// NATS bindings when a NATS resource populated them (`nats` feature).
     #[cfg(feature = "nats")]
     nats_bindings: Option<NatsBindings>,
+    /// Neo4j bindings when a Neo4j resource populated them (`neo4j` feature).
+    #[cfg(feature = "neo4j")]
+    neo4j_bindings: Option<Neo4jBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -275,6 +283,7 @@ pub struct Context {
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -328,6 +337,8 @@ impl Context {
             mongo_bindings: None,
             #[cfg(feature = "nats")]
             nats_bindings: None,
+            #[cfg(feature = "neo4j")]
+            neo4j_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -349,6 +360,7 @@ impl Context {
                     feature = "valkey",
                     feature = "mongodb",
                     feature = "nats",
+                    feature = "neo4j",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -395,6 +407,8 @@ impl Context {
             mongo_bindings: None,
             #[cfg(feature = "nats")]
             nats_bindings: None,
+            #[cfg(feature = "neo4j")]
+            neo4j_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -416,6 +430,7 @@ impl Context {
                     feature = "valkey",
                     feature = "mongodb",
                     feature = "nats",
+                    feature = "neo4j",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -462,6 +477,8 @@ impl Context {
             mongo_bindings: None,
             #[cfg(feature = "nats")]
             nats_bindings: None,
+            #[cfg(feature = "neo4j")]
+            neo4j_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -483,6 +500,7 @@ impl Context {
                     feature = "valkey",
                     feature = "mongodb",
                     feature = "nats",
+                    feature = "neo4j",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -646,6 +664,18 @@ impl Context {
     #[cfg(feature = "nats")]
     pub fn nats_bindings(&self) -> Option<&NatsBindings> {
         self.nats_bindings.as_ref()
+    }
+
+    /// Set Neo4j bindings for this scenario (typically after Neo4j provision).
+    #[cfg(feature = "neo4j")]
+    pub fn set_neo4j_bindings(&mut self, neo4j_bindings: Neo4jBindings) {
+        self.neo4j_bindings = Some(neo4j_bindings);
+    }
+
+    /// Neo4j connection details when a Neo4j resource populated them (`neo4j` feature).
+    #[cfg(feature = "neo4j")]
+    pub fn neo4j_bindings(&self) -> Option<&Neo4jBindings> {
+        self.neo4j_bindings.as_ref()
     }
 
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
@@ -817,6 +847,12 @@ impl Context {
         NatsHelpers::new(self)
     }
 
+    /// Neo4j Cypher helpers (`neo4j` feature).
+    #[cfg(feature = "neo4j")]
+    pub fn neo4j(&self) -> Neo4jHelpers<'_> {
+        Neo4jHelpers::new(self)
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -926,6 +962,7 @@ impl Context {
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -949,6 +986,7 @@ impl Context {
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -973,6 +1011,7 @@ impl Context {
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1505,6 +1544,59 @@ fn apply_resource_handles_to_nats_bindings(ctx: &mut Context, handles: &[Resourc
     }
 }
 
+#[cfg(feature = "neo4j")]
+/// If any handle metadata carries Neo4j engine fields, set [`Context::set_neo4j_bindings`].
+fn apply_resource_handles_to_neo4j_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if engine != "neo4j" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|value| value.as_str());
+        let port = meta
+            .get("port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let http_port = meta
+            .get("http_port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let database = meta.get("database").and_then(|value| value.as_str());
+        let username = meta.get("username").and_then(|value| value.as_str());
+        let password = meta.get("password").and_then(|value| value.as_str());
+        let bolt_url = meta.get("bolt_url").and_then(|value| value.as_str());
+        let http_url = meta.get("http_url").and_then(|value| value.as_str());
+        if let (
+            Some(host),
+            Some(port),
+            Some(http_port),
+            Some(database),
+            Some(username),
+            Some(password),
+            Some(bolt_url),
+            Some(http_url),
+        ) = (
+            host, port, http_port, database, username, password, bolt_url, http_url,
+        ) {
+            ctx.set_neo4j_bindings(Neo4jBindings {
+                bolt_url: bolt_url.to_string(),
+                http_url: http_url.to_string(),
+                host: host.to_string(),
+                port,
+                http_port,
+                username: username.to_string(),
+                password: password.to_string(),
+                database: database.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(any(feature = "redis", feature = "valkey"))]
 /// If any handle metadata carries Redis or Valkey engine fields, set [`Context::set_redis_bindings`].
 fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
@@ -1669,6 +1761,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "valkey",
         feature = "mongodb",
         feature = "nats",
+        feature = "neo4j",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -1698,6 +1791,7 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "valkey",
         feature = "mongodb",
         feature = "nats",
+        feature = "neo4j",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2017,6 +2111,7 @@ where
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -2035,6 +2130,7 @@ where
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2112,6 +2208,8 @@ where
                             feature = "redis",
                             feature = "valkey",
                             feature = "mongodb",
+                            feature = "nats",
+                            feature = "neo4j",
                             feature = "services",
                         ),
                         not(feature = "no-diagnostics"),
@@ -2142,6 +2240,8 @@ where
                 apply_resource_handles_to_mongo_bindings(ctx, &handles);
                 #[cfg(feature = "nats")]
                 apply_resource_handles_to_nats_bindings(ctx, &handles);
+                #[cfg(feature = "neo4j")]
+                apply_resource_handles_to_neo4j_bindings(ctx, &handles);
                 #[cfg(feature = "fault-injection")]
                 install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
@@ -2163,6 +2263,8 @@ where
                         feature = "redis",
                         feature = "valkey",
                         feature = "mongodb",
+                        feature = "nats",
+                        feature = "neo4j",
                         feature = "services",
                     ),
                     not(feature = "no-diagnostics"),
@@ -2200,6 +2302,8 @@ where
                 feature = "redis",
                 feature = "valkey",
                 feature = "mongodb",
+                feature = "nats",
+                feature = "neo4j",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2226,6 +2330,7 @@ where
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2250,6 +2355,8 @@ where
                     feature = "redis",
                     feature = "valkey",
                     feature = "mongodb",
+                    feature = "nats",
+                    feature = "neo4j",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2277,6 +2384,7 @@ where
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2297,6 +2405,8 @@ where
                     feature = "redis",
                     feature = "valkey",
                     feature = "mongodb",
+                    feature = "nats",
+                    feature = "neo4j",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2334,6 +2444,8 @@ where
                 feature = "redis",
                 feature = "valkey",
                 feature = "mongodb",
+                feature = "nats",
+                feature = "neo4j",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2370,6 +2482,8 @@ where
                 feature = "redis",
                 feature = "valkey",
                 feature = "mongodb",
+                feature = "nats",
+                feature = "neo4j",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2396,6 +2510,7 @@ where
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2447,6 +2562,7 @@ where
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2466,6 +2582,7 @@ where
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2498,6 +2615,7 @@ where
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2520,6 +2638,7 @@ where
             feature = "valkey",
             feature = "mongodb",
             feature = "nats",
+            feature = "neo4j",
             feature = "services",
         ),
         feature = "diagnostics",

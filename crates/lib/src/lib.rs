@@ -111,6 +111,7 @@ pub mod bridge;
     feature = "valkey",
     feature = "mongodb",
     feature = "nats",
+    feature = "neo4j",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -215,6 +216,7 @@ pub use crate::timeline::{
     feature = "valkey",
     feature = "mongodb",
     feature = "nats",
+    feature = "neo4j",
     feature = "services",
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
@@ -232,6 +234,7 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
         feature = "valkey",
         feature = "mongodb",
         feature = "nats",
+        feature = "neo4j",
         feature = "services",
     ),
 ))]
@@ -267,6 +270,8 @@ pub use crate::helpers::MongoHelpers;
 pub use crate::helpers::MysqlHelpers;
 #[cfg(feature = "nats")]
 pub use crate::helpers::NatsHelpers;
+#[cfg(feature = "neo4j")]
+pub use crate::helpers::Neo4jHelpers;
 #[cfg(feature = "postgres")]
 pub use crate::helpers::PostgresHelpers;
 #[cfg(any(feature = "redis", feature = "valkey"))]
@@ -301,6 +306,9 @@ pub use crate::resources::ValkeyResource;
 
 #[cfg(feature = "mongodb")]
 pub use crate::resources::{MongoBindings, MongoResource};
+
+#[cfg(feature = "neo4j")]
+pub use crate::resources::{Neo4jBindings, Neo4jResource};
 
 #[cfg(feature = "nats")]
 pub use crate::resources::{NatsBindings, NatsResource};

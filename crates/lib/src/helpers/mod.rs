@@ -20,6 +20,7 @@ pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
     feature = "valkey",
     feature = "mongodb",
     feature = "nats",
+    feature = "neo4j",
 ))]
 pub(crate) fn map_backend_error(
     error: impl std::error::Error + Send + Sync + 'static,
@@ -95,6 +96,9 @@ pub mod mongo;
 #[cfg(feature = "nats")]
 pub mod nats;
 
+#[cfg(feature = "neo4j")]
+pub mod neo4j;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
@@ -121,3 +125,6 @@ pub use mongo::MongoHelpers;
 
 #[cfg(feature = "nats")]
 pub use nats::NatsHelpers;
+
+#[cfg(feature = "neo4j")]
+pub use neo4j::Neo4jHelpers;
