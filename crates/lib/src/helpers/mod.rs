@@ -18,6 +18,7 @@ pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
     feature = "sqlite",
     feature = "redis",
     feature = "valkey",
+    feature = "mongodb",
 ))]
 pub(crate) fn map_backend_error(
     error: impl std::error::Error + Send + Sync + 'static,
@@ -86,6 +87,9 @@ pub mod sqlite;
 #[cfg(any(feature = "redis", feature = "valkey"))]
 pub mod redis;
 
+#[cfg(feature = "mongodb")]
+pub mod mongo;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
@@ -106,3 +110,6 @@ pub use sqlite::SqliteHelpers;
 
 #[cfg(any(feature = "redis", feature = "valkey"))]
 pub use redis::RedisHelpers;
+
+#[cfg(feature = "mongodb")]
+pub use mongo::MongoHelpers;

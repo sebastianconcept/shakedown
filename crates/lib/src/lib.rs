@@ -109,6 +109,7 @@ pub mod bridge;
     feature = "mysql",
     feature = "redis",
     feature = "valkey",
+    feature = "mongodb",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -211,6 +212,7 @@ pub use crate::timeline::{
     feature = "mysql",
     feature = "redis",
     feature = "valkey",
+    feature = "mongodb",
     feature = "services",
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
@@ -226,6 +228,7 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
         feature = "mysql",
         feature = "redis",
         feature = "valkey",
+        feature = "mongodb",
         feature = "services",
     ),
 ))]
@@ -255,6 +258,8 @@ pub use crate::helpers::ConsumedMessage;
 pub use crate::helpers::KafkaHelpers;
 #[cfg(feature = "mariadb")]
 pub use crate::helpers::MariaDbHelpers;
+#[cfg(feature = "mongodb")]
+pub use crate::helpers::MongoHelpers;
 #[cfg(feature = "mysql")]
 pub use crate::helpers::MysqlHelpers;
 #[cfg(feature = "postgres")]
@@ -288,6 +293,9 @@ pub use crate::resources::RedisResource;
 
 #[cfg(feature = "valkey")]
 pub use crate::resources::ValkeyResource;
+
+#[cfg(feature = "mongodb")]
+pub use crate::resources::{MongoBindings, MongoResource};
 
 #[cfg(all(
     feature = "outbox",

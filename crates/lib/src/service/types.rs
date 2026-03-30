@@ -63,6 +63,8 @@ pub enum EnvMapping {
     Rabbitmq(String),
     /// Redis or Valkey `redis://` URL (`redis` / `valkey` features) → custom env var name.
     Redis(String),
+    /// MongoDB connection URI (`mongodb` feature) → custom env var name.
+    Mongo(String),
     /// Named HTTP/gRPC bridge base URL → custom env var name.
     Bridge {
         bridge_name: String,
@@ -104,6 +106,11 @@ impl EnvMapping {
     /// Map Redis / Valkey bindings to `environment_variable_name`.
     pub fn redis(environment_variable_name: impl Into<String>) -> Self {
         Self::Redis(environment_variable_name.into())
+    }
+
+    /// Map MongoDB bindings to `environment_variable_name`.
+    pub fn mongo(environment_variable_name: impl Into<String>) -> Self {
+        Self::Mongo(environment_variable_name.into())
     }
 
     /// Map the bridge named `bridge_name` to `environment_variable_name`.
@@ -186,6 +193,12 @@ mod tests {
     fn env_mapping_redis() {
         let mapping = EnvMapping::redis("CACHE_URL");
         assert_eq!(mapping, EnvMapping::Redis("CACHE_URL".to_string()));
+    }
+
+    #[test]
+    fn env_mapping_mongo() {
+        let mapping = EnvMapping::mongo("MONGO_DSN");
+        assert_eq!(mapping, EnvMapping::Mongo("MONGO_DSN".to_string()));
     }
 
     #[test]

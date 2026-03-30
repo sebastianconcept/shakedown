@@ -42,6 +42,9 @@ rusqlite = { version = "0.32", optional = true, default-features = false, featur
 # Redis / Valkey async client (`redis` / `valkey` features; RESP)
 redis = { version = "1.1", optional = true, default-features = false, features = ["tokio-comp"] }
 
+# MongoDB official async driver (`mongodb` feature)
+mongodb = { version = "3.4", optional = true }
+
 # RabbitMQ client for readiness and publication verification (`rabbitmq` feature)
 lapin = { version = "4.3", optional = true }
 
@@ -175,6 +178,15 @@ valkey = [
     "dep:testcontainers",
     "dep:testcontainers-modules",
     "testcontainers-modules/valkey",
+    "diagnostics",
+]
+# MongoDB (`mongo` image via testcontainers-modules)
+mongodb = [
+    "dep:mongodb",
+    "dep:futures-util",
+    "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/mongo",
     "diagnostics",
 ]
 # MCP server support (post-MVP, optional)
@@ -332,3 +344,15 @@ required-features = ["redis"]
 name = "valkey_vertical"
 path = "tests/valkey_vertical.rs"
 required-features = ["valkey"]
+
+# MongoDB suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "mongo_vertical"
+path = "tests/mongo_vertical.rs"
+required-features = ["mongodb"]
+
+# MongoDB helpers round-trip (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_mongo"
+path = "tests/helpers_mongo.rs"
+required-features = ["mongodb"]

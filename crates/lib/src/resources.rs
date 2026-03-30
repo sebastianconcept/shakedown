@@ -20,7 +20,7 @@ use std::fmt;
 /// can use as a key prefix, database name, virtual host, index name — whatever your system
 /// uses for isolation. Every scenario gets its own namespace; teardown drops it.
 ///
-/// The built-in resources (Kafka, RabbitMQ, Postgres, MariaDB, MySQL, SQLite, Redis, Valkey) use specialised variants
+/// The built-in resources (Kafka, RabbitMQ, Postgres, MariaDB, MySQL, SQLite, Redis, Valkey, MongoDB) use specialised variants
 /// of this logic internally. This helper gives you the same safety guarantees without having
 /// to reimplement the sanitisation rules:
 ///
@@ -219,6 +219,10 @@ pub enum BuiltinResource {
     #[cfg(feature = "valkey")]
     /// Docker-backed Valkey (official image via testcontainers-modules; suite-shared container).
     Valkey(ValkeyResource),
+
+    #[cfg(feature = "mongodb")]
+    /// Docker-backed MongoDB (official image via testcontainers-modules; suite-shared `mongod`).
+    Mongo(MongoResource),
 }
 
 #[async_trait]
@@ -247,6 +251,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Redis(r) => r.provision(scenario_id).await,
             #[cfg(feature = "valkey")]
             BuiltinResource::Valkey(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "mongodb")]
+            BuiltinResource::Mongo(r) => r.provision(scenario_id).await,
         }
     }
 
@@ -271,6 +277,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Redis(r) => r.check_ready().await,
             #[cfg(feature = "valkey")]
             BuiltinResource::Valkey(r) => r.check_ready().await,
+            #[cfg(feature = "mongodb")]
+            BuiltinResource::Mongo(r) => r.check_ready().await,
         }
     }
 
@@ -295,6 +303,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Redis(r) => r.apply_default_seed().await,
             #[cfg(feature = "valkey")]
             BuiltinResource::Valkey(r) => r.apply_default_seed().await,
+            #[cfg(feature = "mongodb")]
+            BuiltinResource::Mongo(r) => r.apply_default_seed().await,
         }
     }
 
@@ -319,6 +329,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Redis(r) => r.teardown().await,
             #[cfg(feature = "valkey")]
             BuiltinResource::Valkey(r) => r.teardown().await,
+            #[cfg(feature = "mongodb")]
+            BuiltinResource::Mongo(r) => r.teardown().await,
         }
     }
 }
@@ -1457,6 +1469,313 @@ mod valkey_impl {
 
         async fn teardown(&mut self) -> Result<(), InfrastructureError> {
             self.0.teardown().await
+        }
+    }
+}
+
+#[cfg(feature = "mongodb")]
+mod mongo_impl {
+    use super::{sanitize_sql_database_name, Resource, ResourceHandle};
+    use crate::error::{InfrastructureError, ScenarioId};
+    use async_trait::async_trait;
+    use mongodb::bson::doc;
+    use mongodb::Client;
+    use std::sync::OnceLock;
+    use testcontainers::core::{Image, ImageExt};
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::mongo::Mongo;
+    use tokio::sync::Mutex;
+
+    const MONGO_PORT: u16 = 27017;
+    /// Default `mongo` image tag (official Docker Hub; extra-infra SPECS).
+    pub const DEFAULT_MONGO_IMAGE_TAG: &str = "7";
+    const SUITE_USER: &str = "root";
+    const SUITE_PASSWORD: &str = "root";
+
+    #[allow(clippy::large_enum_variant)]
+    enum SuiteMongoState {
+        Idle,
+        Running {
+            host: String,
+            port: u16,
+            container: testcontainers::ContainerAsync<Mongo>,
+            refs: usize,
+            image_key: String,
+        },
+    }
+
+    static SUITE_MONGO: OnceLock<Mutex<SuiteMongoState>> = OnceLock::new();
+
+    fn suite_mongo_mutex() -> &'static Mutex<SuiteMongoState> {
+        SUITE_MONGO.get_or_init(|| Mutex::new(SuiteMongoState::Idle))
+    }
+
+    fn image_fingerprint(image: &Mongo, tag_override: &Option<String>) -> String {
+        let tag = tag_override.as_deref().unwrap_or(DEFAULT_MONGO_IMAGE_TAG);
+        format!("{}:{}", image.name(), tag)
+    }
+
+    fn admin_connection_uri(host: &str, port: u16) -> String {
+        format!("mongodb://{SUITE_USER}:{SUITE_PASSWORD}@{host}:{port}/admin?authSource=admin")
+    }
+
+    fn scenario_connection_uri(host: &str, port: u16, database: &str) -> String {
+        format!("mongodb://{SUITE_USER}:{SUITE_PASSWORD}@{host}:{port}/{database}?authSource=admin")
+    }
+
+    async fn mongo_client(uri: &str) -> Result<Client, mongodb::error::Error> {
+        Client::with_uri_str(uri).await
+    }
+
+    /// Docker-backed MongoDB using testcontainers-modules (`mongo` image).
+    ///
+    /// **Suite lifecycle:** one `mongod` per process; refcounted teardown drops the scenario database
+    /// and removes the container when the last reference completes teardown.
+    ///
+    /// Default image tag is **`7`** (`mongo:7`). Override with [`Self::with_image_tag`] or
+    /// `SHAKEDOWN_MONGO_IMAGE_TAG`. Root credentials are fixed (`root` / `root`) for the suite container.
+    #[derive(Debug)]
+    pub struct MongoResource {
+        image: Mongo,
+        image_tag: Option<String>,
+        holds_suite_ref: bool,
+        host: Option<String>,
+        port: Option<u16>,
+        username: String,
+        password: String,
+        database_name: String,
+    }
+
+    impl Default for MongoResource {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl MongoResource {
+        /// Create default Docker-backed MongoDB settings (suite server started on first provision).
+        pub fn new() -> Self {
+            Self {
+                image: Mongo::default(),
+                image_tag: Some(DEFAULT_MONGO_IMAGE_TAG.to_string()),
+                holds_suite_ref: false,
+                host: None,
+                port: None,
+                username: SUITE_USER.to_string(),
+                password: SUITE_PASSWORD.to_string(),
+                database_name: String::new(),
+            }
+        }
+
+        /// Override the image tag (pin `7.0` or another tag for production parity). Image name stays `mongo`.
+        pub fn with_image_tag(mut self, tag: impl Into<String>) -> Self {
+            self.image_tag = Some(tag.into());
+            self
+        }
+
+        /// Apply tag override from `SHAKEDOWN_MONGO_IMAGE_TAG` when set.
+        pub fn with_image_tag_from_env(mut self) -> Self {
+            if let Ok(tag) = std::env::var("SHAKEDOWN_MONGO_IMAGE_TAG") {
+                let tag = tag.trim();
+                if !tag.is_empty() {
+                    self.image_tag = Some(tag.to_string());
+                }
+            }
+            self
+        }
+
+        fn map_tc_err(
+            error: impl std::fmt::Display + Send + Sync + 'static,
+        ) -> InfrastructureError {
+            InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
+        }
+    }
+
+    #[async_trait]
+    impl Resource for MongoResource {
+        async fn provision(
+            &mut self,
+            scenario_id: &ScenarioId,
+        ) -> Result<Vec<ResourceHandle>, InfrastructureError> {
+            if self.holds_suite_ref {
+                return Err(InfrastructureError::AlreadyProvisioned("mongodb".into()));
+            }
+
+            let database_name = sanitize_sql_database_name(scenario_id.as_str());
+            let want_key = image_fingerprint(&self.image, &self.image_tag);
+
+            let mut guard = suite_mongo_mutex().lock().await;
+            let (host, port) = match &mut *guard {
+                SuiteMongoState::Idle => {
+                    let tag = self.image_tag.as_deref().unwrap_or(DEFAULT_MONGO_IMAGE_TAG);
+                    let node = self
+                        .image
+                        .clone()
+                        .with_tag(tag.to_string())
+                        .with_env_var("MONGO_INITDB_ROOT_USERNAME", SUITE_USER)
+                        .with_env_var("MONGO_INITDB_ROOT_PASSWORD", SUITE_PASSWORD)
+                        .with_label(
+                            crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                            crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                        )
+                        .start()
+                        .await
+                        .map_err(Self::map_tc_err)?;
+
+                    let mapped_port = node
+                        .get_host_port_ipv4(MONGO_PORT)
+                        .await
+                        .map_err(Self::map_tc_err)?;
+                    let host = "127.0.0.1".to_string();
+
+                    *guard = SuiteMongoState::Running {
+                        host: host.clone(),
+                        port: mapped_port,
+                        container: node,
+                        refs: 1,
+                        image_key: want_key.clone(),
+                    };
+                    (host, mapped_port)
+                }
+                SuiteMongoState::Running {
+                    host,
+                    port,
+                    refs,
+                    image_key,
+                    ..
+                } => {
+                    if *image_key != want_key {
+                        return Err(InfrastructureError::Backend(Box::new(
+                            std::io::Error::other(format!(
+                                "MongoDB suite server already running as {image_key}; \
+                                 cannot start or join as {want_key}. Use one image:tag per process."
+                            )),
+                        )));
+                    }
+                    *refs += 1;
+                    (host.clone(), *port)
+                }
+            };
+            drop(guard);
+
+            let admin_uri = admin_connection_uri(host.as_str(), port);
+            let client = mongo_client(admin_uri.as_str()).await.map_err(|error| {
+                InfrastructureError::Provision {
+                    resource: "mongodb".into(),
+                    source: Box::new(std::io::Error::other(error.to_string())),
+                }
+            })?;
+            let scenario_db = client.database(database_name.as_str());
+            let init_coll = scenario_db.collection::<mongodb::bson::Document>("_shakedown_init");
+            init_coll
+                .insert_one(doc! { "ok": true })
+                .await
+                .map_err(|error| InfrastructureError::Provision {
+                    resource: "mongodb".into(),
+                    source: Box::new(std::io::Error::other(error.to_string())),
+                })?;
+
+            self.holds_suite_ref = true;
+            self.host = Some(host.clone());
+            self.port = Some(port);
+            self.database_name = database_name.clone();
+
+            let connection_url =
+                scenario_connection_uri(host.as_str(), port, database_name.as_str());
+            let username = self.username.clone();
+            let password = self.password.clone();
+
+            Ok(vec![ResourceHandle {
+                id: format!("mongo_{scenario_id}"),
+                connection_string: connection_url.clone(),
+                metadata: Some(serde_json::json!({
+                    "host": host,
+                    "port": port,
+                    "database": database_name,
+                    "username": username,
+                    "password": password,
+                    "connection_url": connection_url,
+                    "engine": "mongodb",
+                })),
+            }])
+        }
+
+        async fn check_ready(&self) -> Result<(), InfrastructureError> {
+            let host = self
+                .host
+                .as_deref()
+                .ok_or_else(|| InfrastructureError::NotProvisioned("mongodb".into()))?;
+            let port = self
+                .port
+                .ok_or_else(|| InfrastructureError::NotProvisioned("mongodb".into()))?;
+
+            let admin_uri = admin_connection_uri(host, port);
+            let client = mongo_client(admin_uri.as_str()).await.map_err(|error| {
+                InfrastructureError::Readiness {
+                    resource: "mongodb".into(),
+                    source: Box::new(std::io::Error::other(error.to_string())),
+                }
+            })?;
+            let admin = client.database("admin");
+            admin
+                .run_command(doc! { "ping": 1 })
+                .await
+                .map_err(|error| InfrastructureError::Readiness {
+                    resource: "mongodb".into(),
+                    source: Box::new(std::io::Error::other(error.to_string())),
+                })?;
+            Ok(())
+        }
+
+        async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+            Ok(())
+        }
+
+        async fn teardown(&mut self) -> Result<(), InfrastructureError> {
+            if !self.holds_suite_ref {
+                self.host = None;
+                self.port = None;
+                self.database_name.clear();
+                return Ok(());
+            }
+
+            let database_name = self.database_name.clone();
+            let host = self.host.clone().unwrap_or_default();
+            let port = self.port.unwrap_or(MONGO_PORT);
+
+            if !database_name.is_empty() {
+                let admin_uri = admin_connection_uri(host.as_str(), port);
+                if let Ok(client) = mongo_client(admin_uri.as_str()).await {
+                    let db = client.database(database_name.as_str());
+                    let _ = db.drop().await;
+                }
+            }
+
+            let mut guard = suite_mongo_mutex().lock().await;
+            let mut container_to_rm: Option<testcontainers::ContainerAsync<Mongo>> = None;
+            match &mut *guard {
+                SuiteMongoState::Idle => {}
+                SuiteMongoState::Running { refs, .. } => {
+                    *refs = refs.saturating_sub(1);
+                    if *refs == 0 {
+                        let taken = std::mem::replace(&mut *guard, SuiteMongoState::Idle);
+                        if let SuiteMongoState::Running { container, .. } = taken {
+                            container_to_rm = Some(container);
+                        }
+                    }
+                }
+            }
+            drop(guard);
+
+            if let Some(container) = container_to_rm {
+                container.rm().await.map_err(Self::map_tc_err)?;
+            }
+
+            self.holds_suite_ref = false;
+            self.host = None;
+            self.port = None;
+            self.database_name.clear();
+            Ok(())
         }
     }
 }
@@ -2930,6 +3249,9 @@ pub use redis_impl::RedisResource;
 #[cfg(feature = "valkey")]
 pub use valkey_impl::ValkeyResource;
 
+#[cfg(feature = "mongodb")]
+pub use mongo_impl::MongoResource;
+
 /// Connection and naming details extracted after Kafka provision for a scenario.
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from [`crate::lifecycle::Context::kafka_bindings`]
@@ -3118,6 +3440,27 @@ pub struct RedisBindings {
     pub port: u16,
     /// Prefix prepended to logical keys for isolation (`shakedown:<scenario>:`).
     pub key_prefix: String,
+}
+
+/// Connection details for a provisioned MongoDB scenario database (`mongodb` feature).
+///
+/// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
+/// [`crate::lifecycle::Context::mongo_bindings`] after provision.
+#[cfg(feature = "mongodb")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MongoBindings {
+    /// Hostname or IP (typically `127.0.0.1` for the suite container).
+    pub host: String,
+    /// Mapped host port for `mongod` (`27017` in the default image).
+    pub port: u16,
+    /// Scenario-isolated database name.
+    pub database: String,
+    /// Root user for the suite container (default `root`).
+    pub username: String,
+    /// Password for `username` (default `root` in the suite image).
+    pub password: String,
+    /// Full MongoDB connection URI for this scenario database (`authSource=admin`).
+    pub connection_url: String,
 }
 
 /// A marker trait for resources that can be cloned.
