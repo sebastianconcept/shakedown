@@ -95,6 +95,8 @@
 //! }
 //! ```
 
+mod docker_labels;
+
 /// Service bridge types and traits (`bridges` feature, default).
 #[cfg(feature = "bridges")]
 pub mod bridge;

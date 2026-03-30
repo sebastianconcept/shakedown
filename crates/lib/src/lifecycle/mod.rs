@@ -272,7 +272,7 @@ pub struct Context {
     bridge_servers_phase_complete: bool,
     /// Staged [`crate::service::ServiceSpec`] entries; [`ServiceHandle`] filled when containers are healthy (US-009).
     #[cfg(feature = "services")]
-    services: HashMap<String, crate::service::ServiceState>,
+    pub(crate) services: HashMap<String, crate::service::ServiceState>,
 }
 
 impl Context {
@@ -896,7 +896,6 @@ impl Context {
 
     /// Used by lifecycle when a service container passes readiness (US-009).
     #[cfg(feature = "services")]
-    #[allow(dead_code)] // Wired from `run_scenario` in US-009; `cfg(test)` call sites are not visible to `cargo clippy`.
     pub(crate) fn set_service_handle(
         &mut self,
         name: &str,
@@ -2053,6 +2052,35 @@ where
         return Err(error);
     }
 
+    #[cfg(feature = "services")]
+    if let Err(error) =
+        crate::service::lifecycle::start_and_readiness_services(ctx, event_log).await
+    {
+        event_log.append_raw(
+            EventLevel::Error,
+            "lifecycle",
+            format!("Service container phase failed: {error}"),
+        );
+        teardown_all_resources(ctx).await;
+        #[cfg(all(
+            any(
+                feature = "kafka",
+                feature = "postgres",
+                feature = "mariadb",
+                feature = "mysql",
+            ),
+            not(feature = "no-diagnostics"),
+        ))]
+        shakedown_merge_diagnostics!(
+            docker_events_monitor,
+            resource_stats_monitor,
+            container_logs_monitor,
+            event_log
+        );
+        emit_failure_timeline_on_infra_err(event_log, &scenario_id, &error);
+        return Err(error.into());
+    }
+
     // Run phase
     #[cfg(all(
         any(
@@ -2126,6 +2154,15 @@ where
     ))]
     shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Teardown);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting teardown phase");
+    #[cfg(feature = "services")]
+    if let Err(error) = crate::service::lifecycle::teardown_service_containers(ctx, event_log).await
+    {
+        event_log.append_raw(
+            EventLevel::Error,
+            "lifecycle",
+            format!("Service container teardown failed: {error}"),
+        );
+    }
     #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
     shutdown_grpc_bridge_runtimes_with_log(ctx, event_log).await;
     #[cfg(feature = "bridges")]

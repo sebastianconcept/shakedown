@@ -4,9 +4,7 @@
 //! All values are rewritten for service containers via
 //! [`crate::service::address::rewrite_injected_addresses_for_service_container`].
 //!
-//! `inject_service_env` is consumed by service container lifecycle (`run_scenario`, US-009). The
-//! library build does not reference it until that wiring lands; keep `dead_code` allowed here.
-#![allow(dead_code)]
+//! `inject_service_env` is consumed by service container lifecycle (`run_scenario`, US-009).
 
 use std::collections::HashMap;
 
@@ -285,6 +283,7 @@ fn kafka_bootstrap_value(bindings: &KafkaBindings) -> String {
 
 /// Same database **name** env var (`DATABASE_URL`) for every service; distinct URLs when multiple
 /// services share one engine (partition by logical service name in the path).
+#[allow(dead_code)] // Call sites are `#[cfg(feature = "postgres"|…)]`; unused in `services`-only builds.
 fn relational_url_for_service(
     connection_url: &str,
     base_database: &str,
@@ -302,6 +301,7 @@ fn relational_url_for_service(
     replace_database_path(connection_url, base_database, new_database.as_str())
 }
 
+#[allow(dead_code)]
 fn sanitize_service_suffix(service_name: &str) -> String {
     let trimmed: String = service_name
         .chars()
@@ -310,6 +310,7 @@ fn sanitize_service_suffix(service_name: &str) -> String {
     trimmed.trim_matches('_').to_string()
 }
 
+#[allow(dead_code)]
 fn replace_database_path(connection_url: &str, old_database: &str, new_database: &str) -> String {
     let path_end = connection_url
         .find('?')

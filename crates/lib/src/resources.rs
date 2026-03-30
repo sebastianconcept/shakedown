@@ -451,8 +451,8 @@ mod kafka_impl {
                         image
                             .with_tag(tag.clone())
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -460,8 +460,8 @@ mod kafka_impl {
                     } else {
                         image
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -753,8 +753,8 @@ mod rabbit_impl {
                         image
                             .with_tag(tag.clone())
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -762,8 +762,8 @@ mod rabbit_impl {
                     } else {
                         image
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -1060,8 +1060,8 @@ mod postgres_impl {
                         image
                             .with_tag(tag.clone())
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -1069,8 +1069,8 @@ mod postgres_impl {
                     } else {
                         image
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -1402,8 +1402,8 @@ mod mariadb_impl {
                         image
                             .with_tag(tag.clone())
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -1411,8 +1411,8 @@ mod mariadb_impl {
                     } else {
                         image
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -1749,8 +1749,8 @@ mod mysql_impl {
                         image
                             .with_tag(tag.clone())
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -1758,8 +1758,8 @@ mod mysql_impl {
                     } else {
                         image
                             .with_label(
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY,
-                                crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
+                                crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                             )
                             .start()
                             .await
@@ -2062,8 +2062,7 @@ mod sqlite_impl {
 mod toxiproxy_impl {
     //! Suite-shared Toxiproxy (`ghcr.io/shopify/toxiproxy`) for fault injection (SPECS §2).
     //!
-    //! Labels match [`crate::diagnostics::labels`] when the `diagnostics` feature is enabled; we
-    //! duplicate the key/value here so `fault-injection` does not depend on that module.
+    //! Container labels use [`crate::docker_labels`] (same strings as `diagnostics::labels`).
 
     use super::{Resource, ResourceHandle};
     use crate::error::{InfrastructureError, ScenarioId};
@@ -2078,10 +2077,7 @@ mod toxiproxy_impl {
     use testcontainers::ImageExt;
     use tokio::sync::Mutex;
 
-    /// Keep in sync with `crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_KEY`.
-    const SHAKEDOWN_DOCKER_LABEL_KEY: &str = "io.shakedown.framework";
-    /// Keep in sync with `crate::diagnostics::labels::SHAKEDOWN_DOCKER_LABEL_VALUE`.
-    const SHAKEDOWN_DOCKER_LABEL_VALUE: &str = "true";
+    use crate::docker_labels::{SHAKEDOWN_DOCKER_LABEL_KEY, SHAKEDOWN_DOCKER_LABEL_VALUE};
 
     const RESOURCE_NAME: &str = "toxiproxy";
     const API_PORT: u16 = 8474;

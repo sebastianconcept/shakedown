@@ -34,7 +34,6 @@ impl fmt::Debug for ServiceHandle {
 
 impl ServiceHandle {
     /// Constructed by the harness when a service container is running (US-009).
-    #[allow(dead_code)] // Called from `lifecycle` (US-009); not yet wired from `run_scenario`.
     pub(crate) fn new(
         name: String,
         base_url: String,
@@ -71,8 +70,8 @@ impl ServiceHandle {
         self.healthy.load(Ordering::Relaxed)
     }
 
-    /// Used by lifecycle when readiness is determined (US-009).
-    #[allow(dead_code)] // Called from `lifecycle` (US-009); not yet wired from `run_scenario`.
+    /// Used by lifecycle when readiness is determined (US-009); also exercised from unit tests.
+    #[allow(dead_code)] // Not called from production lifecycle yet (health is set at construction).
     pub(crate) fn set_healthy(&self, healthy: bool) {
         self.healthy.store(healthy, Ordering::Relaxed);
     }
