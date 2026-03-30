@@ -284,6 +284,12 @@ name = "services_us012_kafka_bridge_whoami"
 path = "tests/services_us012_kafka_bridge_whoami.rs"
 required-features = ["kafka", "services"]
 
+# US-013: Postgres partitioned DATABASE_URL + two whoami + depends_on (Docker); ignored unless --ignored
+[[test]]
+name = "services_us013_multi_postgres_whoami"
+path = "tests/services_us013_multi_postgres_whoami.rs"
+required-features = ["postgres", "services"]
+
 # Postgres + RabbitMQ outbox + AMQP publication proof (Docker); no `kafka` feature
 [[test]]
 name = "outbox_rabbit"

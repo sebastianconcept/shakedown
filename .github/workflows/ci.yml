@@ -34,3 +34,8 @@ jobs:
         run: >-
           cargo test -p shakedown --features kafka,services
           --test services_us012_kafka_bridge_whoami -- --ignored --test-threads=1
+
+      - name: US-013 integration (Docker)
+        run: >-
+          cargo test -p shakedown --features postgres,services
+          --test services_us013_multi_postgres_whoami -- --ignored --test-threads=1
