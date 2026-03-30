@@ -177,6 +177,11 @@ pub use crate::publication::{
     DEFAULT_PUBLICATION_OBSERVE_TIMEOUT,
 };
 
+#[cfg(feature = "services")]
+pub use crate::service::{
+    HealthCheck, DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_TIMEOUT,
+};
+
 #[cfg(all(feature = "outbox", feature = "kafka"))]
 pub use crate::publication::KafkaPublicationVerifier;
 
