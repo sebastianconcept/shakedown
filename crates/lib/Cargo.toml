@@ -161,7 +161,7 @@ fault-injection = [
 # MCP server support (post-MVP, optional)
 mcp = []
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
-services = ["dep:testcontainers"]
+services = ["dep:testcontainers", "dep:reqwest"]
 
 # Optional macro + Kafka runtime test (Docker); avoids compiling `resources = [Kafka]` without rdkafka
 [[test]]
@@ -257,6 +257,12 @@ required-features = ["grpc-bridges"]
 [[test]]
 name = "service_host_resolution"
 path = "tests/service_host_resolution.rs"
+required-features = ["services"]
+
+# Service-under-test GenericImage lifecycle (Docker); ignored unless --ignored
+[[test]]
+name = "services_lifecycle"
+path = "tests/services_lifecycle.rs"
 required-features = ["services"]
 
 # Postgres + RabbitMQ outbox + AMQP publication proof (Docker); no `kafka` feature

@@ -5,9 +5,11 @@
 
 pub mod address;
 mod builder;
+mod dependency;
 mod handle;
 mod health;
 pub(crate) mod injection;
+pub(crate) mod lifecycle;
 mod state;
 mod types;
 
