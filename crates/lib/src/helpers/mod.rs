@@ -51,8 +51,14 @@ pub mod kafka;
 #[cfg(feature = "rabbitmq")]
 pub mod rabbit;
 
+#[cfg(feature = "postgres")]
+pub mod postgres;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
 #[cfg(feature = "rabbitmq")]
 pub use rabbit::{ExchangeKind, RabbitHelpers};
+
+#[cfg(feature = "postgres")]
+pub use postgres::PostgresHelpers;

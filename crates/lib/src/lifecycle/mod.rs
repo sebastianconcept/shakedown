@@ -60,6 +60,8 @@ use crate::event::Event;
 use crate::event::{EventLevel, EventLog};
 #[cfg(feature = "kafka")]
 use crate::helpers::KafkaHelpers;
+#[cfg(feature = "postgres")]
+use crate::helpers::PostgresHelpers;
 #[cfg(feature = "rabbitmq")]
 use crate::helpers::RabbitHelpers;
 #[cfg(all(
@@ -656,6 +658,12 @@ impl Context {
     #[cfg(feature = "rabbitmq")]
     pub fn rabbit(&self) -> RabbitHelpers<'_> {
         RabbitHelpers::new(self)
+    }
+
+    /// PostgreSQL execute/query helpers (`postgres` feature).
+    #[cfg(feature = "postgres")]
+    pub fn postgres(&self) -> PostgresHelpers<'_> {
+        PostgresHelpers::new(self)
     }
 
     /// Check if the context has any registered resources.
