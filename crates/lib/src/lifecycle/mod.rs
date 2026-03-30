@@ -910,6 +910,35 @@ impl Context {
         state.handle = Some(handle);
         Ok(())
     }
+
+    /// Number of registered [`crate::service::ServiceSpec`] entries (used by env injection for partitioning).
+    #[cfg(feature = "services")]
+    #[allow(dead_code)] // US-007 `inject_service_env`; US-009 lifecycle
+    pub(crate) fn registered_service_count(&self) -> usize {
+        self.services.len()
+    }
+
+    /// Registered service names for injection, excluding `exclude` (typically the current service).
+    #[cfg(feature = "services")]
+    #[allow(dead_code)] // US-007 `inject_service_env`; US-009 lifecycle
+    pub(crate) fn registered_service_names_except<'a>(
+        &'a self,
+        exclude: &'a str,
+    ) -> impl Iterator<Item = &'a str> + 'a {
+        self.services
+            .keys()
+            .filter(move |name| name.as_str() != exclude)
+            .map(|name| name.as_str())
+    }
+
+    /// Invoke `visit` for each running HTTP/gRPC bridge base URL (service container env injection).
+    #[cfg(all(feature = "bridges", feature = "services"))]
+    #[allow(dead_code)] // US-007 `inject_service_env`; US-009 lifecycle
+    pub(crate) fn for_each_bridge_url(&self, mut visit: impl FnMut(&str, &str)) {
+        for (name, handle) in &self.bridge_handles {
+            visit(name.as_str(), handle.client_url.as_str());
+        }
+    }
 }
 
 impl Default for Context {

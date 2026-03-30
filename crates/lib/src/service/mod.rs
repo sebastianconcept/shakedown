@@ -6,6 +6,7 @@
 mod builder;
 mod handle;
 mod health;
+pub(crate) mod injection;
 mod state;
 mod types;
 
