@@ -173,6 +173,12 @@ name = "helpers_kafka"
 path = "tests/helpers_kafka.rs"
 required-features = ["kafka"]
 
+# RabbitMQ typed helpers publish/consume integration (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_rabbit"
+path = "tests/helpers_rabbit.rs"
+required-features = ["rabbitmq"]
+
 # Postgres suite + bindings (Docker); ignored unless --ignored
 [[test]]
 name = "postgres_vertical"
