@@ -9,8 +9,23 @@ use crate::error::ShakedownError;
 /// Same 20s default as publication observation (`outbox` feature) and outbox Kafka/Rabbit verifiers.
 pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// A message consumed by a helper's [`crate::helpers::kafka::KafkaHelpers::consume_until`] (and
-/// symmetric RabbitMQ helpers): key/payload bytes plus the fully qualified topic or queue name.
+#[cfg(any(
+    feature = "kafka",
+    feature = "rabbitmq",
+    feature = "postgres",
+    feature = "mariadb",
+    feature = "mysql",
+    feature = "sqlite",
+))]
+pub(crate) fn map_backend_error(
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> ShakedownError {
+    ShakedownError::Infrastructure(crate::error::InfrastructureError::Backend(Box::new(error)))
+}
+
+/// A message consumed by [`crate::helpers::kafka::KafkaHelpers::consume_until`] or
+/// [`crate::helpers::rabbit::RabbitHelpers::consume_until`]: key/payload bytes plus the fully
+/// qualified Kafka topic or AMQP queue name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsumedMessage {
     pub key: Option<Vec<u8>>,

@@ -4,12 +4,9 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, NoTls, Row};
 
 use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
+use crate::helpers::map_backend_error;
 use crate::lifecycle::Context;
 use crate::resources::PostgresBindings;
-
-fn map_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> ShakedownError {
-    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
-}
 
 async fn connect_client(postgres_bindings: &PostgresBindings) -> Result<Client, ShakedownError> {
     let (client, connection) =

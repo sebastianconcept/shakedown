@@ -191,6 +191,10 @@ pub enum ShakedownError {
     ///
     /// Cause: bytes from the outbox row could not be parsed as the expected type (schema drift or corruption).
     PayloadDeserialisation(String),
+    /// JSON payload serialisation failed: {0}
+    ///
+    /// Cause: `serde_json::to_vec` failed when building a message body (e.g. typed helper `produce_json` / `publish_json`).
+    PayloadSerialisation(String),
     /// Outbox payload assertion failed for aggregate_id='{aggregate_id}', event_type='{event_type}'
     ///
     /// Cause: the payload was deserialised but the scenario’s predicate rejected it.
@@ -236,6 +240,7 @@ impl Error for ShakedownError {
             ShakedownError::OutboxPublicationNotFound { .. } => None,
             ShakedownError::OutboxPublicationTimeout { .. } => None,
             ShakedownError::PayloadDeserialisation(_) => None,
+            ShakedownError::PayloadSerialisation(_) => None,
             ShakedownError::PayloadAssertionFailed { .. } => None,
             ShakedownError::ResourceAssertionFailed { .. } => None,
             ShakedownError::HelperTimeout { .. } => None,

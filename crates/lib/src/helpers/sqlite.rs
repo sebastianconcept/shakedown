@@ -7,12 +7,9 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, OpenFlags, Params};
 
 use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
+use crate::helpers::map_backend_error;
 use crate::lifecycle::Context;
 use crate::resources::SqliteBindings;
-
-fn map_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> ShakedownError {
-    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
-}
 
 fn open_connection(database_url: &str) -> Result<Connection, rusqlite::Error> {
     Connection::open_with_flags(
@@ -148,7 +145,7 @@ impl<'ctx> SqliteHelpers<'ctx> {
                 .map_err(map_backend_error)?;
             let mut rows = statement.query(params).map_err(map_backend_error)?;
             let first = match rows.next().map_err(map_backend_error)? {
-                Some(row) => row_to_values(&row).map_err(map_backend_error)?,
+                Some(row) => row_to_values(row).map_err(map_backend_error)?,
                 None => {
                     return Err(ShakedownError::Scenario(ScenarioError::Assertion(
                         AssertionError::Unspecified {
@@ -188,7 +185,7 @@ impl<'ctx> SqliteHelpers<'ctx> {
             let mut rows = statement.query(params).map_err(map_backend_error)?;
             let mut out = Vec::new();
             while let Some(row) = rows.next().map_err(map_backend_error)? {
-                out.push(row_to_values(&row).map_err(map_backend_error)?);
+                out.push(row_to_values(row).map_err(map_backend_error)?);
             }
             Ok(out)
         })
