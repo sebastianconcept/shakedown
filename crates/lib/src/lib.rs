@@ -228,6 +228,7 @@ pub use crate::resources::{MysqlBindings, MysqlResource};
 #[cfg(feature = "sqlite")]
 pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResource};
 
+pub use crate::helpers::ConsumedMessage;
 #[cfg(feature = "kafka")]
 pub use crate::helpers::KafkaHelpers;
 #[cfg(feature = "kafka")]
