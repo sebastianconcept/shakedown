@@ -70,6 +70,7 @@ tokio-stream = { version = "0.1", optional = true, default-features = false }
 tower = { version = "0.5", optional = true, default-features = false, features = ["util"] }
 
 [dev-dependencies]
+serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"
 bollard = { version = "0.20", default-features = false, features = ["ssl"] }
 lapin = { version = "4.3" }
@@ -164,6 +165,12 @@ mcp = []
 [[test]]
 name = "macro_kafka"
 path = "tests/macro_kafka.rs"
+required-features = ["kafka"]
+
+# Kafka typed helpers produce/consume integration (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_kafka"
+path = "tests/helpers_kafka.rs"
 required-features = ["kafka"]
 
 # Postgres suite + bindings (Docker); ignored unless --ignored
