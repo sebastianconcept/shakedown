@@ -4,5 +4,7 @@
 //! lifecycle wiring land in follow-up user stories; this module is the compile-time seam.
 
 mod health;
+mod types;
 
 pub use health::{HealthCheck, DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_TIMEOUT};
+pub use types::{EnvMapping, PullPolicy};
