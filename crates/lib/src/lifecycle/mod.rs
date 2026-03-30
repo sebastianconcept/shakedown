@@ -60,6 +60,10 @@ use crate::event::Event;
 use crate::event::{EventLevel, EventLog};
 #[cfg(feature = "kafka")]
 use crate::helpers::KafkaHelpers;
+#[cfg(feature = "mariadb")]
+use crate::helpers::MariaDbHelpers;
+#[cfg(feature = "mysql")]
+use crate::helpers::MysqlHelpers;
 #[cfg(feature = "postgres")]
 use crate::helpers::PostgresHelpers;
 #[cfg(feature = "rabbitmq")]
@@ -664,6 +668,18 @@ impl Context {
     #[cfg(feature = "postgres")]
     pub fn postgres(&self) -> PostgresHelpers<'_> {
         PostgresHelpers::new(self)
+    }
+
+    /// MariaDB execute/query helpers (`mariadb` feature).
+    #[cfg(feature = "mariadb")]
+    pub fn mariadb(&self) -> MariaDbHelpers<'_> {
+        MariaDbHelpers::new(self)
+    }
+
+    /// Oracle MySQL execute/query helpers (`mysql` feature).
+    #[cfg(feature = "mysql")]
+    pub fn mysql(&self) -> MysqlHelpers<'_> {
+        MysqlHelpers::new(self)
     }
 
     /// Check if the context has any registered resources.
