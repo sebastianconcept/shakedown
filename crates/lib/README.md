@@ -288,6 +288,121 @@ If the Docker socket is missing or unusable, [`try_connect`](src/diagnostics/con
 - [`tests/diagnostics_graceful.rs`](tests/diagnostics_graceful.rs) — `FakeResource` only, invalid `DOCKER_HOST` pointing at a non-existent Unix socket; asserts the scenario succeeds and no infrastructure rows are recorded (no Docker daemon required).
 - [`tests/diagnostics_integration.rs`](tests/diagnostics_integration.rs) — log streaming, Docker `stop` events, and stats rings against a labeled Alpine container; Docker-backed cases use `just test-diagnostics-integration-ignored` or the matching `cargo` line in [Running tests](#running-tests).
 
+## Typed helpers
+
+The harness always exposes **structured bindings** on [`Context`] after provisioning (for example [`KafkaBindings`](src/resources.rs), [`RabbitBindings`](src/resources.rs), [`PostgresBindings`](src/resources.rs)). On top of that, Shakedown offers **optional typed helpers** — thin facades that apply scenario isolation (topic prefixes, namespaced AMQP names, scoped database URLs) so common steps stay short.
+
+There are **three patterns**; pick based on what you are proving:
+
+### Pattern 1: bindings only (bring your own client)
+
+**When to use this:** You need **full control** — a different driver stack, TLS/SASL, connection pooling, consumer groups, advanced Kafka APIs, or custom SQL session settings. Read `ctx.kafka_bindings()`, `ctx.rabbit_bindings()`, `ctx.postgres_bindings()`, etc., and construct your own clients from those values. Nothing in the helpers replaces that path.
+
+### Pattern 2: typed helpers (produce / consume / assert)
+
+**When to use this:** You want the **happy path** for scenario steps: produce or consume messages with isolation baked in, or run SQL assertions against the scenario-scoped database without hand-rolling connection URLs. Helpers use the **same effective bindings** as raw accessors (including Toxiproxy-rewritten Kafka bootstrap when fault injection is active — see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
+
+Entry points: `ctx.kafka()` ([`KafkaHelpers`](src/helpers/kafka.rs)), `ctx.rabbit()` ([`RabbitHelpers`](src/helpers/rabbit.rs)), `ctx.postgres()` ([`PostgresHelpers`](src/helpers/postgres.rs)), `ctx.mariadb()` / `ctx.mysql()` / `ctx.sqlite()` ([`MariaDbHelpers`](src/helpers/mariadb.rs), [`MysqlHelpers`](src/helpers/mysql.rs), [`SqliteHelpers`](src/helpers/sqlite.rs)).
+
+### Pattern 3: outbox rows + publication verifiers
+
+**When to use this:** You are testing the **transactional outbox** flow — rows in `outbox_event` **and** proof that a message appeared on Kafka or RabbitMQ. [`Outbox`](src/outbox.rs) plus [`PublicationVerifier`](src/publication/verifier.rs) (`assert_kafka_published`, `assert_rabbit_published`) is the contract for that. Helpers **do not** duplicate verifier semantics; use them for direct bus/DB steps, and verifiers when you need publication proof tied to outbox semantics.
+
+### Feature flags (helpers)
+
+Helpers are gated behind the **same** resource features as the underlying providers — no separate `helpers` feature.
+
+| Surface | Cargo feature | Module / types |
+|---------|----------------|------------------|
+| `ctx.kafka()` → [`KafkaHelpers`](src/helpers/kafka.rs) | `kafka` | `rdkafka` |
+| `ctx.rabbit()` → [`RabbitHelpers`](src/helpers/rabbit.rs), [`ExchangeKind`](src/helpers/rabbit.rs) | `rabbitmq` | `lapin` |
+| `ctx.postgres()` → [`PostgresHelpers`](src/helpers/postgres.rs) | `postgres` | `tokio-postgres` |
+| `ctx.mariadb()` → [`MariaDbHelpers`](src/helpers/mariadb.rs) | `mariadb` | `mysql_async` |
+| `ctx.mysql()` → [`MysqlHelpers`](src/helpers/mysql.rs) | `mysql` | `mysql_async` |
+| `ctx.sqlite()` → [`SqliteHelpers`](src/helpers/sqlite.rs) | `sqlite` | `rusqlite` (via `spawn_blocking` inside helpers) |
+
+[`ConsumedMessage`](src/helpers/mod.rs) (key, payload, `source` namespaced topic or queue) is re-exported from the crate root for Kafka and Rabbit consume helpers.
+
+### Example: Kafka (produce → consume)
+
+Enable `kafka` in `Cargo.toml`. Logical topic names are prefixed automatically via [`KafkaBindings::topic_namespace`](src/resources.rs).
+
+```rust,ignore
+#[shakedown::test(resources = [Kafka])]
+async fn kafka_helpers_example(ctx: &mut shakedown::Context) -> Result<(), shakedown::ShakedownError> {
+    ctx.kafka()
+        .produce("orders", "order-1", br#"{"sku":"A"}"#)
+        .await?;
+
+    let consumed = ctx.kafka().consume_one("orders", None).await?;
+    assert_eq!(consumed.key_str(), Some("order-1"));
+
+    // Or filter with `consume_until` and a predicate over `ConsumedMessage`:
+    let _matched = ctx
+        .kafka()
+        .consume_until("orders", |message| message.key_str() == Some("order-1"), None)
+        .await?;
+    Ok(())
+}
+```
+
+Runnable Docker-backed coverage: [`tests/helpers_kafka.rs`](tests/helpers_kafka.rs) (`cargo test -p shakedown --features kafka --test helpers_kafka -- --ignored`).
+
+### Example: RabbitMQ (topology → publish → consume)
+
+Enable `rabbitmq`. Use [`declare_topology`](src/helpers/rabbit.rs) so exchange, queue, and bind are declared with scenario namespacing in one call.
+
+```rust,ignore
+use shakedown::ExchangeKind;
+
+#[shakedown::test(resources = [Rabbit])]
+async fn rabbit_helpers_example(ctx: &mut shakedown::Context) -> Result<(), shakedown::ShakedownError> {
+    ctx.rabbit()
+        .declare_topology("events", ExchangeKind::Direct, "events", "order.created")
+        .await?;
+
+    ctx.rabbit()
+        .publish("events", "order.created", br#"{"order_id":"42"}"#)
+        .await?;
+
+    let consumed = ctx
+        .rabbit()
+        .consume_until("events", |_| true, None)
+        .await?;
+    let _: serde_json::Value = consumed.payload_json()?;
+    Ok(())
+}
+```
+
+Runnable Docker-backed coverage: [`tests/helpers_rabbit.rs`](tests/helpers_rabbit.rs) (`cargo test -p shakedown --features rabbitmq --test helpers_rabbit -- --ignored`).
+
+### Example: Postgres (execute → assert)
+
+Enable `postgres`. Parameters use `tokio_postgres::types::ToSql` ([`PostgresHelpers`](src/helpers/postgres.rs)).
+
+```rust,ignore
+#[shakedown::test(resources = [Postgres])]
+async fn postgres_helpers_example(ctx: &mut shakedown::Context) -> Result<(), shakedown::ShakedownError> {
+    ctx.postgres()
+        .execute(
+            "INSERT INTO orders (id, total) VALUES ($1, $2)",
+            &[&42_i32, &99.0_f64],
+        )
+        .await?;
+
+    ctx.postgres()
+        .assert_row_exists("SELECT 1 FROM orders WHERE id = $1", &[&42_i32])
+        .await?;
+
+    ctx.postgres()
+        .assert_row_count("SELECT * FROM orders WHERE id = $1", &[&42_i32], 1)
+        .await?;
+    Ok(())
+}
+```
+
+Runnable Docker-backed coverage: [`tests/helpers_postgres.rs`](tests/helpers_postgres.rs). For **SQLite** without Docker, see [`tests/helpers_sqlite.rs`](tests/helpers_sqlite.rs) (`cargo test -p shakedown --features sqlite --test helpers_sqlite`).
+
 ## Outbox helpers
 
 The outbox API has **two layers**. You can use row assertions **without** any message bus; publication proof is **optional** and gated on **`kafka`** and/or **`rabbitmq`**.
