@@ -179,7 +179,7 @@ pub use crate::publication::{
 
 #[cfg(feature = "services")]
 pub use crate::service::{
-    EnvMapping, HealthCheck, PullPolicy, ServiceSpec, ServiceUnderTest,
+    EnvMapping, HealthCheck, PullPolicy, ServiceHandle, ServiceSpec, ServiceUnderTest,
     DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_TIMEOUT,
 };
 

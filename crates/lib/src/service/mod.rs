@@ -4,9 +4,11 @@
 //! lifecycle wiring land in follow-up user stories; this module is the compile-time seam.
 
 mod builder;
+mod handle;
 mod health;
 mod types;
 
 pub use builder::ServiceUnderTest;
+pub use handle::ServiceHandle;
 pub use health::{HealthCheck, DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_TIMEOUT};
 pub use types::{EnvMapping, PullPolicy, ServiceSpec};
