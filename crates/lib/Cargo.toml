@@ -266,6 +266,12 @@ name = "services_lifecycle"
 path = "tests/services_lifecycle.rs"
 required-features = ["services"]
 
+# Multi-service depends_on + inter-service env (Docker); ignored unless --ignored
+[[test]]
+name = "services_multi_dependency"
+path = "tests/services_multi_dependency.rs"
+required-features = ["services"]
+
 # Service container labels + bollard diagnostics merge (Docker); ignored unless --ignored
 [[test]]
 name = "services_diagnostics"

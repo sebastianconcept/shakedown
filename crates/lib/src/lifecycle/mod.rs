@@ -864,8 +864,10 @@ impl Context {
     /// Register a built [`crate::service::ServiceSpec`] for the harness to start after infrastructure
     /// and bridges (US-009).
     ///
-    /// Duplicate service names return [`crate::error::InternalError::InvalidConfiguration`]. [`Self::service_url`] and
-    /// [`Self::service_handle`] remain empty until lifecycle attaches a [`ServiceHandle`] after readiness.
+    /// Duplicate service names return [`crate::error::InternalError::InvalidConfiguration`]. Every
+    /// `depends_on` target must already be registered, and the combined dependency graph must be acyclic (US-011);
+    /// otherwise the new registration is rolled back and the same error variant is returned. [`Self::service_url`]
+    /// and [`Self::service_handle`] stay empty until lifecycle attaches a [`ServiceHandle`] after readiness.
     #[cfg(feature = "services")]
     pub fn register_service(
         &mut self,
@@ -877,8 +879,14 @@ impl Context {
                 InternalError::InvalidConfiguration(format!("duplicate service name '{name}'")),
             ));
         }
-        self.services
-            .insert(name, crate::service::ServiceState::new(service_spec));
+        self.services.insert(
+            name.clone(),
+            crate::service::ServiceState::new(service_spec),
+        );
+        if let Err(error) = crate::service::dependency::service_startup_order(&self.services) {
+            self.services.remove(&name);
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -922,19 +930,6 @@ impl Context {
     #[allow(dead_code)] // US-007 `inject_service_env`; US-009 lifecycle
     pub(crate) fn registered_service_count(&self) -> usize {
         self.services.len()
-    }
-
-    /// Registered service names for injection, excluding `exclude` (typically the current service).
-    #[cfg(feature = "services")]
-    #[allow(dead_code)] // US-007 `inject_service_env`; US-009 lifecycle
-    pub(crate) fn registered_service_names_except<'a>(
-        &'a self,
-        exclude: &'a str,
-    ) -> impl Iterator<Item = &'a str> + 'a {
-        self.services
-            .keys()
-            .filter(move |name| name.as_str() != exclude)
-            .map(|name| name.as_str())
     }
 
     /// Invoke `visit` for each running HTTP/gRPC bridge base URL (service container env injection).

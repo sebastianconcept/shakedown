@@ -5,7 +5,7 @@
 
 pub mod address;
 mod builder;
-mod dependency;
+pub(crate) mod dependency;
 mod handle;
 mod health;
 pub(crate) mod injection;
@@ -60,6 +60,40 @@ mod registration_tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn register_service_requires_dependency_registered_first() {
+        let mut context = Context::new();
+        let worker_first = ServiceUnderTest::docker("traefik/whoami")
+            .name("worker")
+            .port(80)
+            .depends_on("api")
+            .build()
+            .expect("valid spec");
+        let error = context.register_service(worker_first).unwrap_err();
+        match error {
+            ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
+                assert!(message.contains("api"), "{message}");
+                assert!(message.contains("not registered"), "{message}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert!(context.services.is_empty());
+    }
+
+    #[test]
+    fn register_service_accepts_dependency_after_upstream() {
+        let mut context = Context::new();
+        context.register_service(sample_spec("api")).unwrap();
+        let worker = ServiceUnderTest::docker("traefik/whoami")
+            .name("worker")
+            .port(80)
+            .depends_on("api")
+            .build()
+            .expect("valid spec");
+        context.register_service(worker).unwrap();
+        assert_eq!(context.registered_service_count(), 2);
     }
 
     #[test]
