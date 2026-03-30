@@ -138,6 +138,9 @@ pub mod phase;
 pub mod publication;
 /// [`resources::Resource`] implementations, registration, and Kafka bindings.
 pub mod resources;
+/// Service-under-test Docker containers and bindings (`services` feature).
+#[cfg(feature = "services")]
+pub mod service;
 /// Failure timeline rendering (terminal) for [`EventLog`].
 pub mod timeline;
 
