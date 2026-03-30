@@ -2926,6 +2926,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "slab",
+ "tokio",
 ]
 
 [[package]]

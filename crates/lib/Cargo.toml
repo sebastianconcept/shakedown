@@ -21,7 +21,8 @@ tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "
 async-trait = "0.1"
 
 # Kafka integration (behind feature gate per D-2)
-rdkafka = { version = "=0.38", optional = true, default-features = false, features = ["ssl-vendored"] }
+# `tokio` enables `FutureProducer` + `AsyncRuntime` (helpers and bridges use async send).
+rdkafka = { version = "=0.38", optional = true, default-features = false, features = ["ssl-vendored", "tokio"] }
 
 # Testcontainers (base container runtime)
 testcontainers = { version = "0.27", default-features = false, optional = true }
