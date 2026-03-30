@@ -179,8 +179,8 @@ pub use crate::publication::{
 
 #[cfg(feature = "services")]
 pub use crate::service::{
-    EnvMapping, HealthCheck, PullPolicy, DEFAULT_HEALTH_CHECK_INTERVAL,
-    DEFAULT_HEALTH_CHECK_TIMEOUT,
+    EnvMapping, HealthCheck, PullPolicy, ServiceSpec, ServiceUnderTest,
+    DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_TIMEOUT,
 };
 
 #[cfg(all(feature = "outbox", feature = "kafka"))]
