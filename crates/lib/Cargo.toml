@@ -48,6 +48,9 @@ mongodb = { version = "3.4", optional = true }
 # NATS async client (`nats` feature)
 async-nats = { version = "0.46", optional = true }
 
+# Neo4j Bolt client (`neo4j` feature)
+neo4rs = { version = "0.8", optional = true }
+
 # RabbitMQ client for readiness and publication verification (`rabbitmq` feature)
 lapin = { version = "4.3", optional = true }
 
@@ -202,6 +205,14 @@ nats = [
     "dep:testcontainers",
     "dep:testcontainers-modules",
     "testcontainers-modules/nats",
+    "diagnostics",
+]
+# Neo4j 5.x Enterprise default (`neo4j:5-enterprise`); per-scenario databases via CREATE DATABASE
+neo4j = [
+    "dep:neo4rs",
+    "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/neo4j",
     "diagnostics",
 ]
 # MCP server support (post-MVP, optional)
@@ -383,3 +394,15 @@ required-features = ["nats"]
 name = "helpers_nats"
 path = "tests/helpers_nats.rs"
 required-features = ["nats"]
+
+# Neo4j suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "neo4j_vertical"
+path = "tests/neo4j_vertical.rs"
+required-features = ["neo4j"]
+
+# Neo4j helpers Cypher round-trip (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_neo4j"
+path = "tests/helpers_neo4j.rs"
+required-features = ["neo4j"]

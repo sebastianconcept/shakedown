@@ -67,6 +67,8 @@ pub enum EnvMapping {
     Mongo(String),
     /// NATS server URL (`nats` feature) → custom env var name.
     Nats(String),
+    /// Neo4j Bolt URL (`neo4j` feature) → custom env var name.
+    Neo4j(String),
     /// Named HTTP/gRPC bridge base URL → custom env var name.
     Bridge {
         bridge_name: String,
@@ -118,6 +120,11 @@ impl EnvMapping {
     /// Map NATS bindings to `environment_variable_name`.
     pub fn nats(environment_variable_name: impl Into<String>) -> Self {
         Self::Nats(environment_variable_name.into())
+    }
+
+    /// Map Neo4j Bolt URL bindings to `environment_variable_name`.
+    pub fn neo4j(environment_variable_name: impl Into<String>) -> Self {
+        Self::Neo4j(environment_variable_name.into())
     }
 
     /// Map the bridge named `bridge_name` to `environment_variable_name`.
@@ -212,6 +219,12 @@ mod tests {
     fn env_mapping_nats() {
         let mapping = EnvMapping::nats("MSG_BUS_URL");
         assert_eq!(mapping, EnvMapping::Nats("MSG_BUS_URL".to_string()));
+    }
+
+    #[test]
+    fn env_mapping_neo4j() {
+        let mapping = EnvMapping::neo4j("GRAPH_URI");
+        assert_eq!(mapping, EnvMapping::Neo4j("GRAPH_URI".to_string()));
     }
 
     #[test]

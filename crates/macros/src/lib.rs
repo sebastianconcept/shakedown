@@ -572,6 +572,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Neo4j" => Ok(quote! {
+            #[cfg(feature = "neo4j")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Neo4j(
+                    ::shakedown::Neo4jResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "neo4j"))]
+            {
+                ::core::compile_error!(
+                    "Neo4j in #[shakedown::test(resources = [...])] requires `neo4j` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Toxiproxy" => Ok(quote! {
             #[cfg(feature = "fault-injection")]
             {
@@ -589,7 +603,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `Redis`, `Valkey`, `Mongo`, `Nats`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, and `Toxiproxy`"
             ),
         )),
     }

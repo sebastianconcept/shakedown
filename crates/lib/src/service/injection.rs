@@ -48,6 +48,7 @@ struct MappingOverrides {
     redis: Option<String>,
     mongo: Option<String>,
     nats: Option<String>,
+    neo4j: Option<String>,
     bridges: HashMap<String, String>,
     services: HashMap<String, String>,
 }
@@ -63,6 +64,7 @@ impl MappingOverrides {
             redis: None,
             mongo: None,
             nats: None,
+            neo4j: None,
             bridges: HashMap::new(),
             services: HashMap::new(),
         };
@@ -76,6 +78,7 @@ impl MappingOverrides {
                 EnvMapping::Redis(name) => overrides.redis = Some(name.clone()),
                 EnvMapping::Mongo(name) => overrides.mongo = Some(name.clone()),
                 EnvMapping::Nats(name) => overrides.nats = Some(name.clone()),
+                EnvMapping::Neo4j(name) => overrides.neo4j = Some(name.clone()),
                 EnvMapping::Bridge {
                     bridge_name,
                     env_var,
@@ -184,6 +187,12 @@ fn inject_conventions(
     if let Some(bindings) = context.nats_bindings() {
         let key = overrides.nats.as_deref().unwrap_or("NATS_URL");
         environment.insert(key.to_string(), bindings.connection_url.clone());
+    }
+
+    #[cfg(feature = "neo4j")]
+    if let Some(bindings) = context.neo4j_bindings() {
+        let key = overrides.neo4j.as_deref().unwrap_or("NEO4J_URI");
+        environment.insert(key.to_string(), bindings.bolt_url.clone());
     }
 
     // Bridge URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::Bridge`.
@@ -326,6 +335,12 @@ fn resolve_env_mapping(
             .map(|bindings| (key.clone(), bindings.connection_url.clone())),
         #[cfg(not(feature = "nats"))]
         EnvMapping::Nats(_) => None,
+        #[cfg(feature = "neo4j")]
+        EnvMapping::Neo4j(key) => context
+            .neo4j_bindings()
+            .map(|bindings| (key.clone(), bindings.bolt_url.clone())),
+        #[cfg(not(feature = "neo4j"))]
+        EnvMapping::Neo4j(_) => None,
         EnvMapping::Bridge {
             bridge_name,
             env_var,
