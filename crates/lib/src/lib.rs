@@ -231,6 +231,10 @@ pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResour
 pub use crate::helpers::ConsumedMessage;
 #[cfg(feature = "kafka")]
 pub use crate::helpers::KafkaHelpers;
+#[cfg(feature = "mariadb")]
+pub use crate::helpers::MariaDbHelpers;
+#[cfg(feature = "mysql")]
+pub use crate::helpers::MysqlHelpers;
 #[cfg(feature = "postgres")]
 pub use crate::helpers::PostgresHelpers;
 #[cfg(feature = "rabbitmq")]

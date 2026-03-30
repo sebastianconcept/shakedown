@@ -54,6 +54,15 @@ pub mod rabbit;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 
+#[cfg(any(feature = "mariadb", feature = "mysql"))]
+mod mysql_family;
+
+#[cfg(feature = "mariadb")]
+pub mod mariadb;
+
+#[cfg(feature = "mysql")]
+pub mod mysql;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
@@ -62,3 +71,9 @@ pub use rabbit::{ExchangeKind, RabbitHelpers};
 
 #[cfg(feature = "postgres")]
 pub use postgres::PostgresHelpers;
+
+#[cfg(feature = "mariadb")]
+pub use mariadb::MariaDbHelpers;
+
+#[cfg(feature = "mysql")]
+pub use mysql::MysqlHelpers;
