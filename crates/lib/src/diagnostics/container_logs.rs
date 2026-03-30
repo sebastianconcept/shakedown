@@ -26,7 +26,7 @@ use crate::error::ShakedownError;
 use crate::event::InfraEvent;
 use crate::phase::Phase;
 
-use super::labels::shakedown_docker_label_filter;
+use super::labels::{correlation_name_from_container_summary, shakedown_docker_label_filter};
 
 /// Background task following logs for Shakedown-labeled running containers.
 ///
@@ -93,7 +93,7 @@ async fn run_log_supervisor(
             if !seen.insert(container_id.clone()) {
                 continue;
             }
-            let display_name = container_display_name(&summary);
+            let display_name = correlation_name_from_container_summary(&summary);
             let docker_clone = docker.clone();
             let phase_rx = phase_receiver.clone();
             let sink_clone = Arc::clone(&sink);
@@ -122,17 +122,6 @@ async fn list_shakedown_running_containers(
         .filters(&filters)
         .build();
     docker.list_containers(Some(options)).await
-}
-
-fn container_display_name(summary: &bollard::models::ContainerSummary) -> String {
-    summary
-        .names
-        .as_ref()
-        .and_then(|names| names.first())
-        .map(|name| name.trim_start_matches('/').to_string())
-        .filter(|name| !name.is_empty())
-        .or_else(|| summary.id.clone())
-        .unwrap_or_else(|| "unknown".to_string())
 }
 
 async fn follow_container_logs(

@@ -102,8 +102,9 @@ fn gather_samples(
         return Err(ShakedownError::ResourceAssertionFailed {
             container: container_name.to_string(),
             metric: "resource_stats".to_string(),
-            measured: "no stats ring (run under Docker-backed resources with diagnostics)"
-                .to_string(),
+            measured:
+                "no stats ring (run under Docker-backed resources or `services` with diagnostics)"
+                    .to_string(),
             threshold: "attached stats ring".to_string(),
             phase: Phase::Run,
         });

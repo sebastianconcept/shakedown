@@ -247,6 +247,7 @@ pub struct Context {
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         feature = "diagnostics",
         not(feature = "no-diagnostics"),
@@ -310,6 +311,7 @@ impl Context {
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "services",
                 ),
                 feature = "diagnostics",
                 not(feature = "no-diagnostics"),
@@ -366,6 +368,7 @@ impl Context {
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "services",
                 ),
                 feature = "diagnostics",
                 not(feature = "no-diagnostics"),
@@ -422,6 +425,7 @@ impl Context {
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "services",
                 ),
                 feature = "diagnostics",
                 not(feature = "no-diagnostics"),
@@ -806,6 +810,7 @@ impl Context {
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         feature = "diagnostics",
         not(feature = "no-diagnostics"),
@@ -824,6 +829,7 @@ impl Context {
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         feature = "diagnostics",
         not(feature = "no-diagnostics"),
@@ -843,6 +849,7 @@ impl Context {
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         feature = "diagnostics",
         not(feature = "no-diagnostics"),
@@ -1430,6 +1437,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
+        feature = "services",
     ),
     not(feature = "no-diagnostics"),
 ))]
@@ -1454,6 +1462,7 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
+        feature = "services",
     ),
     not(feature = "no-diagnostics"),
 ))]
@@ -1768,6 +1777,7 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         feature = "diagnostics",
         not(feature = "no-diagnostics"),
@@ -1781,6 +1791,7 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         not(feature = "no-diagnostics"),
     ))]
@@ -1854,6 +1865,7 @@ where
                             feature = "postgres",
                             feature = "mariadb",
                             feature = "mysql",
+                            feature = "services",
                         ),
                         not(feature = "no-diagnostics"),
                     ))]
@@ -1895,6 +1907,7 @@ where
                         feature = "postgres",
                         feature = "mariadb",
                         feature = "mysql",
+                        feature = "services",
                     ),
                     not(feature = "no-diagnostics"),
                 ))]
@@ -1928,6 +1941,7 @@ where
                 feature = "postgres",
                 feature = "mariadb",
                 feature = "mysql",
+                feature = "services",
             ),
             not(feature = "no-diagnostics"),
         ))]
@@ -1949,6 +1963,7 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         not(feature = "no-diagnostics"),
     ))]
@@ -1965,9 +1980,11 @@ where
             #[cfg(all(
                 any(
                     feature = "kafka",
+                    feature = "rabbitmq",
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
             ))]
@@ -1990,6 +2007,7 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         not(feature = "no-diagnostics"),
     ))]
@@ -2002,9 +2020,11 @@ where
             #[cfg(all(
                 any(
                     feature = "kafka",
+                    feature = "rabbitmq",
                     feature = "postgres",
                     feature = "mariadb",
                     feature = "mysql",
+                    feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
             ))]
@@ -2034,9 +2054,11 @@ where
         #[cfg(all(
             any(
                 feature = "kafka",
+                feature = "rabbitmq",
                 feature = "postgres",
                 feature = "mariadb",
                 feature = "mysql",
+                feature = "services",
             ),
             not(feature = "no-diagnostics"),
         ))]
@@ -2065,9 +2087,11 @@ where
         #[cfg(all(
             any(
                 feature = "kafka",
+                feature = "rabbitmq",
                 feature = "postgres",
                 feature = "mariadb",
                 feature = "mysql",
+                feature = "services",
             ),
             not(feature = "no-diagnostics"),
         ))]
@@ -2089,6 +2113,7 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         not(feature = "no-diagnostics"),
     ))]
@@ -2135,6 +2160,7 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         not(feature = "no-diagnostics"),
     ))]
@@ -2149,6 +2175,7 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         not(feature = "no-diagnostics"),
     ))]
@@ -2176,6 +2203,7 @@ where
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         not(feature = "no-diagnostics"),
     ))]
@@ -2189,9 +2217,11 @@ where
     #[cfg(all(
         any(
             feature = "kafka",
+            feature = "rabbitmq",
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
+            feature = "services",
         ),
         feature = "diagnostics",
         not(feature = "no-diagnostics"),

@@ -7,8 +7,8 @@
 //! **Why:** operators need correlated infra signals in [`crate::event::EventLog`] and failure
 //! timelines without ad hoc `docker` CLI in tests.
 //!
-//! **How:** when a Docker-backed resource feature is active (`kafka`, `rabbitmq`, `postgres`, `mariadb`, `mysql`),
-//! `diagnostics` is enabled, and `no-diagnostics` is off, [`try_connect`] / [`suite_diagnostics_handle`]
+//! **How:** when a Docker-backed resource feature is active (`kafka`, `rabbitmq`, `postgres`, `mariadb`, `mysql`)
+//! or `services`, `diagnostics` is enabled, and `no-diagnostics` is off, [`try_connect`] / [`suite_diagnostics_handle`]
 //! provide a shared client; [`crate::lifecycle::run_scenario`] spawns background tasks and merges their
 //! output during diagnostic shutdown. Use `no-diagnostics` to compile out observability entirely.
 

@@ -24,7 +24,7 @@ use crate::error::ShakedownError;
 use crate::event::{DockerEventKind, InfraEvent, InfraSeverity};
 use crate::phase::Phase;
 
-use super::labels::shakedown_docker_label_filter;
+use super::labels::{shakedown_docker_label_filter, SHAKEDOWN_SERVICE_LABEL_KEY};
 
 /// Background task streaming filtered Docker Engine container events into an in-memory sink.
 ///
@@ -97,6 +97,11 @@ fn container_name_from_actor(message: &EventMessage) -> String {
     let Some(attrs) = &actor.attributes else {
         return actor.id.clone().unwrap_or_default();
     };
+    if let Some(service) = attrs.get(SHAKEDOWN_SERVICE_LABEL_KEY) {
+        if !service.is_empty() {
+            return service.clone();
+        }
+    }
     attrs
         .get("name")
         .map(|name| name.trim_start_matches('/').to_string())
@@ -248,6 +253,34 @@ mod tests {
     use super::*;
     use bollard::models::EventActor;
     use std::collections::HashMap;
+
+    #[test]
+    fn container_name_prefers_shakedown_service_label() {
+        let mut attributes = HashMap::new();
+        attributes.insert("name".to_string(), "random_docker_name".to_string());
+        attributes.insert(
+            crate::docker_labels::SHAKEDOWN_SERVICE_LABEL_KEY.to_string(),
+            "order-api".to_string(),
+        );
+        attributes.insert("exitCode".to_string(), "1".to_string());
+        attributes.insert("oomKilled".to_string(), "false".to_string());
+        let message = EventMessage {
+            action: Some("die".to_string()),
+            actor: Some(EventActor {
+                id: Some("abc".to_string()),
+                attributes: Some(attributes),
+            }),
+            time: Some(100),
+            time_nano: None,
+            typ: None,
+            scope: None,
+        };
+        let record = classify_container_event(&message, Phase::Run, "scn").expect("record");
+        match record {
+            InfraEvent::DockerEvent { container, .. } => assert_eq!(container, "order-api"),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
 
     #[test]
     fn die_non_zero_is_critical_exit() {
