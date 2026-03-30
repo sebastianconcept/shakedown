@@ -544,6 +544,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Mongo" => Ok(quote! {
+            #[cfg(feature = "mongodb")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Mongo(
+                    ::shakedown::MongoResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "mongodb"))]
+            {
+                ::core::compile_error!(
+                    "Mongo in #[shakedown::test(resources = [...])] requires `mongodb` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Toxiproxy" => Ok(quote! {
             #[cfg(feature = "fault-injection")]
             {
@@ -561,7 +575,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `Redis`, `Valkey`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `Redis`, `Valkey`, `Mongo`, and `Toxiproxy`"
             ),
         )),
     }

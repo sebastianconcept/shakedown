@@ -46,6 +46,7 @@ struct MappingOverrides {
     mysql: Option<String>,
     rabbitmq: Option<String>,
     redis: Option<String>,
+    mongo: Option<String>,
     bridges: HashMap<String, String>,
     services: HashMap<String, String>,
 }
@@ -59,6 +60,7 @@ impl MappingOverrides {
             mysql: None,
             rabbitmq: None,
             redis: None,
+            mongo: None,
             bridges: HashMap::new(),
             services: HashMap::new(),
         };
@@ -70,6 +72,7 @@ impl MappingOverrides {
                 EnvMapping::Mysql(name) => overrides.mysql = Some(name.clone()),
                 EnvMapping::Rabbitmq(name) => overrides.rabbitmq = Some(name.clone()),
                 EnvMapping::Redis(name) => overrides.redis = Some(name.clone()),
+                EnvMapping::Mongo(name) => overrides.mongo = Some(name.clone()),
                 EnvMapping::Bridge {
                     bridge_name,
                     env_var,
@@ -98,7 +101,12 @@ fn inject_conventions(
     overrides: &MappingOverrides,
     environment: &mut HashMap<String, String>,
 ) {
-    #[cfg(any(feature = "postgres", feature = "mariadb", feature = "mysql"))]
+    #[cfg(any(
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+        feature = "mongodb",
+    ))]
     let partition_relational = context.registered_service_count() > 1;
 
     if let Some(bindings) = context.kafka_bindings() {
@@ -157,6 +165,18 @@ fn inject_conventions(
         environment.insert(key.to_string(), bindings.connection_url.clone());
     }
 
+    #[cfg(feature = "mongodb")]
+    if let Some(bindings) = context.mongo_bindings() {
+        let key = overrides.mongo.as_deref().unwrap_or("MONGODB_URI");
+        let url = relational_url_for_service(
+            bindings.connection_url.as_str(),
+            bindings.database.as_str(),
+            service_spec.name(),
+            partition_relational,
+        );
+        environment.insert(key.to_string(), url);
+    }
+
     // Bridge URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::Bridge`.
     #[cfg(all(feature = "bridges", feature = "services"))]
     {
@@ -205,9 +225,19 @@ fn resolve_env_mapping(
     service_name: &str,
     mapping: &EnvMapping,
 ) -> Option<(String, String)> {
-    #[cfg(any(feature = "postgres", feature = "mariadb", feature = "mysql"))]
+    #[cfg(any(
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+        feature = "mongodb",
+    ))]
     let partition_relational = context.registered_service_count() > 1;
-    #[cfg(not(any(feature = "postgres", feature = "mariadb", feature = "mysql")))]
+    #[cfg(not(any(
+        feature = "postgres",
+        feature = "mariadb",
+        feature = "mysql",
+        feature = "mongodb",
+    )))]
     let _ = service_name;
     match mapping {
         EnvMapping::Kafka(key) => context
@@ -267,6 +297,20 @@ fn resolve_env_mapping(
             .map(|bindings| (key.clone(), bindings.connection_url.clone())),
         #[cfg(not(any(feature = "redis", feature = "valkey")))]
         EnvMapping::Redis(_) => None,
+        #[cfg(feature = "mongodb")]
+        EnvMapping::Mongo(key) => context.mongo_bindings().map(|bindings| {
+            (
+                key.clone(),
+                relational_url_for_service(
+                    bindings.connection_url.as_str(),
+                    bindings.database.as_str(),
+                    service_name,
+                    partition_relational,
+                ),
+            )
+        }),
+        #[cfg(not(feature = "mongodb"))]
+        EnvMapping::Mongo(_) => None,
         EnvMapping::Bridge {
             bridge_name,
             env_var,

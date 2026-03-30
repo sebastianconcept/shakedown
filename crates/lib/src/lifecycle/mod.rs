@@ -62,6 +62,8 @@ use crate::event::{EventLevel, EventLog};
 use crate::helpers::KafkaHelpers;
 #[cfg(feature = "mariadb")]
 use crate::helpers::MariaDbHelpers;
+#[cfg(feature = "mongodb")]
+use crate::helpers::MongoHelpers;
 #[cfg(feature = "mysql")]
 use crate::helpers::MysqlHelpers;
 #[cfg(feature = "postgres")]
@@ -84,6 +86,8 @@ use crate::helpers::SqliteHelpers;
 use crate::outbox::Outbox;
 #[cfg(feature = "mariadb")]
 use crate::resources::MariaDBBindings;
+#[cfg(feature = "mongodb")]
+use crate::resources::MongoBindings;
 #[cfg(feature = "mysql")]
 use crate::resources::MysqlBindings;
 #[cfg(feature = "postgres")]
@@ -202,7 +206,8 @@ impl std::fmt::Display for ScenarioKind {
 /// How: constructed with [`Context::new`] or by `#[shakedown::test]`; the scenario function receives
 /// `&mut Context` to register extras or read [`Context::scenario_id`], [`Context::kafka_bindings`],
 /// [`Context::rabbit_bindings`] (with the `rabbitmq` feature), [`Context::redis_bindings`] /
-/// [`Context::redis`] (with the `redis` / `valkey` features), and (with the `postgres` / `mariadb` /
+/// [`Context::redis`] (with the `redis` / `valkey` features), [`Context::mongo_bindings`] /
+/// [`Context::mongo`] (with the `mongodb` feature), and (with the `postgres` / `mariadb` /
 /// `mysql` / `sqlite` features) relational bindings accessors.
 pub struct Context {
     /// Registered resources
@@ -231,6 +236,9 @@ pub struct Context {
     /// Redis / Valkey bindings when a matching resource populated them (`redis` / `valkey` features).
     #[cfg(any(feature = "redis", feature = "valkey"))]
     redis_bindings: Option<RedisBindings>,
+    /// MongoDB bindings when a Mongo resource populated them (`mongodb` feature).
+    #[cfg(feature = "mongodb")]
+    mongo_bindings: Option<MongoBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -257,6 +265,7 @@ pub struct Context {
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -306,6 +315,8 @@ impl Context {
             sqlite_bindings: None,
             #[cfg(any(feature = "redis", feature = "valkey"))]
             redis_bindings: None,
+            #[cfg(feature = "mongodb")]
+            mongo_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -325,6 +336,7 @@ impl Context {
                     feature = "mysql",
                     feature = "redis",
                     feature = "valkey",
+                    feature = "mongodb",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -367,6 +379,8 @@ impl Context {
             sqlite_bindings: None,
             #[cfg(any(feature = "redis", feature = "valkey"))]
             redis_bindings: None,
+            #[cfg(feature = "mongodb")]
+            mongo_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -386,6 +400,7 @@ impl Context {
                     feature = "mysql",
                     feature = "redis",
                     feature = "valkey",
+                    feature = "mongodb",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -428,6 +443,8 @@ impl Context {
             sqlite_bindings: None,
             #[cfg(any(feature = "redis", feature = "valkey"))]
             redis_bindings: None,
+            #[cfg(feature = "mongodb")]
+            mongo_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -447,6 +464,7 @@ impl Context {
                     feature = "mysql",
                     feature = "redis",
                     feature = "valkey",
+                    feature = "mongodb",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -586,6 +604,18 @@ impl Context {
     #[cfg(any(feature = "redis", feature = "valkey"))]
     pub fn redis_bindings(&self) -> Option<&RedisBindings> {
         self.redis_bindings.as_ref()
+    }
+
+    /// Set MongoDB bindings for this scenario (typically after Mongo provision).
+    #[cfg(feature = "mongodb")]
+    pub fn set_mongo_bindings(&mut self, mongo_bindings: MongoBindings) {
+        self.mongo_bindings = Some(mongo_bindings);
+    }
+
+    /// MongoDB connection details when a Mongo resource populated them (`mongodb` feature).
+    #[cfg(feature = "mongodb")]
+    pub fn mongo_bindings(&self) -> Option<&MongoBindings> {
+        self.mongo_bindings.as_ref()
     }
 
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
@@ -745,6 +775,12 @@ impl Context {
         RedisHelpers::new(self)
     }
 
+    /// MongoDB document helpers (`mongodb` feature).
+    #[cfg(feature = "mongodb")]
+    pub fn mongo(&self) -> MongoHelpers<'_> {
+        MongoHelpers::new(self)
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -852,6 +888,7 @@ impl Context {
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -873,6 +910,7 @@ impl Context {
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -895,6 +933,7 @@ impl Context {
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1351,6 +1390,49 @@ fn apply_resource_handles_to_kafka_bindings(ctx: &mut Context, handles: &[Resour
     }
 }
 
+#[cfg(feature = "mongodb")]
+/// If any handle metadata carries MongoDB engine fields, set [`Context::set_mongo_bindings`].
+fn apply_resource_handles_to_mongo_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if engine != "mongodb" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|value| value.as_str());
+        let port = meta
+            .get("port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let database = meta.get("database").and_then(|value| value.as_str());
+        let username = meta.get("username").and_then(|value| value.as_str());
+        let password = meta.get("password").and_then(|value| value.as_str());
+        let connection_url = meta.get("connection_url").and_then(|value| value.as_str());
+        if let (
+            Some(host),
+            Some(port),
+            Some(database),
+            Some(username),
+            Some(password),
+            Some(connection_url),
+        ) = (host, port, database, username, password, connection_url)
+        {
+            ctx.set_mongo_bindings(MongoBindings {
+                host: host.to_string(),
+                port,
+                database: database.to_string(),
+                username: username.to_string(),
+                password: password.to_string(),
+                connection_url: connection_url.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(any(feature = "redis", feature = "valkey"))]
 /// If any handle metadata carries Redis or Valkey engine fields, set [`Context::set_redis_bindings`].
 fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
@@ -1513,6 +1595,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "mysql",
         feature = "redis",
         feature = "valkey",
+        feature = "mongodb",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -1540,6 +1623,7 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "mysql",
         feature = "redis",
         feature = "valkey",
+        feature = "mongodb",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -1857,6 +1941,7 @@ where
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1873,6 +1958,7 @@ where
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -1949,6 +2035,7 @@ where
                             feature = "mysql",
                             feature = "redis",
                             feature = "valkey",
+                            feature = "mongodb",
                             feature = "services",
                         ),
                         not(feature = "no-diagnostics"),
@@ -1975,6 +2062,8 @@ where
                 apply_resource_handles_to_sqlite_bindings(ctx, &handles);
                 #[cfg(any(feature = "redis", feature = "valkey"))]
                 apply_resource_handles_to_redis_bindings(ctx, &handles);
+                #[cfg(feature = "mongodb")]
+                apply_resource_handles_to_mongo_bindings(ctx, &handles);
                 #[cfg(feature = "fault-injection")]
                 install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
@@ -1995,6 +2084,7 @@ where
                         feature = "mysql",
                         feature = "redis",
                         feature = "valkey",
+                        feature = "mongodb",
                         feature = "services",
                     ),
                     not(feature = "no-diagnostics"),
@@ -2031,6 +2121,7 @@ where
                 feature = "mysql",
                 feature = "redis",
                 feature = "valkey",
+                feature = "mongodb",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2055,6 +2146,7 @@ where
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2078,6 +2170,7 @@ where
                     feature = "mysql",
                     feature = "redis",
                     feature = "valkey",
+                    feature = "mongodb",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2103,6 +2196,7 @@ where
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2122,6 +2216,7 @@ where
                     feature = "mysql",
                     feature = "redis",
                     feature = "valkey",
+                    feature = "mongodb",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2158,6 +2253,7 @@ where
                 feature = "mysql",
                 feature = "redis",
                 feature = "valkey",
+                feature = "mongodb",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2193,6 +2289,7 @@ where
                 feature = "mysql",
                 feature = "redis",
                 feature = "valkey",
+                feature = "mongodb",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2217,6 +2314,7 @@ where
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2266,6 +2364,7 @@ where
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2283,6 +2382,7 @@ where
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2313,6 +2413,7 @@ where
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2333,6 +2434,7 @@ where
             feature = "mysql",
             feature = "redis",
             feature = "valkey",
+            feature = "mongodb",
             feature = "services",
         ),
         feature = "diagnostics",
