@@ -1,4 +1,4 @@
-//! Integration tests for Docker-backed infrastructure diagnostics (US-010).
+//! Integration tests for Docker-backed infrastructure diagnostics.
 //!
 //! **No Docker:** see `tests/diagnostics_graceful.rs` (runs under `cargo test -p shakedown --features kafka`).
 //!

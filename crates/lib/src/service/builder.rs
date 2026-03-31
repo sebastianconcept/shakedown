@@ -1,6 +1,6 @@
 //! [`ServiceUnderTest`] builder → [`ServiceSpec`] (`services` feature).
 //!
-//! Pure configuration validation — no Docker I/O (container start is US-009).
+//! Pure configuration validation — no Docker I/O (container start is part of service lifecycle).
 
 use std::collections::{HashMap, HashSet};
 
@@ -92,7 +92,7 @@ impl ServiceUnderTest {
         self
     }
 
-    /// Docker image pull policy before `GenericImage::start` (US-009).
+    /// Docker image pull policy before `GenericImage::start` (service container lifecycle).
     pub fn pull_policy(mut self, policy: PullPolicy) -> Self {
         self.pull_policy = policy;
         self

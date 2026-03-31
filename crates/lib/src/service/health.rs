@@ -31,13 +31,13 @@ pub enum HealthCheck {
         timeout: Duration,
         interval: Duration,
     },
-    /// Run a command inside the container (executor wiring in US-009).
+    /// Run a command inside the container (container exec via bollard).
     Command {
         cmd: Vec<String>,
         timeout: Duration,
         interval: Duration,
     },
-    /// Require every nested check to succeed (evaluated in order in US-009).
+    /// Require every nested check to succeed (evaluated in order).
     Composite {
         checks: Vec<HealthCheck>,
         timeout: Duration,
@@ -66,7 +66,7 @@ impl HealthCheck {
         }
     }
 
-    /// gRPC health with the default service (implementation-defined in US-009).
+    /// gRPC health with the default service.
     pub fn grpc() -> Self {
         Self::Grpc {
             service: None,
@@ -92,7 +92,7 @@ impl HealthCheck {
         }
     }
 
-    /// Shell-less command line as argv (container exec in US-009).
+    /// Shell-less command line as argv (container exec).
     pub fn command(command_line: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self::Command {
             cmd: command_line.into_iter().map(Into::into).collect(),
