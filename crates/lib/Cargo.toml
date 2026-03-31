@@ -220,6 +220,15 @@ neo4j = [
     "testcontainers-modules/neo4j",
     "diagnostics",
 ]
+# Elasticsearch 8.x (docker.elastic.co image via testcontainers-modules; HTTP via reqwest — OQ-6.1)
+elasticsearch = [
+    "dep:reqwest",
+    "dep:testcontainers",
+    "dep:testcontainers-modules",
+    "testcontainers-modules/elastic_search",
+    "shakedown-macros/elasticsearch",
+    "diagnostics",
+]
 # MCP server support (post-MVP, optional)
 mcp = []
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
@@ -423,3 +432,15 @@ required-features = ["neo4j"]
 name = "helpers_neo4j"
 path = "tests/helpers_neo4j.rs"
 required-features = ["neo4j"]
+
+# Elasticsearch suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "elasticsearch_vertical"
+path = "tests/elasticsearch_vertical.rs"
+required-features = ["elasticsearch"]
+
+# Elasticsearch helpers index/search (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_elasticsearch"
+path = "tests/helpers_elasticsearch.rs"
+required-features = ["elasticsearch"]
