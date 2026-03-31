@@ -19,27 +19,17 @@ use serde::{Deserialize, Serialize};
 use crate::phase::Phase;
 
 /// Severity for a single [`Event`] (mirrors common log levels).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, displaydoc::Display)]
+#[ignore_extra_doc_attributes]
 pub enum EventLevel {
-    /// Debug-level events for detailed tracing
+    /// DEBUG
     Debug,
-    /// Informational events during scenario execution
+    /// INFO
     Info,
-    /// Warning about potential issues
+    /// WARN
     Warn,
-    /// Error in a resource or phase
+    /// ERROR
     Error,
-}
-
-impl std::fmt::Display for EventLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EventLevel::Debug => write!(f, "DEBUG"),
-            EventLevel::Info => write!(f, "INFO"),
-            EventLevel::Warn => write!(f, "WARN"),
-            EventLevel::Error => write!(f, "ERROR"),
-        }
-    }
 }
 
 /// One timestamped record in the scenario timeline.

@@ -425,6 +425,12 @@ pub struct ResourceHandle {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ScenarioId(String);
 
+impl std::fmt::Display for ScenarioId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl ScenarioId {
     /// Construct an id from any string-like value (typically the Rust test function name).
     pub fn new(id: impl Into<String>) -> Self {
@@ -439,12 +445,6 @@ impl ScenarioId {
     /// View the id as `str` for formatting and isolation helpers.
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-impl std::fmt::Display for ScenarioId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

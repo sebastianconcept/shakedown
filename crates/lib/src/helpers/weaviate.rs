@@ -1,9 +1,27 @@
 //! Weaviate typed helpers — [`WeaviateHelpers`] for scenario-scoped classes (`weaviate` feature).
 
+use std::error::Error;
+
 use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
 use crate::helpers::map_backend_error;
 use crate::lifecycle::Context;
 use crate::resources::WeaviateBindings;
+
+/// HTTP error from a Weaviate REST API call.
+///
+/// Captures method, path, status code, and response body so callers and logs have full context
+/// when a Weaviate HTTP request fails (e.g. schema creation, object insertion).
+#[derive(Debug, displaydoc::Display)]
+#[ignore_extra_doc_attributes]
+pub(crate) struct WeaviateHttpError {
+    /// Weaviate HTTP error: {method} {path} returned {status} — {body}
+    method: String,
+    path: String,
+    status: reqwest::StatusCode,
+    body: String,
+}
+
+impl Error for WeaviateHttpError {}
 
 /// Facade for Weaviate helpers bound to [`Context`] (`weaviate` feature).
 pub struct WeaviateHelpers<'ctx> {
@@ -56,12 +74,14 @@ impl<'ctx> WeaviateHelpers<'ctx> {
             .await
             .map_err(map_backend_error)?;
         if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let error = WeaviateHttpError {
+                method: "POST".to_string(),
+                path: "/v1/schema".to_string(),
+                status: response.status(),
+                body: response.text().await.unwrap_or_default(),
+            };
             return Err(ShakedownError::Infrastructure(
-                InfrastructureError::Backend(Box::new(std::io::Error::other(format!(
-                    "POST /v1/schema failed: HTTP {status} {body}"
-                )))),
+                InfrastructureError::Backend(Box::new(error)),
             ));
         }
         Ok(())
@@ -88,12 +108,14 @@ impl<'ctx> WeaviateHelpers<'ctx> {
             .await
             .map_err(map_backend_error)?;
         if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
+            let error = WeaviateHttpError {
+                method: "POST".to_string(),
+                path: "/v1/objects".to_string(),
+                status: response.status(),
+                body: response.text().await.unwrap_or_default(),
+            };
             return Err(ShakedownError::Infrastructure(
-                InfrastructureError::Backend(Box::new(std::io::Error::other(format!(
-                    "POST /v1/objects failed: HTTP {status} {text}"
-                )))),
+                InfrastructureError::Backend(Box::new(error)),
             ));
         }
         let value: serde_json::Value = response.json().await.map_err(map_backend_error)?;
@@ -118,12 +140,14 @@ impl<'ctx> WeaviateHelpers<'ctx> {
             .await
             .map_err(map_backend_error)?;
         if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
+            let error = WeaviateHttpError {
+                method: "GET".to_string(),
+                path: format!("/v1/objects/{object_id}"),
+                status: response.status(),
+                body: response.text().await.unwrap_or_default(),
+            };
             return Err(ShakedownError::Infrastructure(
-                InfrastructureError::Backend(Box::new(std::io::Error::other(format!(
-                    "GET /v1/objects/{object_id} failed: HTTP {status} {text}"
-                )))),
+                InfrastructureError::Backend(Box::new(error)),
             ));
         }
         response.json().await.map_err(map_backend_error)
@@ -152,12 +176,14 @@ impl<'ctx> WeaviateHelpers<'ctx> {
             .await
             .map_err(map_backend_error)?;
         if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
+            let error = WeaviateHttpError {
+                method: "GET".to_string(),
+                path: "/v1/objects".to_string(),
+                status: response.status(),
+                body: response.text().await.unwrap_or_default(),
+            };
             return Err(ShakedownError::Infrastructure(
-                InfrastructureError::Backend(Box::new(std::io::Error::other(format!(
-                    "GET /v1/objects (class filter) failed: HTTP {status} {text}"
-                )))),
+                InfrastructureError::Backend(Box::new(error)),
             ));
         }
         let body: serde_json::Value = response.json().await.map_err(map_backend_error)?;

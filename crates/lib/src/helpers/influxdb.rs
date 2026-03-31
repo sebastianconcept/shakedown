@@ -1,9 +1,27 @@
 //! InfluxDB 2.x typed helpers — [`InfluxDbHelpers`] (`influxdb` feature).
 
+use std::error::Error;
+
 use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
 use crate::helpers::map_backend_error;
 use crate::lifecycle::Context;
 use crate::resources::InfluxDbBindings;
+
+/// HTTP error from an InfluxDB REST API call.
+///
+/// Captures method, path, status code, and response body so callers and logs have full context
+/// when an InfluxDB HTTP request fails (e.g. writing points, running Flux queries).
+#[derive(Debug, displaydoc::Display)]
+#[ignore_extra_doc_attributes]
+pub(crate) struct InfluxDbHttpError {
+    /// InfluxDB HTTP error: {method} {path} returned {status} — {body}
+    method: String,
+    path: String,
+    status: reqwest::StatusCode,
+    body: String,
+}
+
+impl Error for InfluxDbHttpError {}
 
 /// Field value for [`InfluxDbHelpers::write_point`] line-protocol encoding.
 #[derive(Debug, Clone)]
@@ -138,12 +156,14 @@ impl<'ctx> InfluxDbHelpers<'ctx> {
             .await
             .map_err(map_backend_error)?;
         if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
+            let error = InfluxDbHttpError {
+                method: "POST".to_string(),
+                path: "/api/v2/write".to_string(),
+                status: response.status(),
+                body: response.text().await.unwrap_or_default(),
+            };
             return Err(ShakedownError::Infrastructure(
-                InfrastructureError::Backend(Box::new(std::io::Error::other(format!(
-                    "POST /api/v2/write failed: HTTP {status} {text}"
-                )))),
+                InfrastructureError::Backend(Box::new(error)),
             ));
         }
         Ok(())
@@ -170,12 +190,14 @@ impl<'ctx> InfluxDbHelpers<'ctx> {
             .await
             .map_err(map_backend_error)?;
         if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
+            let error = InfluxDbHttpError {
+                method: "POST".to_string(),
+                path: "/api/v2/query".to_string(),
+                status: response.status(),
+                body: response.text().await.unwrap_or_default(),
+            };
             return Err(ShakedownError::Infrastructure(
-                InfrastructureError::Backend(Box::new(std::io::Error::other(format!(
-                    "POST /api/v2/query failed: HTTP {status} {text}"
-                )))),
+                InfrastructureError::Backend(Box::new(error)),
             ));
         }
         response.text().await.map_err(map_backend_error)

@@ -92,6 +92,10 @@ impl<'ctx> Neo4jHelpers<'ctx> {
     }
 
     /// Run a write Cypher statement with named parameters (`$key` in Cypher matches `key` here).
+    ///
+    /// Supported parameter value types: null, bool, integer (i64), float (f64), string.
+    /// Arrays and nested objects are not yet supported — pass them as separate parameters or
+    /// serialise to a JSON string if the server-side Cypher can parse it.
     pub async fn execute_cypher(
         &self,
         query_text: &str,
@@ -107,6 +111,10 @@ impl<'ctx> Neo4jHelpers<'ctx> {
     }
 
     /// Run a read Cypher query and collect all rows.
+    ///
+    /// Supported parameter value types: null, bool, integer (i64), float (f64), string.
+    /// Arrays and nested objects are not yet supported — pass them as separate parameters or
+    /// serialise to a JSON string if the server-side Cypher can parse it.
     pub async fn query_cypher(
         &self,
         query_text: &str,
