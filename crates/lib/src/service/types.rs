@@ -79,6 +79,8 @@ pub enum EnvMapping {
     Qdrant(String),
     /// Weaviate REST base URL (`weaviate` feature) → custom env var name.
     Weaviate(String),
+    /// InfluxDB 2.x HTTP API base URL (`influxdb` feature) → custom env var name.
+    InfluxDb(String),
     /// Named HTTP/gRPC bridge base URL → custom env var name.
     Bridge {
         bridge_name: String,
@@ -160,6 +162,11 @@ impl EnvMapping {
     /// Map Weaviate REST URL bindings to `environment_variable_name`.
     pub fn weaviate(environment_variable_name: impl Into<String>) -> Self {
         Self::Weaviate(environment_variable_name.into())
+    }
+
+    /// Map InfluxDB HTTP API URL bindings to `environment_variable_name`.
+    pub fn influxdb(environment_variable_name: impl Into<String>) -> Self {
+        Self::InfluxDb(environment_variable_name.into())
     }
 
     /// Map the bridge named `bridge_name` to `environment_variable_name`.
@@ -293,6 +300,12 @@ mod tests {
             mapping,
             EnvMapping::Weaviate("VECTOR_SEARCH_URL".to_string())
         );
+    }
+
+    #[test]
+    fn env_mapping_influxdb() {
+        let mapping = EnvMapping::influxdb("TSDB_URL");
+        assert_eq!(mapping, EnvMapping::InfluxDb("TSDB_URL".to_string()));
     }
 
     #[test]

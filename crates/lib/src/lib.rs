@@ -120,6 +120,7 @@ pub mod bridge;
     feature = "opensearch",
     feature = "qdrant",
     feature = "weaviate",
+    feature = "influxdb",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -307,6 +308,8 @@ pub use crate::helpers::SqliteHelpers;
 pub use crate::helpers::WeaviateHelpers;
 #[cfg(feature = "rabbitmq")]
 pub use crate::helpers::{ExchangeKind, RabbitHelpers};
+#[cfg(feature = "influxdb")]
+pub use crate::helpers::{InfluxDbHelpers, InfluxFieldValue};
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
 
@@ -349,6 +352,8 @@ pub use crate::resources::{ElasticsearchBindings, ElasticsearchResource};
 #[cfg(feature = "opensearch")]
 pub use crate::resources::{OpenSearchBindings, OpenSearchResource};
 
+#[cfg(feature = "influxdb")]
+pub use crate::resources::{InfluxDbBindings, InfluxDbResource};
 #[cfg(feature = "qdrant")]
 pub use crate::resources::{QdrantBindings, QdrantResource};
 #[cfg(feature = "weaviate")]

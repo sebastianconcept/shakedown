@@ -62,6 +62,8 @@ use crate::event::{EventLevel, EventLog};
 use crate::helpers::DuckDbHelpers;
 #[cfg(feature = "elasticsearch")]
 use crate::helpers::ElasticsearchHelpers;
+#[cfg(feature = "influxdb")]
+use crate::helpers::InfluxDbHelpers;
 #[cfg(feature = "kafka")]
 use crate::helpers::KafkaHelpers;
 #[cfg(feature = "mariadb")]
@@ -102,6 +104,8 @@ use crate::outbox::Outbox;
 use crate::resources::DuckDbBindings;
 #[cfg(feature = "elasticsearch")]
 use crate::resources::ElasticsearchBindings;
+#[cfg(feature = "influxdb")]
+use crate::resources::InfluxDbBindings;
 #[cfg(feature = "mariadb")]
 use crate::resources::MariaDBBindings;
 #[cfg(feature = "mongodb")]
@@ -291,6 +295,9 @@ pub struct Context {
     /// Weaviate bindings when a Weaviate resource populated them (`weaviate` feature).
     #[cfg(feature = "weaviate")]
     weaviate_bindings: Option<WeaviateBindings>,
+    /// InfluxDB bindings when an InfluxDB resource populated them (`influxdb` feature).
+    #[cfg(feature = "influxdb")]
+    influxdb_bindings: Option<InfluxDbBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -324,6 +331,7 @@ pub struct Context {
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -389,6 +397,8 @@ impl Context {
             qdrant_bindings: None,
             #[cfg(feature = "weaviate")]
             weaviate_bindings: None,
+            #[cfg(feature = "influxdb")]
+            influxdb_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -415,6 +425,7 @@ impl Context {
                     feature = "opensearch",
                     feature = "qdrant",
                     feature = "weaviate",
+                    feature = "influxdb",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -473,6 +484,8 @@ impl Context {
             qdrant_bindings: None,
             #[cfg(feature = "weaviate")]
             weaviate_bindings: None,
+            #[cfg(feature = "influxdb")]
+            influxdb_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -499,6 +512,7 @@ impl Context {
                     feature = "opensearch",
                     feature = "qdrant",
                     feature = "weaviate",
+                    feature = "influxdb",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -557,6 +571,8 @@ impl Context {
             qdrant_bindings: None,
             #[cfg(feature = "weaviate")]
             weaviate_bindings: None,
+            #[cfg(feature = "influxdb")]
+            influxdb_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -583,6 +599,7 @@ impl Context {
                     feature = "opensearch",
                     feature = "qdrant",
                     feature = "weaviate",
+                    feature = "influxdb",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -820,6 +837,18 @@ impl Context {
         self.weaviate_bindings.as_ref()
     }
 
+    /// Set InfluxDB bindings for this scenario (typically after InfluxDB provision).
+    #[cfg(feature = "influxdb")]
+    pub fn set_influxdb_bindings(&mut self, influxdb_bindings: InfluxDbBindings) {
+        self.influxdb_bindings = Some(influxdb_bindings);
+    }
+
+    /// InfluxDB HTTP URL, token, org, and scenario bucket when an InfluxDB resource populated them (`influxdb` feature).
+    #[cfg(feature = "influxdb")]
+    pub fn influxdb_bindings(&self) -> Option<&InfluxDbBindings> {
+        self.influxdb_bindings.as_ref()
+    }
+
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
     ///
     /// Call before [`run_scenario`]. After servers start, use [`Self::bridge_url`] and [`Self::bridge`].
@@ -1025,6 +1054,12 @@ impl Context {
         WeaviateHelpers::new(self)
     }
 
+    /// InfluxDB 2.x write/query helpers (`influxdb` feature).
+    #[cfg(feature = "influxdb")]
+    pub fn influxdb(&self) -> InfluxDbHelpers<'_> {
+        InfluxDbHelpers::new(self)
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -1139,6 +1174,7 @@ impl Context {
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1167,6 +1203,7 @@ impl Context {
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1196,6 +1233,7 @@ impl Context {
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1922,6 +1960,43 @@ fn apply_resource_handles_to_weaviate_bindings(ctx: &mut Context, handles: &[Res
     }
 }
 
+#[cfg(feature = "influxdb")]
+/// If any handle metadata carries InfluxDB engine fields, set [`Context::set_influxdb_bindings`].
+fn apply_resource_handles_to_influxdb_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if engine != "influxdb" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|value| value.as_str());
+        let port = meta
+            .get("port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let url = meta.get("url").and_then(|value| value.as_str());
+        let token = meta.get("token").and_then(|value| value.as_str());
+        let organization = meta.get("organization").and_then(|value| value.as_str());
+        let bucket = meta.get("bucket").and_then(|value| value.as_str());
+        if let (Some(host), Some(port), Some(url), Some(token), Some(organization), Some(bucket)) =
+            (host, port, url, token, organization, bucket)
+        {
+            ctx.set_influxdb_bindings(InfluxDbBindings {
+                url: url.to_string(),
+                host: host.to_string(),
+                port,
+                token: token.to_string(),
+                organization: organization.to_string(),
+                bucket: bucket.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(feature = "qdrant")]
 /// If any handle metadata carries Qdrant engine fields, set [`Context::set_qdrant_bindings`].
 fn apply_resource_handles_to_qdrant_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
@@ -2145,6 +2220,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "opensearch",
         feature = "qdrant",
         feature = "weaviate",
+        feature = "influxdb",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2179,6 +2255,7 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "opensearch",
         feature = "qdrant",
         feature = "weaviate",
+        feature = "influxdb",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2503,6 +2580,7 @@ where
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -2526,6 +2604,7 @@ where
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2609,6 +2688,7 @@ where
                             feature = "opensearch",
                             feature = "qdrant",
                             feature = "weaviate",
+                            feature = "influxdb",
                             feature = "services",
                         ),
                         not(feature = "no-diagnostics"),
@@ -2651,6 +2731,8 @@ where
                 apply_resource_handles_to_qdrant_bindings(ctx, &handles);
                 #[cfg(feature = "weaviate")]
                 apply_resource_handles_to_weaviate_bindings(ctx, &handles);
+                #[cfg(feature = "influxdb")]
+                apply_resource_handles_to_influxdb_bindings(ctx, &handles);
                 #[cfg(feature = "fault-injection")]
                 install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
@@ -2678,6 +2760,7 @@ where
                         feature = "opensearch",
                         feature = "qdrant",
                         feature = "weaviate",
+                        feature = "influxdb",
                         feature = "services",
                     ),
                     not(feature = "no-diagnostics"),
@@ -2721,6 +2804,7 @@ where
                 feature = "opensearch",
                 feature = "qdrant",
                 feature = "weaviate",
+                feature = "influxdb",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2752,6 +2836,7 @@ where
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2782,6 +2867,7 @@ where
                     feature = "opensearch",
                     feature = "qdrant",
                     feature = "weaviate",
+                    feature = "influxdb",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2814,6 +2900,7 @@ where
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2840,6 +2927,7 @@ where
                     feature = "opensearch",
                     feature = "qdrant",
                     feature = "weaviate",
+                    feature = "influxdb",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2883,6 +2971,7 @@ where
                 feature = "opensearch",
                 feature = "qdrant",
                 feature = "weaviate",
+                feature = "influxdb",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2925,6 +3014,7 @@ where
                 feature = "opensearch",
                 feature = "qdrant",
                 feature = "weaviate",
+                feature = "influxdb",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2956,6 +3046,7 @@ where
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -3012,6 +3103,7 @@ where
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -3036,6 +3128,7 @@ where
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -3073,6 +3166,7 @@ where
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -3100,6 +3194,7 @@ where
             feature = "opensearch",
             feature = "qdrant",
             feature = "weaviate",
+            feature = "influxdb",
             feature = "services",
         ),
         feature = "diagnostics",
