@@ -7,9 +7,9 @@
 //! cargo test -p shakedown --features kafka,services --test services_us012_kafka_bridge_whoami -- --ignored
 //! ```
 
-use std::collections::HashMap;
 use std::time::Duration;
 
+#[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
 use shakedown::diagnostics::labels::{
     correlation_name_from_container_summary, SHAKEDOWN_DOCKER_LABEL_KEY,
     SHAKEDOWN_DOCKER_LABEL_VALUE, SHAKEDOWN_SERVICE_LABEL_KEY,
@@ -94,41 +94,46 @@ async fn kafka_http_bridge_whoami_env_injection_and_diagnostics() {
                 assert!(handle.is_healthy());
                 assert!(handle.container_id().is_some());
 
-                let diagnostics_handle = shakedown::suite_diagnostics_handle()
-                    .await
-                    .expect("suite diagnostics");
-                let docker = diagnostics_handle.docker();
-                let list = docker
-                    .list_containers(Some(
-                        bollard::query_parameters::ListContainersOptionsBuilder::default()
-                            .all(true)
-                            .filters(&HashMap::from([
-                                (
-                                    "label".to_string(),
-                                    vec![format!(
-                                        "{SHAKEDOWN_DOCKER_LABEL_KEY}={SHAKEDOWN_DOCKER_LABEL_VALUE}"
-                                    )],
-                                ),
-                                ("status".to_string(), vec!["running".to_string()]),
-                            ]))
-                            .build(),
-                    ))
-                    .await
-                    .expect("list containers");
-                let order_summary = list
-                    .iter()
-                    .find(|summary| {
-                        summary.labels.as_ref().is_some_and(|labels| {
-                            labels.get(SHAKEDOWN_SERVICE_LABEL_KEY).map(|v| v.as_str())
-                                == Some("order")
+                #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
+                {
+                    use std::collections::HashMap;
+
+                    let diagnostics_handle = shakedown::suite_diagnostics_handle()
+                        .await
+                        .expect("suite diagnostics");
+                    let docker = diagnostics_handle.docker();
+                    let list = docker
+                        .list_containers(Some(
+                            bollard::query_parameters::ListContainersOptionsBuilder::default()
+                                .all(true)
+                                .filters(&HashMap::from([
+                                    (
+                                        "label".to_string(),
+                                        vec![format!(
+                                            "{SHAKEDOWN_DOCKER_LABEL_KEY}={SHAKEDOWN_DOCKER_LABEL_VALUE}"
+                                        )],
+                                    ),
+                                    ("status".to_string(), vec!["running".to_string()]),
+                                ]))
+                                .build(),
+                        ))
+                        .await
+                        .expect("list containers");
+                    let order_summary = list
+                        .iter()
+                        .find(|summary| {
+                            summary.labels.as_ref().is_some_and(|labels| {
+                                labels.get(SHAKEDOWN_SERVICE_LABEL_KEY).map(|v| v.as_str())
+                                    == Some("order")
+                            })
                         })
-                    })
-                    .expect("running container with io.shakedown.service=order");
-                assert_eq!(
-                    correlation_name_from_container_summary(order_summary),
-                    "order",
-                    "diagnostics correlation name should match registered service name"
-                );
+                        .expect("running container with io.shakedown.service=order");
+                    assert_eq!(
+                        correlation_name_from_container_summary(order_summary),
+                        "order",
+                        "diagnostics correlation name should match registered service name"
+                    );
+                }
 
                 tokio::time::sleep(Duration::from_millis(500)).await;
             })

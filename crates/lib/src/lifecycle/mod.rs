@@ -215,21 +215,13 @@ impl EnvironmentBackend for NoopEnvironmentBackend {
 /// and by future fault-injection code to decide whether to apply faults like
 /// Toxiproxy toxics.
 #[allow(clippy::derivable_impls)] // Manual impl needed for enum without #[default] marker
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, displaydoc::Display)]
+#[ignore_extra_doc_attributes]
 pub enum ScenarioKind {
-    /// A normal scenario (no faults injected)
+    /// Normal
     Normal,
-    /// A faulty scenario (faults may be injected)
+    /// Faulty
     Faulty,
-}
-
-impl std::fmt::Display for ScenarioKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ScenarioKind::Normal => write!(f, "Normal"),
-            ScenarioKind::Faulty => write!(f, "Faulty"),
-        }
-    }
 }
 
 /// Mutable scenario state for one run: resources, backend, ids, and optional messaging/DB bindings.
