@@ -245,6 +245,13 @@ qdrant = [
     "shakedown-macros/qdrant",
     "diagnostics",
 ]
+# Weaviate (`semitechnologies/weaviate` via GenericImage; tag aligned with testcontainers-modules/weaviate)
+weaviate = [
+    "dep:reqwest",
+    "dep:testcontainers",
+    "shakedown-macros/weaviate",
+    "diagnostics",
+]
 # MCP server support (post-MVP, optional)
 mcp = []
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
@@ -484,3 +491,15 @@ required-features = ["qdrant"]
 name = "helpers_qdrant"
 path = "tests/helpers_qdrant.rs"
 required-features = ["qdrant"]
+
+# Weaviate suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "weaviate_vertical"
+path = "tests/weaviate_vertical.rs"
+required-features = ["weaviate"]
+
+# Weaviate helpers schema/object (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_weaviate"
+path = "tests/helpers_weaviate.rs"
+required-features = ["weaviate"]

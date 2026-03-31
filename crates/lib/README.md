@@ -293,15 +293,21 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 - **Image tag:** [`NatsResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_NATS_IMAGE_TAG`** via [`NatsResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`2`** (`nats:2`).
 - [`NatsBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: nats` in handle metadata). Use [`Context::nats()`](src/lifecycle/mod.rs) for [`NatsHelpers`](src/helpers/nats.rs) (`publish`, `subscribe_until` → [`ConsumedMessage`](src/helpers/mod.rs) list). Readiness uses **`async_nats`** connect + **`flush`** (client handshake to the broker).
 
-**Service injection:** with the **`services`** feature, [`EnvMapping::redis`](src/service/types.rs) and convention injection default to **`REDIS_URL`** for [`RedisBindings::connection_url`](src/resources.rs) (shared name for Redis and Valkey). [`EnvMapping::mongo`](src/service/types.rs) and convention injection default to **`MONGODB_URI`** for [`MongoBindings::connection_url`](src/resources.rs) (per-service URL partitioning matches relational DBs when multiple services are registered). [`EnvMapping::nats`](src/service/types.rs) and convention injection default to **`NATS_URL`** for [`NatsBindings::connection_url`](src/resources.rs). [`EnvMapping::neo4j`](src/service/types.rs) and convention injection default to **`NEO4J_URI`** for [`Neo4jBindings::bolt_url`](src/resources.rs).
+**Weaviate (`weaviate` feature, `semitechnologies/weaviate` via `GenericImage`, default tag `1.28.2` — aligned with `testcontainers-modules::weaviate`):**
 
-Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, Redis, Valkey, MongoDB, NATS, Neo4j, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
+- [`WeaviateResource`](src/resources.rs) uses a **suite-level** node: first provision starts one container; refcounted teardown deletes schema classes matching the scenario class prefix, then may remove the container. A short container wait plus lifecycle **`GET /v1/.well-known/ready`** avoids flaky HTTP wait strategies on slow hosts. **`AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true`** is set for local tests.
+- **Image tag:** [`WeaviateResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_WEAVIATE_IMAGE_TAG`** via [`WeaviateResource::with_image_tag_from_env`](src/resources.rs).
+- [`WeaviateBindings`](src/resources.rs) (`rest_url`, `class_prefix`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::weaviate()`](src/lifecycle/mod.rs) for [`WeaviateHelpers`](src/helpers/weaviate.rs) (`create_class`, `create_object`, `get_object`, assertions). Readiness uses **`GET /v1/.well-known/ready`**.
+
+**Service injection:** with the **`services`** feature, [`EnvMapping::redis`](src/service/types.rs) and convention injection default to **`REDIS_URL`** for [`RedisBindings::connection_url`](src/resources.rs) (shared name for Redis and Valkey). [`EnvMapping::mongo`](src/service/types.rs) and convention injection default to **`MONGODB_URI`** for [`MongoBindings::connection_url`](src/resources.rs) (per-service URL partitioning matches relational DBs when multiple services are registered). [`EnvMapping::nats`](src/service/types.rs) and convention injection default to **`NATS_URL`** for [`NatsBindings::connection_url`](src/resources.rs). [`EnvMapping::neo4j`](src/service/types.rs) and convention injection default to **`NEO4J_URI`** for [`Neo4jBindings::bolt_url`](src/resources.rs). [`EnvMapping::weaviate`](src/service/types.rs) and convention injection default to **`WEAVIATE_URL`** for [`WeaviateBindings::rest_url`](src/resources.rs).
+
+Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, Redis, Valkey, MongoDB, NATS, Neo4j, Weaviate, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
 
 Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
 
 ## Infrastructure diagnostics (bollard)
 
-When you enable any **Docker-backed** resource feature (`kafka`, `postgres`, `mariadb`, `mysql`, `redis`, `valkey`, `mongodb`, `nats`, `neo4j`), the crate also enables the **`diagnostics`** feature unless you opt out with **`no-diagnostics`**.
+When you enable any **Docker-backed** resource feature (`kafka`, `postgres`, `mariadb`, `mysql`, `redis`, `valkey`, `mongodb`, `nats`, `neo4j`, `elasticsearch`, `opensearch`, `qdrant`, `weaviate`), the crate also enables the **`diagnostics`** feature unless you opt out with **`no-diagnostics`**.
 
 What it provides (read-only — never starts or stops containers; testcontainers owns lifecycle):
 
@@ -373,6 +379,10 @@ Helpers are gated behind the **same** resource features as the underlying provid
 | `ctx.mongo()` → [`MongoHelpers`](src/helpers/mongo.rs) | `mongodb` | `mongodb` official driver |
 | `ctx.nats()` → [`NatsHelpers`](src/helpers/nats.rs) | `nats` | `async-nats` |
 | `ctx.neo4j()` → [`Neo4jHelpers`](src/helpers/neo4j.rs) | `neo4j` | `neo4rs` |
+| `ctx.elasticsearch()` → [`ElasticsearchHelpers`](src/helpers/elasticsearch.rs) | `elasticsearch` | `reqwest` (HTTP) |
+| `ctx.opensearch()` → [`OpenSearchHelpers`](src/helpers/opensearch.rs) | `opensearch` | `reqwest` (HTTP) |
+| `ctx.qdrant()` → [`QdrantHelpers`](src/helpers/qdrant.rs) | `qdrant` | `qdrant-client` (gRPC) |
+| `ctx.weaviate()` → [`WeaviateHelpers`](src/helpers/weaviate.rs) | `weaviate` | `reqwest` (REST) |
 
 [`ConsumedMessage`](src/helpers/mod.rs) (key, payload, `source` namespaced topic, queue, or NATS subject) is re-exported from the crate root for Kafka, Rabbit, and NATS consume helpers.
 

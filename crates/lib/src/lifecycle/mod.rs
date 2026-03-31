@@ -86,6 +86,8 @@ use crate::helpers::RabbitHelpers;
 use crate::helpers::RedisHelpers;
 #[cfg(feature = "sqlite")]
 use crate::helpers::SqliteHelpers;
+#[cfg(feature = "weaviate")]
+use crate::helpers::WeaviateHelpers;
 #[cfg(all(
     feature = "outbox",
     any(
@@ -122,6 +124,8 @@ use crate::resources::RabbitBindings;
 use crate::resources::RedisBindings;
 #[cfg(feature = "sqlite")]
 use crate::resources::SqliteBindings;
+#[cfg(feature = "weaviate")]
+use crate::resources::WeaviateBindings;
 use crate::resources::{
     BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
 };
@@ -284,6 +288,9 @@ pub struct Context {
     /// Qdrant bindings when a Qdrant resource populated them (`qdrant` feature).
     #[cfg(feature = "qdrant")]
     qdrant_bindings: Option<QdrantBindings>,
+    /// Weaviate bindings when a Weaviate resource populated them (`weaviate` feature).
+    #[cfg(feature = "weaviate")]
+    weaviate_bindings: Option<WeaviateBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -316,6 +323,7 @@ pub struct Context {
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -379,6 +387,8 @@ impl Context {
             opensearch_bindings: None,
             #[cfg(feature = "qdrant")]
             qdrant_bindings: None,
+            #[cfg(feature = "weaviate")]
+            weaviate_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -404,6 +414,7 @@ impl Context {
                     feature = "elasticsearch",
                     feature = "opensearch",
                     feature = "qdrant",
+                    feature = "weaviate",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -460,6 +471,8 @@ impl Context {
             opensearch_bindings: None,
             #[cfg(feature = "qdrant")]
             qdrant_bindings: None,
+            #[cfg(feature = "weaviate")]
+            weaviate_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -485,6 +498,7 @@ impl Context {
                     feature = "elasticsearch",
                     feature = "opensearch",
                     feature = "qdrant",
+                    feature = "weaviate",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -541,6 +555,8 @@ impl Context {
             opensearch_bindings: None,
             #[cfg(feature = "qdrant")]
             qdrant_bindings: None,
+            #[cfg(feature = "weaviate")]
+            weaviate_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -566,6 +582,7 @@ impl Context {
                     feature = "elasticsearch",
                     feature = "opensearch",
                     feature = "qdrant",
+                    feature = "weaviate",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -791,6 +808,18 @@ impl Context {
         self.qdrant_bindings.as_ref()
     }
 
+    /// Set Weaviate bindings for this scenario (typically after Weaviate provision).
+    #[cfg(feature = "weaviate")]
+    pub fn set_weaviate_bindings(&mut self, weaviate_bindings: WeaviateBindings) {
+        self.weaviate_bindings = Some(weaviate_bindings);
+    }
+
+    /// Weaviate REST URL and class name prefix when a Weaviate resource populated them (`weaviate` feature).
+    #[cfg(feature = "weaviate")]
+    pub fn weaviate_bindings(&self) -> Option<&WeaviateBindings> {
+        self.weaviate_bindings.as_ref()
+    }
+
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
     ///
     /// Call before [`run_scenario`]. After servers start, use [`Self::bridge_url`] and [`Self::bridge`].
@@ -990,6 +1019,12 @@ impl Context {
         QdrantHelpers::new(self)
     }
 
+    /// Weaviate schema/object helpers (`weaviate` feature).
+    #[cfg(feature = "weaviate")]
+    pub fn weaviate(&self) -> WeaviateHelpers<'_> {
+        WeaviateHelpers::new(self)
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -1103,6 +1138,7 @@ impl Context {
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1130,6 +1166,7 @@ impl Context {
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1158,6 +1195,7 @@ impl Context {
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1851,6 +1889,39 @@ fn apply_resource_handles_to_opensearch_bindings(ctx: &mut Context, handles: &[R
     }
 }
 
+#[cfg(feature = "weaviate")]
+/// If any handle metadata carries Weaviate engine fields, set [`Context::set_weaviate_bindings`].
+fn apply_resource_handles_to_weaviate_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if engine != "weaviate" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|value| value.as_str());
+        let port = meta
+            .get("port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let rest_url = meta.get("rest_url").and_then(|value| value.as_str());
+        let class_prefix = meta.get("class_prefix").and_then(|value| value.as_str());
+        if let (Some(host), Some(port), Some(rest_url), Some(class_prefix)) =
+            (host, port, rest_url, class_prefix)
+        {
+            ctx.set_weaviate_bindings(WeaviateBindings {
+                rest_url: rest_url.to_string(),
+                host: host.to_string(),
+                port,
+                class_prefix: class_prefix.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(feature = "qdrant")]
 /// If any handle metadata carries Qdrant engine fields, set [`Context::set_qdrant_bindings`].
 fn apply_resource_handles_to_qdrant_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
@@ -2073,6 +2144,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "elasticsearch",
         feature = "opensearch",
         feature = "qdrant",
+        feature = "weaviate",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2106,6 +2178,7 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "elasticsearch",
         feature = "opensearch",
         feature = "qdrant",
+        feature = "weaviate",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2429,6 +2502,7 @@ where
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -2451,6 +2525,7 @@ where
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2532,6 +2607,8 @@ where
                             feature = "neo4j",
                             feature = "elasticsearch",
                             feature = "opensearch",
+                            feature = "qdrant",
+                            feature = "weaviate",
                             feature = "services",
                         ),
                         not(feature = "no-diagnostics"),
@@ -2572,6 +2649,8 @@ where
                 apply_resource_handles_to_opensearch_bindings(ctx, &handles);
                 #[cfg(feature = "qdrant")]
                 apply_resource_handles_to_qdrant_bindings(ctx, &handles);
+                #[cfg(feature = "weaviate")]
+                apply_resource_handles_to_weaviate_bindings(ctx, &handles);
                 #[cfg(feature = "fault-injection")]
                 install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
@@ -2597,6 +2676,8 @@ where
                         feature = "neo4j",
                         feature = "elasticsearch",
                         feature = "opensearch",
+                        feature = "qdrant",
+                        feature = "weaviate",
                         feature = "services",
                     ),
                     not(feature = "no-diagnostics"),
@@ -2638,6 +2719,8 @@ where
                 feature = "neo4j",
                 feature = "elasticsearch",
                 feature = "opensearch",
+                feature = "qdrant",
+                feature = "weaviate",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2668,6 +2751,7 @@ where
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2696,6 +2780,8 @@ where
                     feature = "neo4j",
                     feature = "elasticsearch",
                     feature = "opensearch",
+                    feature = "qdrant",
+                    feature = "weaviate",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2727,6 +2813,7 @@ where
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2751,6 +2838,8 @@ where
                     feature = "neo4j",
                     feature = "elasticsearch",
                     feature = "opensearch",
+                    feature = "qdrant",
+                    feature = "weaviate",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2792,6 +2881,8 @@ where
                 feature = "neo4j",
                 feature = "elasticsearch",
                 feature = "opensearch",
+                feature = "qdrant",
+                feature = "weaviate",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2832,6 +2923,8 @@ where
                 feature = "neo4j",
                 feature = "elasticsearch",
                 feature = "opensearch",
+                feature = "qdrant",
+                feature = "weaviate",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2862,6 +2955,7 @@ where
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2917,6 +3011,7 @@ where
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2940,6 +3035,7 @@ where
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2976,6 +3072,7 @@ where
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -3002,6 +3099,7 @@ where
             feature = "elasticsearch",
             feature = "opensearch",
             feature = "qdrant",
+            feature = "weaviate",
             feature = "services",
         ),
         feature = "diagnostics",

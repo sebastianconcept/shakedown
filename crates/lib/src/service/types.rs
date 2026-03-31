@@ -77,6 +77,8 @@ pub enum EnvMapping {
     OpenSearch(String),
     /// Qdrant gRPC URL (`qdrant` feature) → custom env var name.
     Qdrant(String),
+    /// Weaviate REST base URL (`weaviate` feature) → custom env var name.
+    Weaviate(String),
     /// Named HTTP/gRPC bridge base URL → custom env var name.
     Bridge {
         bridge_name: String,
@@ -153,6 +155,11 @@ impl EnvMapping {
     /// Map Qdrant gRPC URL bindings to `environment_variable_name`.
     pub fn qdrant(environment_variable_name: impl Into<String>) -> Self {
         Self::Qdrant(environment_variable_name.into())
+    }
+
+    /// Map Weaviate REST URL bindings to `environment_variable_name`.
+    pub fn weaviate(environment_variable_name: impl Into<String>) -> Self {
+        Self::Weaviate(environment_variable_name.into())
     }
 
     /// Map the bridge named `bridge_name` to `environment_variable_name`.
@@ -277,6 +284,15 @@ mod tests {
     fn env_mapping_qdrant() {
         let mapping = EnvMapping::qdrant("VECTOR_DB_GRPC");
         assert_eq!(mapping, EnvMapping::Qdrant("VECTOR_DB_GRPC".to_string()));
+    }
+
+    #[test]
+    fn env_mapping_weaviate() {
+        let mapping = EnvMapping::weaviate("VECTOR_SEARCH_URL");
+        assert_eq!(
+            mapping,
+            EnvMapping::Weaviate("VECTOR_SEARCH_URL".to_string())
+        );
     }
 
     #[test]

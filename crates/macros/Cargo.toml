@@ -31,6 +31,8 @@ elasticsearch = []
 opensearch = []
 # Qdrant (propagates to `resources = [Qdrant]`)
 qdrant = []
+# Weaviate (propagates to `resources = [Weaviate]`)
+weaviate = []
 # RabbitMQ integration feature (propagates to generated code in macros)
 rabbitmq = []
 # SQLite in-memory resource (propagates to generated code in macros)

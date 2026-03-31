@@ -25,6 +25,7 @@ pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
     feature = "elasticsearch",
     feature = "opensearch",
     feature = "qdrant",
+    feature = "weaviate",
 ))]
 pub(crate) fn map_backend_error(
     error: impl std::error::Error + Send + Sync + 'static,
@@ -115,6 +116,9 @@ pub mod opensearch;
 #[cfg(feature = "qdrant")]
 pub mod qdrant;
 
+#[cfg(feature = "weaviate")]
+pub mod weaviate;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
@@ -156,3 +160,6 @@ pub use opensearch::OpenSearchHelpers;
 
 #[cfg(feature = "qdrant")]
 pub use qdrant::QdrantHelpers;
+
+#[cfg(feature = "weaviate")]
+pub use weaviate::WeaviateHelpers;
