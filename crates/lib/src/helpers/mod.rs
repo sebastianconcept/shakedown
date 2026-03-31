@@ -23,6 +23,7 @@ pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
     feature = "nats",
     feature = "neo4j",
     feature = "elasticsearch",
+    feature = "opensearch",
 ))]
 pub(crate) fn map_backend_error(
     error: impl std::error::Error + Send + Sync + 'static,
@@ -107,6 +108,9 @@ pub mod neo4j;
 #[cfg(feature = "elasticsearch")]
 pub mod elasticsearch;
 
+#[cfg(feature = "opensearch")]
+pub mod opensearch;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
@@ -142,3 +146,6 @@ pub use neo4j::Neo4jHelpers;
 
 #[cfg(feature = "elasticsearch")]
 pub use elasticsearch::ElasticsearchHelpers;
+
+#[cfg(feature = "opensearch")]
+pub use opensearch::OpenSearchHelpers;

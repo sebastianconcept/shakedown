@@ -229,6 +229,13 @@ elasticsearch = [
     "shakedown-macros/elasticsearch",
     "diagnostics",
 ]
+# OpenSearch 2.x (opensearchproject/opensearch via GenericImage; HTTP via reqwest — OQ-6.1)
+opensearch = [
+    "dep:reqwest",
+    "dep:testcontainers",
+    "shakedown-macros/opensearch",
+    "diagnostics",
+]
 # MCP server support (post-MVP, optional)
 mcp = []
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
@@ -444,3 +451,15 @@ required-features = ["elasticsearch"]
 name = "helpers_elasticsearch"
 path = "tests/helpers_elasticsearch.rs"
 required-features = ["elasticsearch"]
+
+# OpenSearch suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "opensearch_vertical"
+path = "tests/opensearch_vertical.rs"
+required-features = ["opensearch"]
+
+# OpenSearch helpers index/search (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_opensearch"
+path = "tests/helpers_opensearch.rs"
+required-features = ["opensearch"]

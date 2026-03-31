@@ -74,6 +74,8 @@ use crate::helpers::MysqlHelpers;
 use crate::helpers::NatsHelpers;
 #[cfg(feature = "neo4j")]
 use crate::helpers::Neo4jHelpers;
+#[cfg(feature = "opensearch")]
+use crate::helpers::OpenSearchHelpers;
 #[cfg(feature = "postgres")]
 use crate::helpers::PostgresHelpers;
 #[cfg(feature = "rabbitmq")]
@@ -106,6 +108,8 @@ use crate::resources::MysqlBindings;
 use crate::resources::NatsBindings;
 #[cfg(feature = "neo4j")]
 use crate::resources::Neo4jBindings;
+#[cfg(feature = "opensearch")]
+use crate::resources::OpenSearchBindings;
 #[cfg(feature = "postgres")]
 use crate::resources::PostgresBindings;
 #[cfg(feature = "rabbitmq")]
@@ -270,6 +274,9 @@ pub struct Context {
     /// Elasticsearch bindings when an Elasticsearch resource populated them (`elasticsearch` feature).
     #[cfg(feature = "elasticsearch")]
     elasticsearch_bindings: Option<ElasticsearchBindings>,
+    /// OpenSearch bindings when an OpenSearch resource populated them (`opensearch` feature).
+    #[cfg(feature = "opensearch")]
+    opensearch_bindings: Option<OpenSearchBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -300,6 +307,7 @@ pub struct Context {
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -359,6 +367,8 @@ impl Context {
             neo4j_bindings: None,
             #[cfg(feature = "elasticsearch")]
             elasticsearch_bindings: None,
+            #[cfg(feature = "opensearch")]
+            opensearch_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -382,6 +392,7 @@ impl Context {
                     feature = "nats",
                     feature = "neo4j",
                     feature = "elasticsearch",
+                    feature = "opensearch",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -434,6 +445,8 @@ impl Context {
             neo4j_bindings: None,
             #[cfg(feature = "elasticsearch")]
             elasticsearch_bindings: None,
+            #[cfg(feature = "opensearch")]
+            opensearch_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -457,6 +470,7 @@ impl Context {
                     feature = "nats",
                     feature = "neo4j",
                     feature = "elasticsearch",
+                    feature = "opensearch",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -509,6 +523,8 @@ impl Context {
             neo4j_bindings: None,
             #[cfg(feature = "elasticsearch")]
             elasticsearch_bindings: None,
+            #[cfg(feature = "opensearch")]
+            opensearch_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -532,6 +548,7 @@ impl Context {
                     feature = "nats",
                     feature = "neo4j",
                     feature = "elasticsearch",
+                    feature = "opensearch",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -733,6 +750,18 @@ impl Context {
         self.elasticsearch_bindings.as_ref()
     }
 
+    /// Set OpenSearch bindings for this scenario (typically after OpenSearch provision).
+    #[cfg(feature = "opensearch")]
+    pub fn set_opensearch_bindings(&mut self, opensearch_bindings: OpenSearchBindings) {
+        self.opensearch_bindings = Some(opensearch_bindings);
+    }
+
+    /// OpenSearch HTTP URL and index prefix when an OpenSearch resource populated them (`opensearch` feature).
+    #[cfg(feature = "opensearch")]
+    pub fn opensearch_bindings(&self) -> Option<&OpenSearchBindings> {
+        self.opensearch_bindings.as_ref()
+    }
+
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
     ///
     /// Call before [`run_scenario`]. After servers start, use [`Self::bridge_url`] and [`Self::bridge`].
@@ -920,6 +949,12 @@ impl Context {
         ElasticsearchHelpers::new(self)
     }
 
+    /// OpenSearch index/search helpers (`opensearch` feature).
+    #[cfg(feature = "opensearch")]
+    pub fn opensearch(&self) -> OpenSearchHelpers<'_> {
+        OpenSearchHelpers::new(self)
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -1031,6 +1066,7 @@ impl Context {
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1056,6 +1092,7 @@ impl Context {
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1082,6 +1119,7 @@ impl Context {
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1732,6 +1770,49 @@ fn apply_resource_handles_to_elasticsearch_bindings(ctx: &mut Context, handles: 
     }
 }
 
+#[cfg(feature = "opensearch")]
+/// If any handle metadata carries OpenSearch engine fields, set [`Context::set_opensearch_bindings`].
+fn apply_resource_handles_to_opensearch_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if engine != "opensearch" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|value| value.as_str());
+        let port = meta
+            .get("port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let url = meta.get("url").and_then(|value| value.as_str());
+        let index_prefix = meta.get("index_prefix").and_then(|value| value.as_str());
+        let username = meta
+            .get("username")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        let password = meta
+            .get("password")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        if let (Some(host), Some(port), Some(url), Some(index_prefix)) =
+            (host, port, url, index_prefix)
+        {
+            ctx.set_opensearch_bindings(OpenSearchBindings {
+                url: url.to_string(),
+                host: host.to_string(),
+                port,
+                index_prefix: index_prefix.to_string(),
+                username,
+                password,
+            });
+        }
+    }
+}
+
 #[cfg(any(feature = "redis", feature = "valkey"))]
 /// If any handle metadata carries Redis or Valkey engine fields, set [`Context::set_redis_bindings`].
 fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
@@ -1898,6 +1979,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "nats",
         feature = "neo4j",
         feature = "elasticsearch",
+        feature = "opensearch",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -1929,6 +2011,7 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "nats",
         feature = "neo4j",
         feature = "elasticsearch",
+        feature = "opensearch",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2250,6 +2333,7 @@ where
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -2270,6 +2354,7 @@ where
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2350,6 +2435,7 @@ where
                             feature = "nats",
                             feature = "neo4j",
                             feature = "elasticsearch",
+                            feature = "opensearch",
                             feature = "services",
                         ),
                         not(feature = "no-diagnostics"),
@@ -2386,6 +2472,8 @@ where
                 apply_resource_handles_to_neo4j_bindings(ctx, &handles);
                 #[cfg(feature = "elasticsearch")]
                 apply_resource_handles_to_elasticsearch_bindings(ctx, &handles);
+                #[cfg(feature = "opensearch")]
+                apply_resource_handles_to_opensearch_bindings(ctx, &handles);
                 #[cfg(feature = "fault-injection")]
                 install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
@@ -2410,6 +2498,7 @@ where
                         feature = "nats",
                         feature = "neo4j",
                         feature = "elasticsearch",
+                        feature = "opensearch",
                         feature = "services",
                     ),
                     not(feature = "no-diagnostics"),
@@ -2450,6 +2539,7 @@ where
                 feature = "nats",
                 feature = "neo4j",
                 feature = "elasticsearch",
+                feature = "opensearch",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2478,6 +2568,7 @@ where
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2505,6 +2596,7 @@ where
                     feature = "nats",
                     feature = "neo4j",
                     feature = "elasticsearch",
+                    feature = "opensearch",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2534,6 +2626,7 @@ where
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2557,6 +2650,7 @@ where
                     feature = "nats",
                     feature = "neo4j",
                     feature = "elasticsearch",
+                    feature = "opensearch",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2597,6 +2691,7 @@ where
                 feature = "nats",
                 feature = "neo4j",
                 feature = "elasticsearch",
+                feature = "opensearch",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2636,6 +2731,7 @@ where
                 feature = "nats",
                 feature = "neo4j",
                 feature = "elasticsearch",
+                feature = "opensearch",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2664,6 +2760,7 @@ where
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2717,6 +2814,7 @@ where
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2738,6 +2836,7 @@ where
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2772,6 +2871,7 @@ where
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2796,6 +2896,7 @@ where
             feature = "nats",
             feature = "neo4j",
             feature = "elasticsearch",
+            feature = "opensearch",
             feature = "services",
         ),
         feature = "diagnostics",

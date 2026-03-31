@@ -1,7 +1,8 @@
 //! HTTP-based Elasticsearch/OpenSearch index operations (reqwest only; OQ-6.1).
 //!
-//! Shared by [`crate::helpers::elasticsearch::ElasticsearchHelpers`] and
-//! [`crate::resources::ElasticsearchResource`] teardown/readiness paths.
+//! Shared by [`crate::helpers::elasticsearch::ElasticsearchHelpers`],
+//! [`crate::helpers::opensearch::OpenSearchHelpers`], and Elasticsearch/OpenSearch resource
+//! teardown/readiness paths.
 
 use reqwest::Client;
 use serde_json::Value;

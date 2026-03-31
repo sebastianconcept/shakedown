@@ -73,6 +73,8 @@ pub enum EnvMapping {
     DuckDb(String),
     /// Elasticsearch HTTP API base URL (`elasticsearch` feature) → custom env var name.
     Elasticsearch(String),
+    /// OpenSearch HTTP API base URL (`opensearch` feature) → custom env var name.
+    OpenSearch(String),
     /// Named HTTP/gRPC bridge base URL → custom env var name.
     Bridge {
         bridge_name: String,
@@ -139,6 +141,11 @@ impl EnvMapping {
     /// Map Elasticsearch HTTP URL bindings to `environment_variable_name`.
     pub fn elasticsearch(environment_variable_name: impl Into<String>) -> Self {
         Self::Elasticsearch(environment_variable_name.into())
+    }
+
+    /// Map OpenSearch HTTP URL bindings to `environment_variable_name`.
+    pub fn opensearch(environment_variable_name: impl Into<String>) -> Self {
+        Self::OpenSearch(environment_variable_name.into())
     }
 
     /// Map the bridge named `bridge_name` to `environment_variable_name`.
@@ -251,6 +258,12 @@ mod tests {
     fn env_mapping_elasticsearch() {
         let mapping = EnvMapping::elasticsearch("ES_URL");
         assert_eq!(mapping, EnvMapping::Elasticsearch("ES_URL".to_string()));
+    }
+
+    #[test]
+    fn env_mapping_opensearch() {
+        let mapping = EnvMapping::opensearch("OS_URL");
+        assert_eq!(mapping, EnvMapping::OpenSearch("OS_URL".to_string()));
     }
 
     #[test]
