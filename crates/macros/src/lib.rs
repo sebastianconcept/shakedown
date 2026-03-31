@@ -502,6 +502,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "DuckDb" => Ok(quote! {
+            #[cfg(feature = "duckdb")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::DuckDb(
+                    ::shakedown::DuckDbResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "duckdb"))]
+            {
+                ::core::compile_error!(
+                    "DuckDb in #[shakedown::test(resources = [...])] requires `duckdb` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Rabbit" => Ok(quote! {
             #[cfg(feature = "rabbitmq")]
             {
@@ -603,7 +617,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, and `Toxiproxy`"
             ),
         )),
     }
@@ -649,7 +663,7 @@ mod tests {
 
     #[test]
     fn accepts_relational_builtins() {
-        for resource_name in ["Postgres", "MariaDB", "Mysql", "Sqlite"] {
+        for resource_name in ["Postgres", "MariaDB", "Mysql", "Sqlite", "DuckDb"] {
             let resource_ident =
                 parse_str(resource_name).expect("resource identifier should parse");
             assert!(
@@ -666,6 +680,7 @@ mod tests {
             ("MariaDB", "mariadb"),
             ("Mysql", "mysql"),
             ("Sqlite", "sqlite"),
+            ("DuckDb", "duckdb"),
         ] {
             let resource_ident =
                 parse_str(resource_name).expect("resource identifier should parse");

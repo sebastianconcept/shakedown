@@ -16,6 +16,7 @@ pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
     feature = "mariadb",
     feature = "mysql",
     feature = "sqlite",
+    feature = "duckdb",
     feature = "redis",
     feature = "valkey",
     feature = "mongodb",
@@ -87,6 +88,9 @@ pub mod mysql;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
+#[cfg(feature = "duckdb")]
+pub mod duckdb;
+
 #[cfg(any(feature = "redis", feature = "valkey"))]
 pub mod redis;
 
@@ -116,6 +120,9 @@ pub use mysql::MysqlHelpers;
 
 #[cfg(feature = "sqlite")]
 pub use sqlite::SqliteHelpers;
+
+#[cfg(feature = "duckdb")]
+pub use duckdb::DuckDbHelpers;
 
 #[cfg(any(feature = "redis", feature = "valkey"))]
 pub use redis::RedisHelpers;
