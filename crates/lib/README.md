@@ -33,6 +33,7 @@ shakedown/
 | MVP milestone | Status |
 |---------------|--------|
 | `mvp-typed-helpers` | ✅ **Complete** (2026-03-29) — typed helpers on [`Context`](src/lifecycle/mod.rs) ([`KafkaHelpers`](src/helpers/kafka.rs), [`RabbitHelpers`](src/helpers/rabbit.rs), relational [`PostgresHelpers`](src/helpers/postgres.rs) / [`MariaDbHelpers`](src/helpers/mariadb.rs) / [`MysqlHelpers`](src/helpers/mysql.rs) / [`SqliteHelpers`](src/helpers/sqlite.rs)); see [Typed helpers](#typed-helpers) |
+| `extra-infra` | ✅ **Complete** (2026-03-31) — twelve additional first-party resources (Redis, Valkey, MongoDB, NATS, Neo4j, DuckDB, Elasticsearch, OpenSearch, Qdrant, Weaviate, InfluxDB, TimescaleDB); see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) |
 | `mvp-examples` | **Next** — living `crates/examples` catalog ( **`MVP.md`** row 9 in adopted docs under `~/docs/shakedown/`) |
 
 - **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka** and **RabbitMQ** publication proof (`assert_kafka_published`, `assert_rabbit_published`) on top of relational bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below).
@@ -43,6 +44,60 @@ shakedown/
 - **Roadmap:** Further milestones are listed in adopted product docs (`MVP.md` under `~/docs/shakedown/`).
 
 Default `cargo test -p shakedown` does not require Docker.
+
+## Extra infrastructure features (`extra-infra`)
+
+The following **Cargo features** add first-party [`Resource`](src/resources.rs) implementations, [`BuiltinResource`](src/resources.rs) variants, bindings on [`Context`](src/lifecycle/mod.rs), optional [`EnvMapping`](src/service/types.rs) / service injection, and typed helpers. Each feature is **independent** unless noted (for example OpenSearch reuses internal HTTP logic with Elasticsearch but has a separate feature and types).
+
+### Cargo features (one line each)
+
+| Feature | What it enables |
+|---------|-----------------|
+| `redis` | Suite-shared **Redis** (`redis:7`), RESP client, key-prefix isolation, [`RedisHelpers`](src/helpers/redis.rs) (`ctx.redis()`). |
+| `valkey` | Same public types as Redis against **Valkey** (`valkey/valkey:8`); still `ctx.redis()`. |
+| `mongodb` | **MongoDB** `mongod`, per-scenario database, [`MongoHelpers`](src/helpers/mongo.rs). |
+| `nats` | **NATS** core pub/sub (not JetStream), subject-prefix isolation, [`NatsHelpers`](src/helpers/nats.rs). |
+| `neo4j` | **Neo4j 5.x** Bolt (Enterprise image default for multi-database isolation), [`Neo4jHelpers`](src/helpers/neo4j.rs). |
+| `duckdb` | **DuckDB** in-process (no Docker), named in-memory DB per scenario, [`DuckDbHelpers`](src/helpers/duckdb.rs). |
+| `elasticsearch` | **Elasticsearch 8** single-node, index-prefix isolation, [`ElasticsearchHelpers`](src/helpers/elasticsearch.rs); builds shared HTTP [`search_operations`](src/search_operations.rs). |
+| `opensearch` | **OpenSearch 2** single-node, same helper shape as ES with separate types, [`OpenSearchHelpers`](src/helpers/opensearch.rs). |
+| `qdrant` | **Qdrant** vector store, collection-prefix isolation, gRPC helpers [`QdrantHelpers`](src/helpers/qdrant.rs). |
+| `weaviate` | **Weaviate** REST API, class-prefix isolation, [`WeaviateHelpers`](src/helpers/weaviate.rs). |
+| `influxdb` | **InfluxDB 2.x** HTTP (line protocol + Flux), per-scenario bucket, [`InfluxDbHelpers`](src/helpers/influxdb.rs). |
+| `timescaledb` | **TimescaleDB** on Postgres wire protocol, [`PostgresBindings`](src/resources.rs)-shaped URLs, [`TimescaledbHelpers`](src/helpers/timescaledb.rs) (includes `assert_hypertable_exists`). |
+
+### Docker vs in-process
+
+| Engines | Runtime |
+|---------|---------|
+| **Docker** (testcontainers, one suite-shared container per engine where applicable) | `redis`, `valkey`, `mongodb`, `nats`, `neo4j`, `elasticsearch`, `opensearch`, `qdrant`, `weaviate`, `influxdb`, `timescaledb` |
+| **In-process** (no container) | `duckdb` — matches the SQLite model (`spawn_blocking`, no `testcontainers`). |
+
+Integration tests that start containers are usually `#[ignore]`; enable with `-- --ignored` when Docker is available. DuckDB tests run in normal `cargo test` when the feature is enabled.
+
+### Default env vars and image overrides
+
+**Service under test** (`services` feature, `auto_inject`): convention keys used when the matching bindings are present on [`Context`](src/lifecycle/mod.rs). Rename with [`EnvMapping`](src/service/types.rs) / [`MappingOverrides`](src/service/types.rs).
+
+| Engine | Default primary env var | Additional convention vars | Image tag override env |
+|--------|---------------------------|-----------------------------|-------------------------|
+| Redis / Valkey | `REDIS_URL` | — | `SHAKEDOWN_REDIS_IMAGE_TAG` / `SHAKEDOWN_VALKEY_IMAGE_TAG` |
+| MongoDB | `MONGODB_URI` | — | `SHAKEDOWN_MONGO_IMAGE_TAG` |
+| NATS | `NATS_URL` | — | `SHAKEDOWN_NATS_IMAGE_TAG` |
+| Neo4j | `NEO4J_URI` (Bolt URL) | — | `SHAKEDOWN_NEO4J_IMAGE_TAG` |
+| DuckDB | `DUCKDB_URL` | — | — (no image) |
+| Elasticsearch | `ELASTICSEARCH_URL` | — | `SHAKEDOWN_ELASTICSEARCH_IMAGE_TAG` |
+| OpenSearch | `OPENSEARCH_URL` | — | `SHAKEDOWN_OPENSEARCH_IMAGE_TAG` |
+| Qdrant | `QDRANT_URL` (gRPC URL) | — | `SHAKEDOWN_QDRANT_IMAGE_TAG` |
+| Weaviate | `WEAVIATE_URL` (REST) | — | `SHAKEDOWN_WEAVIATE_IMAGE_TAG` |
+| InfluxDB 2.x | `INFLUXDB_URL` | `INFLUXDB_TOKEN`, `INFLUXDB_ORG`, `INFLUXDB_BUCKET` | `SHAKEDOWN_INFLUXDB_IMAGE_TAG` |
+| TimescaleDB | `TIMESCALEDB_URL` | — | `SHAKEDOWN_TIMESCALEDB_IMAGE_TAG` |
+
+### Standalone default vs cluster topologies
+
+**First-party builtins target a single standalone node per engine** (one container per engine per test process, suite-shared and refcounted) with **scenario-scoped logical isolation** (prefixes, databases, buckets, etc.). They do **not** start multi-node or highly available clusters.
+
+If you need **cluster** or **replica-set** layouts (Kafka KRaft quorum, Redis Sentinel, MongoDB replica sets, OpenSearch multi-node, and so on), treat that as **custom infrastructure**: implement [`Resource`](src/resources.rs) for your topology, use **Docker Compose** or an external environment, or point bindings at a team-managed endpoint and document the contract in your scenarios. See [Extension points](#extension-points).
 
 ## Running tests
 
@@ -126,6 +181,13 @@ These need a running Docker engine. They are **skipped** in a normal `cargo test
 | MongoDB vertical + helpers | `cargo test -p shakedown --features mongodb --test mongo_vertical --test helpers_mongo -- --ignored` | — |
 | NATS vertical + helpers | `cargo test -p shakedown --features nats --test nats_vertical --test helpers_nats -- --ignored` | — |
 | Neo4j vertical + helpers | `cargo test -p shakedown --features neo4j --test neo4j_vertical --test helpers_neo4j -- --ignored` | — |
+| DuckDB vertical + helpers | `cargo test -p shakedown --features duckdb --test duckdb_vertical --test helpers_duckdb` | — (no Docker) |
+| Elasticsearch vertical + helpers | `cargo test -p shakedown --features elasticsearch --test elasticsearch_vertical --test helpers_elasticsearch -- --ignored` | — |
+| OpenSearch vertical + helpers | `cargo test -p shakedown --features opensearch --test opensearch_vertical --test helpers_opensearch -- --ignored` | — |
+| Qdrant vertical + helpers | `cargo test -p shakedown --features qdrant --test qdrant_vertical --test helpers_qdrant -- --ignored` | — |
+| Weaviate vertical + helpers | `cargo test -p shakedown --features weaviate --test weaviate_vertical --test helpers_weaviate -- --ignored` | — |
+| InfluxDB vertical + helpers | `cargo test -p shakedown --features influxdb --test influxdb_vertical --test helpers_influxdb -- --ignored` | — |
+| TimescaleDB vertical + helpers | `cargo test -p shakedown --features timescaledb --test timescaledb_vertical --test helpers_timescaledb -- --ignored` | — |
 
 **Note:** `tests/diagnostics_integration.rs` also has a **non-ignored** test (`try_connect_graceful_when_docker_unreachable`); it runs with `cargo test -p shakedown --features kafka` without `--ignored`.
 
@@ -369,7 +431,7 @@ There are **three patterns**; pick based on what you are proving:
 
 **When to use this:** You want the **happy path** for scenario steps: produce or consume messages with isolation baked in, or run SQL assertions against the scenario-scoped database without hand-rolling connection URLs. Helpers use the **same effective bindings** as raw accessors (including Toxiproxy-rewritten Kafka bootstrap when fault injection is active — see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
 
-Entry points: `ctx.kafka()` ([`KafkaHelpers`](src/helpers/kafka.rs)), `ctx.rabbit()` ([`RabbitHelpers`](src/helpers/rabbit.rs)), `ctx.postgres()` ([`PostgresHelpers`](src/helpers/postgres.rs)), `ctx.mariadb()` / `ctx.mysql()` / `ctx.sqlite()` ([`MariaDbHelpers`](src/helpers/mariadb.rs), [`MysqlHelpers`](src/helpers/mysql.rs), [`SqliteHelpers`](src/helpers/sqlite.rs)), `ctx.redis()` ([`RedisHelpers`](src/helpers/redis.rs)), `ctx.mongo()` ([`MongoHelpers`](src/helpers/mongo.rs)).
+Entry points: `ctx.kafka()` ([`KafkaHelpers`](src/helpers/kafka.rs)), `ctx.rabbit()` ([`RabbitHelpers`](src/helpers/rabbit.rs)), `ctx.postgres()` ([`PostgresHelpers`](src/helpers/postgres.rs)), `ctx.mariadb()` / `ctx.mysql()` / `ctx.sqlite()` ([`MariaDbHelpers`](src/helpers/mariadb.rs), [`MysqlHelpers`](src/helpers/mysql.rs), [`SqliteHelpers`](src/helpers/sqlite.rs)), `ctx.redis()` ([`RedisHelpers`](src/helpers/redis.rs)), `ctx.mongo()` ([`MongoHelpers`](src/helpers/mongo.rs)), `ctx.nats()` / `ctx.neo4j()` / `ctx.duckdb()` / `ctx.elasticsearch()` / `ctx.opensearch()` / `ctx.qdrant()` / `ctx.weaviate()` / `ctx.influxdb()` / `ctx.timescaledb()` — see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) and the [feature flags table](#feature-flags-helpers) below.
 
 ### Pattern 3: outbox rows + publication verifiers
 
@@ -938,10 +1000,17 @@ When **[`auto_inject(true)`](src/service/builder.rs)** (the default), the harnes
 | MongoDB | `MONGODB_URI` | `mongodb` feature (`EnvMapping::mongo` renames the var) |
 | NATS | `NATS_URL` | `nats` feature (`EnvMapping::nats` renames the var) |
 | Neo4j | `NEO4J_URI` | `neo4j` feature (`EnvMapping::neo4j` renames the var) |
+| DuckDB | `DUCKDB_URL` | `duckdb` feature |
+| Elasticsearch | `ELASTICSEARCH_URL` | `elasticsearch` feature |
+| OpenSearch | `OPENSEARCH_URL` | `opensearch` feature |
+| Qdrant | `QDRANT_URL` | `qdrant` feature (gRPC URL) |
+| Weaviate | `WEAVIATE_URL` | `weaviate` feature (REST) |
+| InfluxDB 2.x | `INFLUXDB_URL` | `influxdb` feature; also sets `INFLUXDB_TOKEN`, `INFLUXDB_ORG`, `INFLUXDB_BUCKET` |
+| TimescaleDB | `TIMESCALEDB_URL` | `timescaledb` feature (distinct from Postgres `DATABASE_URL`) |
 | HTTP/gRPC bridge | `{UPPER_SNAKE(bridge_name)}_URL` | e.g. bridge `"order-gateway"` → `ORDER_GATEWAY_URL` (`bridges` + `services`) |
 | `depends_on` peer | `{UPPER_SNAKE(service_name)}_URL` | Only for names listed in [`.depends_on`](src/service/builder.rs) (§3) |
 
-**Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`redis`](src/service/types.rs), [`mongo`](src/service/types.rs), [`nats`](src/service/types.rs), [`neo4j`](src/service/types.rs), [`bridge`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
+**Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`redis`](src/service/types.rs), [`mongo`](src/service/types.rs), [`nats`](src/service/types.rs), [`neo4j`](src/service/types.rs), [`duckdb`](src/service/types.rs), [`elasticsearch`](src/service/types.rs), [`opensearch`](src/service/types.rs), [`qdrant`](src/service/types.rs), [`weaviate`](src/service/types.rs), [`influxdb`](src/service/types.rs), [`timescaledb`](src/service/types.rs), [`bridge`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
 
 **Opt out:** [`.auto_inject(false)`](src/service/builder.rs) skips the table above; only `.env` and resolved `.env_mapping` entries are injected.
 

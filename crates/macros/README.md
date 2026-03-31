@@ -73,7 +73,37 @@ async fn with_kafka(ctx: &mut Context) { ... }
 async fn with_relational_resources(ctx: &mut Context) { ... }
 ```
 
-Accepted resource names include `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy` (each feature-gated on the `shakedown` dependency).
+**Builtin identifiers** (each name must match a `shakedown` Cargo feature unless `Fake`):
+
+| `resources = [...]` name | `shakedown` feature |
+|--------------------------|---------------------|
+| `Fake` | always available |
+| `Kafka` | `kafka` |
+| `Rabbit` | `rabbitmq` |
+| `Postgres` | `postgres` |
+| `MariaDB` | `mariadb` |
+| `Mysql` | `mysql` |
+| `Sqlite` | `sqlite` |
+| `DuckDb` | `duckdb` |
+| `Redis` | `redis` |
+| `Valkey` | `valkey` |
+| `Mongo` | `mongodb` |
+| `Nats` | `nats` |
+| `Neo4j` | `neo4j` |
+| `Elasticsearch` | `elasticsearch` |
+| `OpenSearch` | `opensearch` |
+| `Qdrant` | `qdrant` |
+| `Weaviate` | `weaviate` |
+| `InfluxDb` | `influxdb` |
+| `Timescaledb` | `timescaledb` |
+| `Toxiproxy` | `fault-injection` |
+
+Example:
+
+```rust,ignore
+#[shakedown::test(resources = [Elasticsearch, Postgres])]
+async fn search_after_write(ctx: &mut Context) { /* ... */ }
+```
 
 Compile-time UI coverage for these attributes lives in `tests/trybuild/` (pass + `compile_fail` cases with `.stderr` snapshots).
 
@@ -134,10 +164,7 @@ From the repo root: `cargo test -p shakedown-macros` (unit tests + trybuild UI t
 - `shakedown-macros` does NOT depend on `shakedown` (no circular dependency).
 - Users need `tokio = { version = "1", features = ["macros", "rt-multi-thread"] }` in their dev-dependencies for `#[tokio::test]` resolution.
 
-## Next milestone
+## Related docs
 
-After macros ship, the orchestration library adds relational resources:
-
-- **Slug:** `mvp-postgres-mariadb` — Postgres, MariaDB, Mysql, and Sqlite `Resource` providers on the same async harness as Kafka.
-- **Spine:** MVP row 4 in adopted docs [`/Users/seb/docs/shakedown/MVP.md`](/Users/seb/docs/shakedown/MVP.md).
-- **Crate overview:** [`crates/lib/README.md`](../lib/README.md).
+- **Crate overview and resource details:** [`crates/lib/README.md`](../lib/README.md) — includes [Extra infrastructure features](../lib/README.md#extra-infrastructure-features-extra-infra) (`redis` … `timescaledb`) and [Typed helpers](../lib/README.md#typed-helpers).
+- **MVP sequence:** adopted [`MVP.md`](/Users/seb/docs/shakedown/MVP.md).
