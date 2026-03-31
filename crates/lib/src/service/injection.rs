@@ -51,6 +51,7 @@ struct MappingOverrides {
     neo4j: Option<String>,
     duckdb: Option<String>,
     elasticsearch: Option<String>,
+    opensearch: Option<String>,
     bridges: HashMap<String, String>,
     services: HashMap<String, String>,
 }
@@ -69,6 +70,7 @@ impl MappingOverrides {
             neo4j: None,
             duckdb: None,
             elasticsearch: None,
+            opensearch: None,
             bridges: HashMap::new(),
             services: HashMap::new(),
         };
@@ -85,6 +87,7 @@ impl MappingOverrides {
                 EnvMapping::Neo4j(name) => overrides.neo4j = Some(name.clone()),
                 EnvMapping::DuckDb(name) => overrides.duckdb = Some(name.clone()),
                 EnvMapping::Elasticsearch(name) => overrides.elasticsearch = Some(name.clone()),
+                EnvMapping::OpenSearch(name) => overrides.opensearch = Some(name.clone()),
                 EnvMapping::Bridge {
                     bridge_name,
                     env_var,
@@ -213,6 +216,12 @@ fn inject_conventions(
             .elasticsearch
             .as_deref()
             .unwrap_or("ELASTICSEARCH_URL");
+        environment.insert(key.to_string(), bindings.url.clone());
+    }
+
+    #[cfg(feature = "opensearch")]
+    if let Some(bindings) = context.opensearch_bindings() {
+        let key = overrides.opensearch.as_deref().unwrap_or("OPENSEARCH_URL");
         environment.insert(key.to_string(), bindings.url.clone());
     }
 
@@ -374,6 +383,12 @@ fn resolve_env_mapping(
             .map(|bindings| (key.clone(), bindings.url.clone())),
         #[cfg(not(feature = "elasticsearch"))]
         EnvMapping::Elasticsearch(_) => None,
+        #[cfg(feature = "opensearch")]
+        EnvMapping::OpenSearch(key) => context
+            .opensearch_bindings()
+            .map(|bindings| (key.clone(), bindings.url.clone())),
+        #[cfg(not(feature = "opensearch"))]
+        EnvMapping::OpenSearch(_) => None,
         EnvMapping::Bridge {
             bridge_name,
             env_var,

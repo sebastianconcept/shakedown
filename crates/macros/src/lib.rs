@@ -614,6 +614,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "OpenSearch" => Ok(quote! {
+            #[cfg(feature = "opensearch")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::OpenSearch(
+                    ::shakedown::OpenSearchResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "opensearch"))]
+            {
+                ::core::compile_error!(
+                    "OpenSearch in #[shakedown::test(resources = [...])] requires `opensearch` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Toxiproxy" => Ok(quote! {
             #[cfg(feature = "fault-injection")]
             {
@@ -631,7 +645,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, and `Toxiproxy`"
             ),
         )),
     }

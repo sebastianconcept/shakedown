@@ -97,8 +97,8 @@
 
 mod docker_labels;
 
-/// HTTP helpers for Elasticsearch/OpenSearch (reqwest; `elasticsearch` feature).
-#[cfg(feature = "elasticsearch")]
+/// HTTP helpers for Elasticsearch/OpenSearch (reqwest; `elasticsearch` / `opensearch` features).
+#[cfg(any(feature = "elasticsearch", feature = "opensearch"))]
 pub(crate) mod search_operations;
 
 /// Service bridge types and traits (`bridges` feature, default).
@@ -117,6 +117,7 @@ pub mod bridge;
     feature = "nats",
     feature = "neo4j",
     feature = "elasticsearch",
+    feature = "opensearch",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -223,6 +224,7 @@ pub use crate::timeline::{
     feature = "nats",
     feature = "neo4j",
     feature = "elasticsearch",
+    feature = "opensearch",
     feature = "services",
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
@@ -242,6 +244,7 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
         feature = "nats",
         feature = "neo4j",
         feature = "elasticsearch",
+        feature = "opensearch",
         feature = "services",
     ),
 ))]
@@ -286,6 +289,8 @@ pub use crate::helpers::MysqlHelpers;
 pub use crate::helpers::NatsHelpers;
 #[cfg(feature = "neo4j")]
 pub use crate::helpers::Neo4jHelpers;
+#[cfg(feature = "opensearch")]
+pub use crate::helpers::OpenSearchHelpers;
 #[cfg(feature = "postgres")]
 pub use crate::helpers::PostgresHelpers;
 #[cfg(any(feature = "redis", feature = "valkey"))]
@@ -324,10 +329,12 @@ pub use crate::resources::{MongoBindings, MongoResource};
 #[cfg(feature = "neo4j")]
 pub use crate::resources::{Neo4jBindings, Neo4jResource};
 
+#[cfg(any(feature = "elasticsearch", feature = "opensearch"))]
+pub use crate::resources::sanitize_elasticsearch_index_prefix;
 #[cfg(feature = "elasticsearch")]
-pub use crate::resources::{
-    sanitize_elasticsearch_index_prefix, ElasticsearchBindings, ElasticsearchResource,
-};
+pub use crate::resources::{ElasticsearchBindings, ElasticsearchResource};
+#[cfg(feature = "opensearch")]
+pub use crate::resources::{OpenSearchBindings, OpenSearchResource};
 
 #[cfg(feature = "nats")]
 pub use crate::resources::{NatsBindings, NatsResource};
