@@ -29,6 +29,8 @@ fault-injection = []
 elasticsearch = []
 # OpenSearch (propagates to `resources = [OpenSearch]`)
 opensearch = []
+# Qdrant (propagates to `resources = [Qdrant]`)
+qdrant = []
 # RabbitMQ integration feature (propagates to generated code in macros)
 rabbitmq = []
 # SQLite in-memory resource (propagates to generated code in macros)

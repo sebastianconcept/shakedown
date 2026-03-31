@@ -628,6 +628,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Qdrant" => Ok(quote! {
+            #[cfg(feature = "qdrant")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Qdrant(
+                    ::shakedown::QdrantResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "qdrant"))]
+            {
+                ::core::compile_error!(
+                    "Qdrant in #[shakedown::test(resources = [...])] requires `qdrant` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Toxiproxy" => Ok(quote! {
             #[cfg(feature = "fault-injection")]
             {
@@ -645,7 +659,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, and `Toxiproxy`"
             ),
         )),
     }
