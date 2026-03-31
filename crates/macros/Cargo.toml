@@ -35,6 +35,8 @@ qdrant = []
 weaviate = []
 # InfluxDB (propagates to `resources = [InfluxDb]`)
 influxdb = []
+# TimescaleDB (propagates to `resources = [Timescaledb]`)
+timescaledb = []
 # RabbitMQ integration feature (propagates to generated code in macros)
 rabbitmq = []
 # SQLite in-memory resource (propagates to generated code in macros)

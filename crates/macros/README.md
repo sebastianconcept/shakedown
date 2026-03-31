@@ -73,7 +73,7 @@ async fn with_kafka(ctx: &mut Context) { ... }
 async fn with_relational_resources(ctx: &mut Context) { ... }
 ```
 
-Accepted resource names include `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, and `Toxiproxy` (each feature-gated on the `shakedown` dependency).
+Accepted resource names include `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy` (each feature-gated on the `shakedown` dependency).
 
 Compile-time UI coverage for these attributes lives in `tests/trybuild/` (pass + `compile_fail` cases with `.stderr` snapshots).
 

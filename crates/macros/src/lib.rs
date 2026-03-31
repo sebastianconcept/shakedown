@@ -670,6 +670,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Timescaledb" => Ok(quote! {
+            #[cfg(feature = "timescaledb")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Timescaledb(
+                    ::shakedown::TimescaledbResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "timescaledb"))]
+            {
+                ::core::compile_error!(
+                    "Timescaledb in #[shakedown::test(resources = [...])] requires `timescaledb` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Toxiproxy" => Ok(quote! {
             #[cfg(feature = "fault-injection")]
             {
@@ -687,7 +701,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`"
             ),
         )),
     }
@@ -733,7 +747,14 @@ mod tests {
 
     #[test]
     fn accepts_relational_builtins() {
-        for resource_name in ["Postgres", "MariaDB", "Mysql", "Sqlite", "DuckDb"] {
+        for resource_name in [
+            "Postgres",
+            "MariaDB",
+            "Mysql",
+            "Sqlite",
+            "DuckDb",
+            "Timescaledb",
+        ] {
             let resource_ident =
                 parse_str(resource_name).expect("resource identifier should parse");
             assert!(
@@ -751,6 +772,7 @@ mod tests {
             ("Mysql", "mysql"),
             ("Sqlite", "sqlite"),
             ("DuckDb", "duckdb"),
+            ("Timescaledb", "timescaledb"),
         ] {
             let resource_ident =
                 parse_str(resource_name).expect("resource identifier should parse");
