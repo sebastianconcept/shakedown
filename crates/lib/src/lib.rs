@@ -119,6 +119,7 @@ pub mod bridge;
     feature = "elasticsearch",
     feature = "opensearch",
     feature = "qdrant",
+    feature = "weaviate",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -302,6 +303,8 @@ pub use crate::helpers::QdrantHelpers;
 pub use crate::helpers::RedisHelpers;
 #[cfg(feature = "sqlite")]
 pub use crate::helpers::SqliteHelpers;
+#[cfg(feature = "weaviate")]
+pub use crate::helpers::WeaviateHelpers;
 #[cfg(feature = "rabbitmq")]
 pub use crate::helpers::{ExchangeKind, RabbitHelpers};
 #[cfg(feature = "kafka")]
@@ -334,7 +337,12 @@ pub use crate::resources::{MongoBindings, MongoResource};
 #[cfg(feature = "neo4j")]
 pub use crate::resources::{Neo4jBindings, Neo4jResource};
 
-#[cfg(any(feature = "elasticsearch", feature = "opensearch", feature = "qdrant"))]
+#[cfg(any(
+    feature = "elasticsearch",
+    feature = "opensearch",
+    feature = "qdrant",
+    feature = "weaviate"
+))]
 pub use crate::resources::sanitize_elasticsearch_index_prefix;
 #[cfg(feature = "elasticsearch")]
 pub use crate::resources::{ElasticsearchBindings, ElasticsearchResource};
@@ -343,6 +351,8 @@ pub use crate::resources::{OpenSearchBindings, OpenSearchResource};
 
 #[cfg(feature = "qdrant")]
 pub use crate::resources::{QdrantBindings, QdrantResource};
+#[cfg(feature = "weaviate")]
+pub use crate::resources::{WeaviateBindings, WeaviateResource};
 #[cfg(feature = "qdrant")]
 pub use qdrant_client::qdrant::{Distance, PointStruct, ScoredPoint};
 

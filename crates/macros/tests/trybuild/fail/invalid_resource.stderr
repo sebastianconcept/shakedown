@@ -1,4 +1,4 @@
-error: unknown resource type `InvalidResource`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, and `Toxiproxy`
+error: unknown resource type `InvalidResource`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, and `Toxiproxy`
  --> tests/trybuild/fail/invalid_resource.rs:5:32
   |
 5 | #[shakedown::test(resources = [InvalidResource])]
