@@ -1,6 +1,6 @@
 //! Pull policy and env-var binding overrides for service-under-test (`services` feature).
 //!
-//! Pure configuration; applied when starting containers and building injection maps (US-004, US-007).
+//! Pure configuration; applied when starting containers and building injection maps.
 
 use std::collections::HashMap;
 

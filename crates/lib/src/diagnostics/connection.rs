@@ -94,7 +94,7 @@ pub async fn try_connect() -> Option<DiagnosticsHandle> {
     {
         // Use `connect_with_defaults` (not `connect_with_local_defaults`) so `DOCKER_HOST` matches
         // testcontainers and other tooling: `tcp://` / `http://` point at the same engine as
-        // `unix://` when unset (US-010).
+        // `unix://` when unset (matches testcontainers DOCKER_HOST resolution).
         match Docker::connect_with_defaults() {
             Ok(docker) => match docker.ping().await {
                 Ok(_) => Some(DiagnosticsHandle::new(docker)),

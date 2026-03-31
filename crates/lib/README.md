@@ -174,8 +174,8 @@ These need a running Docker engine. They are **skipped** in a normal `cargo test
 | Service host.docker.internal | `cargo test -p shakedown --features services --test service_host_resolution -- --ignored` | — |
 | Multi-service `depends_on` | `cargo test -p shakedown --features services --test services_multi_dependency -- --ignored` | — |
 | Service diagnostics (labels + timeline) | `cargo test -p shakedown --features services --test services_diagnostics -- --ignored` | — |
-| US-012: Kafka + bridge + whoami | `cargo test -p shakedown --features kafka,services --test services_us012_kafka_bridge_whoami -- --ignored` | — |
-| US-013: Postgres + two whoami | `cargo test -p shakedown --features postgres,services --test services_us013_multi_postgres_whoami -- --ignored` | — |
+| Kafka + bridge + whoami | `cargo test -p shakedown --features kafka,services --test services_kafka_bridge_whoami -- --ignored` | — |
+| Postgres + two whoami | `cargo test -p shakedown --features postgres,services --test services_multi_postgres_whoami -- --ignored` | — |
 | Redis vertical + helpers | `cargo test -p shakedown --features redis --test redis_vertical --test helpers_redis -- --ignored` | — |
 | Valkey vertical | `cargo test -p shakedown --features valkey --test valkey_vertical -- --ignored` | — |
 | MongoDB vertical + helpers | `cargo test -p shakedown --features mongodb --test mongo_vertical --test helpers_mongo -- --ignored` | — |
@@ -229,7 +229,7 @@ Docker-backed tests are opt-in; see [Running tests](#running-tests) for the full
 - **Image tag:** [`KafkaResource::with_image_tag`](src/resources.rs), or set `SHAKEDOWN_KAFKA_IMAGE_TAG` and use [`KafkaResource::with_image_tag_from_env`](src/resources.rs).
 - **JVM image:** [`KafkaResource::with_jvm_image`](src/resources.rs) (`apache/kafka` instead of `apache/kafka-native`).
 
-### KafkaBindings (US-004)
+### KafkaBindings
 
 [`KafkaBindings`](src/resources.rs) exposes structured bindings on [`Context`]:
 

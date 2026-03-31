@@ -1,4 +1,4 @@
-//! Multi-service `depends_on` ordering and inter-service env injection (`services` feature, US-011).
+//! Multi-service `depends_on` ordering and inter-service env injection (`services` feature).
 //!
 //! ```text
 //! cargo test -p shakedown --features services --test services_multi_dependency -- --ignored

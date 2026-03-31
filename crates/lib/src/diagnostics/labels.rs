@@ -5,7 +5,7 @@
 //!
 //! - [`SHAKEDOWN_DOCKER_LABEL_KEY`] / [`SHAKEDOWN_DOCKER_LABEL_VALUE`] — all Shakedown-managed containers
 //!   (infrastructure resources and service-under-test).
-//! - [`SHAKEDOWN_SERVICE_LABEL_KEY`] — logical service name on service-under-test containers (US-010);
+//! - [`SHAKEDOWN_SERVICE_LABEL_KEY`] — logical service name on service-under-test containers;
 //!   bollard stats, logs, and `/events` correlation use this for [`correlation_name_from_container_summary`].
 
 pub use crate::docker_labels::{
@@ -14,7 +14,7 @@ pub use crate::docker_labels::{
 };
 
 /// Prefer the logical service name from `io.shakedown.service` when present so stats, logs, and
-/// [`crate::lifecycle::Context::assert_resource`] match the service registration name (US-010).
+/// [`crate::lifecycle::Context::assert_resource`] match the service registration name.
 ///
 /// Public so integration tests and advanced callers can align assertions with the same naming
 /// rules as the diagnostics pollers.
