@@ -1,4 +1,4 @@
-//! Service-under-test Docker lifecycle (`services` feature, US-009).
+//! Service-under-test Docker lifecycle (`services` feature).
 //!
 //! ```text
 //! cargo test -p shakedown --features services --test services_lifecycle -- --ignored

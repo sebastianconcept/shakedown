@@ -355,7 +355,7 @@ pub struct Context {
     /// True once HTTP and gRPC bridge servers have been started for this [`run_scenario`] invocation.
     #[cfg(feature = "bridges")]
     bridge_servers_phase_complete: bool,
-    /// Staged [`crate::service::ServiceSpec`] entries; [`ServiceHandle`] filled when containers are healthy (US-009).
+    /// Staged [`crate::service::ServiceSpec`] entries; [`ServiceHandle`] filled when containers are healthy (service container lifecycle).
     #[cfg(feature = "services")]
     pub(crate) services: HashMap<String, crate::service::ServiceState>,
 }
@@ -1276,10 +1276,11 @@ impl Context {
     }
 
     /// Register a built [`crate::service::ServiceSpec`] for the harness to start after infrastructure
-    /// and bridges (US-009).
+    /// and bridges (service container lifecycle).
     ///
     /// Duplicate service names return [`crate::error::InternalError::InvalidConfiguration`]. Every
-    /// `depends_on` target must already be registered, and the combined dependency graph must be acyclic (US-011);
+    /// `depends_on` target must already be registered, and the combined dependency graph must be acyclic
+    /// (multi-service dependency ordering);
     /// otherwise the new registration is rolled back and the same error variant is returned. [`Self::service_url`]
     /// and [`Self::service_handle`] stay empty until lifecycle attaches a [`ServiceHandle`] after readiness.
     #[cfg(feature = "services")]
@@ -1323,7 +1324,7 @@ impl Context {
             .and_then(|state| state.handle.as_ref())
     }
 
-    /// Used by lifecycle when a service container passes readiness (US-009).
+    /// Used by lifecycle when a service container passes readiness.
     #[cfg(feature = "services")]
     pub(crate) fn set_service_handle(
         &mut self,
@@ -1341,14 +1342,14 @@ impl Context {
 
     /// Number of registered [`crate::service::ServiceSpec`] entries (used by env injection for partitioning).
     #[cfg(feature = "services")]
-    #[allow(dead_code)] // US-007 `inject_service_env`; US-009 lifecycle
+    #[allow(dead_code)] // `inject_service_env`; service container lifecycle
     pub(crate) fn registered_service_count(&self) -> usize {
         self.services.len()
     }
 
     /// Invoke `visit` for each running HTTP/gRPC bridge base URL (service container env injection).
     #[cfg(all(feature = "bridges", feature = "services"))]
-    #[allow(dead_code)] // US-007 `inject_service_env`; US-009 lifecycle
+    #[allow(dead_code)] // `inject_service_env`; service container lifecycle
     pub(crate) fn for_each_bridge_url(&self, mut visit: impl FnMut(&str, &str)) {
         for (name, handle) in &self.bridge_handles {
             visit(name.as_str(), handle.client_url.as_str());

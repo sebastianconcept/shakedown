@@ -104,7 +104,7 @@ tonic = { version = "0.14", default-features = false, features = ["transport"] }
 tonic-prost = "0.14"
 
 [features]
-# HTTP bridge types and `hyper` stack (default-on per `mvp-bridges` US-001)
+# HTTP bridge types and `hyper` stack (default-on per `mvp-bridges` milestone)
 default = ["bridges"]
 bridges = [
     "dep:hyper",
@@ -269,7 +269,7 @@ timescaledb = [
 # MCP server support (post-MVP, optional)
 mcp = []
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
-# `diagnostics` enables bollard log/stats/events for labeled service containers (US-010).
+# `diagnostics` enables bollard log/stats/events for labeled service containers.
 services = ["dep:testcontainers", "dep:reqwest", "diagnostics"]
 
 # Optional macro + Kafka runtime test (Docker); avoids compiling `resources = [Kafka]` without rdkafka
@@ -398,16 +398,16 @@ name = "services_diagnostics"
 path = "tests/services_diagnostics.rs"
 required-features = ["services"]
 
-# US-012: Kafka + HTTP bridge + whoami env echo + diagnostics (Docker); ignored unless --ignored
+# Kafka + HTTP bridge + whoami env echo + diagnostics (Docker); ignored unless --ignored
 [[test]]
-name = "services_us012_kafka_bridge_whoami"
-path = "tests/services_us012_kafka_bridge_whoami.rs"
+name = "services_kafka_bridge_whoami"
+path = "tests/services_kafka_bridge_whoami.rs"
 required-features = ["kafka", "services"]
 
-# US-013: Postgres partitioned DATABASE_URL + two whoami + depends_on (Docker); ignored unless --ignored
+# Postgres partitioned DATABASE_URL + two whoami + depends_on (Docker); ignored unless --ignored
 [[test]]
-name = "services_us013_multi_postgres_whoami"
-path = "tests/services_us013_multi_postgres_whoami.rs"
+name = "services_multi_postgres_whoami"
+path = "tests/services_multi_postgres_whoami.rs"
 required-features = ["postgres", "services"]
 
 # Postgres + RabbitMQ outbox + AMQP publication proof (Docker); no `kafka` feature

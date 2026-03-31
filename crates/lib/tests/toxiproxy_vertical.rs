@@ -1,4 +1,4 @@
-//! Toxiproxy suite container + control API readiness (US-002).
+//! Toxiproxy suite container + control API readiness.
 //!
 //! This target is built only with `--features fault-injection`. The test is **`#[ignore]`** so
 //! `cargo test --workspace` skips Docker by default.

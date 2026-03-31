@@ -1,9 +1,9 @@
-//! Service containers participate in bollard diagnostics (`services` + US-010).
+//! Service containers participate in bollard diagnostics (`services` feature).
 //!
 //! In-scenario [`Context::assert_resource`] is covered by unit tests in `diagnostics/assertions.rs`
 //! (injected rings). This integration test asserts merged `ResourceSample` / `ContainerLog` names
 //! after shutdown. Some Docker hosts omit stats samples until teardown or omit empty streams; logs
-//! and the in-scenario label/correlation check still prove US-010 wiring.
+//! and the in-scenario label/correlation check still prove diagnostics wiring.
 //!
 //! ```text
 //! cargo test -p shakedown --features services --test services_diagnostics -- --ignored
@@ -86,7 +86,7 @@ mod diagnostics_service_tests {
                     assert_eq!(
                         correlation_name_from_container_summary(web_summary),
                         "web",
-                        "US-010: correlation name must match registered service name"
+                        "correlation name must match registered service name"
                     );
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 })

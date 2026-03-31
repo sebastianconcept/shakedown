@@ -3,7 +3,7 @@
 //! Infrastructure and bridges bind on the host loopback. Service containers must reach them via
 //! [`HOST_DOCKER_INTERNAL`]. On Linux, Docker does not define that hostname unless
 //! `--add-host host.docker.internal:host-gateway` is set — use
-//! [`ensure_host_docker_internal_resolution`] when building the container request (US-009).
+//! [`ensure_host_docker_internal_resolution`] when building the container request (service container lifecycle).
 
 use testcontainers::core::Image;
 use testcontainers::ContainerRequest;

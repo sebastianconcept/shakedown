@@ -1,10 +1,10 @@
-//! US-012: single-service end-to-end scenario — Kafka + HTTP bridge env injection + whoami + diagnostics.
+//! Single-service end-to-end scenario — Kafka + HTTP bridge env injection + whoami + diagnostics.
 //!
 //! Proves convention injection (`KAFKA_BOOTSTRAP_SERVERS`, `{BRIDGE}_URL`), `host.docker.internal` rewrite
 //! inside the service container, HTTP health, and bollard-merged diagnostics for the service label.
 //!
 //! ```text
-//! cargo test -p shakedown --features kafka,services --test services_us012_kafka_bridge_whoami -- --ignored
+//! cargo test -p shakedown --features kafka,services --test services_kafka_bridge_whoami -- --ignored
 //! ```
 
 use std::time::Duration;
@@ -22,7 +22,7 @@ use shakedown::{
 };
 
 #[tokio::test]
-#[ignore = "requires Docker; run: cargo test -p shakedown --features kafka,services --test services_us012_kafka_bridge_whoami -- --ignored"]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features kafka,services --test services_kafka_bridge_whoami -- --ignored"]
 async fn kafka_http_bridge_whoami_env_injection_and_diagnostics() {
     std::env::set_var("SHAKEDOWN_STATS_INTERVAL_MS", "150");
 

@@ -9,7 +9,7 @@
 //! [`write_failure_timeline_json`]) for CI and tooling. When infrastructure
 //! signals may explain the failure, [`build_failure_timeline_document`] fills
 //! [`FailureTimelineDocument::hints`] and [`render_failure_timeline`] appends a
-//! `HINT:` section (US-008).
+//! `HINT:` section (root-cause analysis).
 
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -25,7 +25,7 @@ use crate::event::{
 };
 use crate::phase::Phase;
 
-/// Suggestion emitted when an infrastructure event may explain a later failure (US-008).
+/// Suggestion emitted when an infrastructure event may explain a later failure (root-cause analysis).
 #[derive(Debug, Clone, Serialize)]
 pub struct RootCauseHint {
     /// Machine hint class (`oom_before_failure`, `exit_before_failure`, `health_before_failure`).
@@ -55,7 +55,7 @@ pub struct FailureTimelineDocument {
     pub events: Vec<TimelineEventJson>,
     /// Latest resource sample per container at failure.
     pub resource_snapshots: ResourceSnapshotsJson,
-    /// Root-cause hints (US-008): infrastructure events that may explain the failure.
+    /// Root-cause hints: infrastructure events that may explain the failure.
     pub hints: Vec<serde_json::Value>,
 }
 
