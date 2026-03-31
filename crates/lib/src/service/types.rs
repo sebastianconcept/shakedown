@@ -75,6 +75,8 @@ pub enum EnvMapping {
     Elasticsearch(String),
     /// OpenSearch HTTP API base URL (`opensearch` feature) → custom env var name.
     OpenSearch(String),
+    /// Qdrant gRPC URL (`qdrant` feature) → custom env var name.
+    Qdrant(String),
     /// Named HTTP/gRPC bridge base URL → custom env var name.
     Bridge {
         bridge_name: String,
@@ -146,6 +148,11 @@ impl EnvMapping {
     /// Map OpenSearch HTTP URL bindings to `environment_variable_name`.
     pub fn opensearch(environment_variable_name: impl Into<String>) -> Self {
         Self::OpenSearch(environment_variable_name.into())
+    }
+
+    /// Map Qdrant gRPC URL bindings to `environment_variable_name`.
+    pub fn qdrant(environment_variable_name: impl Into<String>) -> Self {
+        Self::Qdrant(environment_variable_name.into())
     }
 
     /// Map the bridge named `bridge_name` to `environment_variable_name`.
@@ -264,6 +271,12 @@ mod tests {
     fn env_mapping_opensearch() {
         let mapping = EnvMapping::opensearch("OS_URL");
         assert_eq!(mapping, EnvMapping::OpenSearch("OS_URL".to_string()));
+    }
+
+    #[test]
+    fn env_mapping_qdrant() {
+        let mapping = EnvMapping::qdrant("VECTOR_DB_GRPC");
+        assert_eq!(mapping, EnvMapping::Qdrant("VECTOR_DB_GRPC".to_string()));
     }
 
     #[test]

@@ -52,6 +52,7 @@ struct MappingOverrides {
     duckdb: Option<String>,
     elasticsearch: Option<String>,
     opensearch: Option<String>,
+    qdrant: Option<String>,
     bridges: HashMap<String, String>,
     services: HashMap<String, String>,
 }
@@ -71,6 +72,7 @@ impl MappingOverrides {
             duckdb: None,
             elasticsearch: None,
             opensearch: None,
+            qdrant: None,
             bridges: HashMap::new(),
             services: HashMap::new(),
         };
@@ -88,6 +90,7 @@ impl MappingOverrides {
                 EnvMapping::DuckDb(name) => overrides.duckdb = Some(name.clone()),
                 EnvMapping::Elasticsearch(name) => overrides.elasticsearch = Some(name.clone()),
                 EnvMapping::OpenSearch(name) => overrides.opensearch = Some(name.clone()),
+                EnvMapping::Qdrant(name) => overrides.qdrant = Some(name.clone()),
                 EnvMapping::Bridge {
                     bridge_name,
                     env_var,
@@ -223,6 +226,12 @@ fn inject_conventions(
     if let Some(bindings) = context.opensearch_bindings() {
         let key = overrides.opensearch.as_deref().unwrap_or("OPENSEARCH_URL");
         environment.insert(key.to_string(), bindings.url.clone());
+    }
+
+    #[cfg(feature = "qdrant")]
+    if let Some(bindings) = context.qdrant_bindings() {
+        let key = overrides.qdrant.as_deref().unwrap_or("QDRANT_URL");
+        environment.insert(key.to_string(), bindings.grpc_url.clone());
     }
 
     // Bridge URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::Bridge`.
@@ -389,6 +398,12 @@ fn resolve_env_mapping(
             .map(|bindings| (key.clone(), bindings.url.clone())),
         #[cfg(not(feature = "opensearch"))]
         EnvMapping::OpenSearch(_) => None,
+        #[cfg(feature = "qdrant")]
+        EnvMapping::Qdrant(key) => context
+            .qdrant_bindings()
+            .map(|bindings| (key.clone(), bindings.grpc_url.clone())),
+        #[cfg(not(feature = "qdrant"))]
+        EnvMapping::Qdrant(_) => None,
         EnvMapping::Bridge {
             bridge_name,
             env_var,

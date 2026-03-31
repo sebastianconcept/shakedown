@@ -83,6 +83,7 @@ tower = { version = "0.5", optional = true, default-features = false, features =
 
 # DuckDB in-process per-scenario resource (no Docker; SPECS: duckdb + spawn_blocking)
 duckdb = { version = "1", default-features = false, features = ["bundled"], optional = true }
+qdrant-client = { version = "1.17", optional = true, default-features = false }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -234,6 +235,14 @@ opensearch = [
     "dep:reqwest",
     "dep:testcontainers",
     "shakedown-macros/opensearch",
+    "diagnostics",
+]
+# Qdrant vector DB (GenericImage `qdrant/qdrant`; gRPC helpers via qdrant-client)
+qdrant = [
+    "dep:qdrant-client",
+    "dep:reqwest",
+    "dep:testcontainers",
+    "shakedown-macros/qdrant",
     "diagnostics",
 ]
 # MCP server support (post-MVP, optional)
@@ -463,3 +472,15 @@ required-features = ["opensearch"]
 name = "helpers_opensearch"
 path = "tests/helpers_opensearch.rs"
 required-features = ["opensearch"]
+
+# Qdrant suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "qdrant_vertical"
+path = "tests/qdrant_vertical.rs"
+required-features = ["qdrant"]
+
+# Qdrant helpers upsert/search (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_qdrant"
+path = "tests/helpers_qdrant.rs"
+required-features = ["qdrant"]

@@ -78,6 +78,8 @@ use crate::helpers::Neo4jHelpers;
 use crate::helpers::OpenSearchHelpers;
 #[cfg(feature = "postgres")]
 use crate::helpers::PostgresHelpers;
+#[cfg(feature = "qdrant")]
+use crate::helpers::QdrantHelpers;
 #[cfg(feature = "rabbitmq")]
 use crate::helpers::RabbitHelpers;
 #[cfg(any(feature = "redis", feature = "valkey"))]
@@ -112,6 +114,8 @@ use crate::resources::Neo4jBindings;
 use crate::resources::OpenSearchBindings;
 #[cfg(feature = "postgres")]
 use crate::resources::PostgresBindings;
+#[cfg(feature = "qdrant")]
+use crate::resources::QdrantBindings;
 #[cfg(feature = "rabbitmq")]
 use crate::resources::RabbitBindings;
 #[cfg(any(feature = "redis", feature = "valkey"))]
@@ -277,6 +281,9 @@ pub struct Context {
     /// OpenSearch bindings when an OpenSearch resource populated them (`opensearch` feature).
     #[cfg(feature = "opensearch")]
     opensearch_bindings: Option<OpenSearchBindings>,
+    /// Qdrant bindings when a Qdrant resource populated them (`qdrant` feature).
+    #[cfg(feature = "qdrant")]
+    qdrant_bindings: Option<QdrantBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -308,6 +315,7 @@ pub struct Context {
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -369,6 +377,8 @@ impl Context {
             elasticsearch_bindings: None,
             #[cfg(feature = "opensearch")]
             opensearch_bindings: None,
+            #[cfg(feature = "qdrant")]
+            qdrant_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -393,6 +403,7 @@ impl Context {
                     feature = "neo4j",
                     feature = "elasticsearch",
                     feature = "opensearch",
+                    feature = "qdrant",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -447,6 +458,8 @@ impl Context {
             elasticsearch_bindings: None,
             #[cfg(feature = "opensearch")]
             opensearch_bindings: None,
+            #[cfg(feature = "qdrant")]
+            qdrant_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -471,6 +484,7 @@ impl Context {
                     feature = "neo4j",
                     feature = "elasticsearch",
                     feature = "opensearch",
+                    feature = "qdrant",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -525,6 +539,8 @@ impl Context {
             elasticsearch_bindings: None,
             #[cfg(feature = "opensearch")]
             opensearch_bindings: None,
+            #[cfg(feature = "qdrant")]
+            qdrant_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -549,6 +565,7 @@ impl Context {
                     feature = "neo4j",
                     feature = "elasticsearch",
                     feature = "opensearch",
+                    feature = "qdrant",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -762,6 +779,18 @@ impl Context {
         self.opensearch_bindings.as_ref()
     }
 
+    /// Set Qdrant bindings for this scenario (typically after Qdrant provision).
+    #[cfg(feature = "qdrant")]
+    pub fn set_qdrant_bindings(&mut self, qdrant_bindings: QdrantBindings) {
+        self.qdrant_bindings = Some(qdrant_bindings);
+    }
+
+    /// Qdrant gRPC/REST endpoints and collection prefix when a Qdrant resource populated them (`qdrant` feature).
+    #[cfg(feature = "qdrant")]
+    pub fn qdrant_bindings(&self) -> Option<&QdrantBindings> {
+        self.qdrant_bindings.as_ref()
+    }
+
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
     ///
     /// Call before [`run_scenario`]. After servers start, use [`Self::bridge_url`] and [`Self::bridge`].
@@ -955,6 +984,12 @@ impl Context {
         OpenSearchHelpers::new(self)
     }
 
+    /// Qdrant vector helpers (`qdrant` feature).
+    #[cfg(feature = "qdrant")]
+    pub fn qdrant(&self) -> QdrantHelpers<'_> {
+        QdrantHelpers::new(self)
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -1067,6 +1102,7 @@ impl Context {
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1093,6 +1129,7 @@ impl Context {
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1120,6 +1157,7 @@ impl Context {
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1813,6 +1851,60 @@ fn apply_resource_handles_to_opensearch_bindings(ctx: &mut Context, handles: &[R
     }
 }
 
+#[cfg(feature = "qdrant")]
+/// If any handle metadata carries Qdrant engine fields, set [`Context::set_qdrant_bindings`].
+fn apply_resource_handles_to_qdrant_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if engine != "qdrant" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|value| value.as_str());
+        let rest_port = meta
+            .get("rest_port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let grpc_port = meta
+            .get("grpc_port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let rest_url = meta.get("rest_url").and_then(|value| value.as_str());
+        let grpc_url = meta.get("grpc_url").and_then(|value| value.as_str());
+        let collection_prefix = meta
+            .get("collection_prefix")
+            .and_then(|value| value.as_str());
+        if let (
+            Some(host),
+            Some(rest_port),
+            Some(grpc_port),
+            Some(rest_url),
+            Some(grpc_url),
+            Some(collection_prefix),
+        ) = (
+            host,
+            rest_port,
+            grpc_port,
+            rest_url,
+            grpc_url,
+            collection_prefix,
+        ) {
+            ctx.set_qdrant_bindings(QdrantBindings {
+                grpc_url: grpc_url.to_string(),
+                rest_url: rest_url.to_string(),
+                host: host.to_string(),
+                grpc_port,
+                rest_port,
+                collection_prefix: collection_prefix.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(any(feature = "redis", feature = "valkey"))]
 /// If any handle metadata carries Redis or Valkey engine fields, set [`Context::set_redis_bindings`].
 fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
@@ -1980,6 +2072,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "neo4j",
         feature = "elasticsearch",
         feature = "opensearch",
+        feature = "qdrant",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2012,6 +2105,7 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "neo4j",
         feature = "elasticsearch",
         feature = "opensearch",
+        feature = "qdrant",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2334,6 +2428,7 @@ where
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -2355,6 +2450,7 @@ where
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2474,6 +2570,8 @@ where
                 apply_resource_handles_to_elasticsearch_bindings(ctx, &handles);
                 #[cfg(feature = "opensearch")]
                 apply_resource_handles_to_opensearch_bindings(ctx, &handles);
+                #[cfg(feature = "qdrant")]
+                apply_resource_handles_to_qdrant_bindings(ctx, &handles);
                 #[cfg(feature = "fault-injection")]
                 install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
@@ -2569,6 +2667,7 @@ where
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2627,6 +2726,7 @@ where
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2761,6 +2861,7 @@ where
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2815,6 +2916,7 @@ where
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2837,6 +2939,7 @@ where
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2872,6 +2975,7 @@ where
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2897,6 +3001,7 @@ where
             feature = "neo4j",
             feature = "elasticsearch",
             feature = "opensearch",
+            feature = "qdrant",
             feature = "services",
         ),
         feature = "diagnostics",

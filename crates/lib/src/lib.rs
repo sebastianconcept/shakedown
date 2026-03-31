@@ -118,6 +118,7 @@ pub mod bridge;
     feature = "neo4j",
     feature = "elasticsearch",
     feature = "opensearch",
+    feature = "qdrant",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -225,6 +226,7 @@ pub use crate::timeline::{
     feature = "neo4j",
     feature = "elasticsearch",
     feature = "opensearch",
+    feature = "qdrant",
     feature = "services",
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
@@ -245,6 +247,7 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
         feature = "neo4j",
         feature = "elasticsearch",
         feature = "opensearch",
+        feature = "qdrant",
         feature = "services",
     ),
 ))]
@@ -293,6 +296,8 @@ pub use crate::helpers::Neo4jHelpers;
 pub use crate::helpers::OpenSearchHelpers;
 #[cfg(feature = "postgres")]
 pub use crate::helpers::PostgresHelpers;
+#[cfg(feature = "qdrant")]
+pub use crate::helpers::QdrantHelpers;
 #[cfg(any(feature = "redis", feature = "valkey"))]
 pub use crate::helpers::RedisHelpers;
 #[cfg(feature = "sqlite")]
@@ -329,12 +334,17 @@ pub use crate::resources::{MongoBindings, MongoResource};
 #[cfg(feature = "neo4j")]
 pub use crate::resources::{Neo4jBindings, Neo4jResource};
 
-#[cfg(any(feature = "elasticsearch", feature = "opensearch"))]
+#[cfg(any(feature = "elasticsearch", feature = "opensearch", feature = "qdrant"))]
 pub use crate::resources::sanitize_elasticsearch_index_prefix;
 #[cfg(feature = "elasticsearch")]
 pub use crate::resources::{ElasticsearchBindings, ElasticsearchResource};
 #[cfg(feature = "opensearch")]
 pub use crate::resources::{OpenSearchBindings, OpenSearchResource};
+
+#[cfg(feature = "qdrant")]
+pub use crate::resources::{QdrantBindings, QdrantResource};
+#[cfg(feature = "qdrant")]
+pub use qdrant_client::qdrant::{Distance, PointStruct, ScoredPoint};
 
 #[cfg(feature = "nats")]
 pub use crate::resources::{NatsBindings, NatsResource};
