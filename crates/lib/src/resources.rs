@@ -169,6 +169,27 @@ pub fn sqlite_named_memory_uri(scenario_id: &str) -> String {
     format!("file:shakedown_{safe}?mode=memory&cache=shared")
 }
 
+/// Build a unique DuckDB **named in-memory** path for a scenario id.
+///
+/// Uses `:memory:<name>` so additional [`duckdb::Connection::open`] calls with the same path attach
+/// to one logical database; distinct scenario ids yield distinct names (isolation). The harness
+/// keeps a primary connection while [`crate::lifecycle::Context`] exposes the same string in
+/// [`DuckDbBindings::database_url`] for helpers and service injection.
+pub fn duckdb_named_memory_database_path(scenario_id: &str) -> String {
+    let mut safe = String::new();
+    for ch in scenario_id.chars().take(120) {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            safe.push(ch.to_ascii_lowercase());
+        } else {
+            safe.push('_');
+        }
+    }
+    if safe.is_empty() {
+        safe.push_str("scenario");
+    }
+    format!(":memory:shakedown_{safe}")
+}
+
 /// Async resource contract — implement this trait to add a new infrastructure type.
 ///
 /// Methods are async because provisioning (especially containers) involves I/O.
@@ -227,6 +248,10 @@ pub enum BuiltinResource {
     /// In-memory SQLite per scenario (no Docker; [`SqliteResource`]).
     Sqlite(SqliteResource),
 
+    #[cfg(feature = "duckdb")]
+    /// In-process DuckDB per scenario (no Docker; [`DuckDbResource`]).
+    DuckDb(DuckDbResource),
+
     #[cfg(feature = "fault-injection")]
     /// Docker-backed Toxiproxy (suite-shared container via [`ToxiproxyResource`]).
     Toxiproxy(ToxiproxyResource),
@@ -272,6 +297,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Mysql(r) => r.provision(scenario_id).await,
             #[cfg(feature = "sqlite")]
             BuiltinResource::Sqlite(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "duckdb")]
+            BuiltinResource::DuckDb(r) => r.provision(scenario_id).await,
             #[cfg(feature = "fault-injection")]
             BuiltinResource::Toxiproxy(r) => r.provision(scenario_id).await,
             #[cfg(feature = "redis")]
@@ -302,6 +329,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Mysql(r) => r.check_ready().await,
             #[cfg(feature = "sqlite")]
             BuiltinResource::Sqlite(r) => r.check_ready().await,
+            #[cfg(feature = "duckdb")]
+            BuiltinResource::DuckDb(r) => r.check_ready().await,
             #[cfg(feature = "fault-injection")]
             BuiltinResource::Toxiproxy(r) => r.check_ready().await,
             #[cfg(feature = "redis")]
@@ -332,6 +361,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Mysql(r) => r.apply_default_seed().await,
             #[cfg(feature = "sqlite")]
             BuiltinResource::Sqlite(r) => r.apply_default_seed().await,
+            #[cfg(feature = "duckdb")]
+            BuiltinResource::DuckDb(r) => r.apply_default_seed().await,
             #[cfg(feature = "fault-injection")]
             BuiltinResource::Toxiproxy(r) => r.apply_default_seed().await,
             #[cfg(feature = "redis")]
@@ -362,6 +393,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Mysql(r) => r.teardown().await,
             #[cfg(feature = "sqlite")]
             BuiltinResource::Sqlite(r) => r.teardown().await,
+            #[cfg(feature = "duckdb")]
+            BuiltinResource::DuckDb(r) => r.teardown().await,
             #[cfg(feature = "fault-injection")]
             BuiltinResource::Toxiproxy(r) => r.teardown().await,
             #[cfg(feature = "redis")]
@@ -3604,6 +3637,118 @@ mod sqlite_impl {
     }
 }
 
+#[cfg(feature = "duckdb")]
+mod duckdb_impl {
+    use super::{duckdb_named_memory_database_path, Resource, ResourceHandle};
+    use crate::error::{InfrastructureError, ScenarioId};
+    use async_trait::async_trait;
+    use duckdb::Connection;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+
+    const RESOURCE_NAME: &str = "duckdb";
+
+    /// In-process DuckDB for one scenario (no Docker).
+    ///
+    /// Opens a **named in-memory** database (see [`super::duckdb_named_memory_database_path`]) so
+    /// [`DuckDbBindings::database_url`] can be used to open further connections to the same logical
+    /// database (helpers use [`tokio::task::spawn_blocking`]).
+    ///
+    /// `duckdb::Connection` is not [`Sync`]; it is wrapped in [`Arc`] [`Mutex`] so [`BuiltinResource`]
+    /// remains [`Sync`].
+    #[derive(Debug, Default)]
+    pub struct DuckDbResource {
+        connection: Option<Arc<Mutex<Connection>>>,
+        database_url: String,
+    }
+
+    impl DuckDbResource {
+        /// New DuckDB resource (connection opened on [`Resource::provision`]).
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    #[async_trait]
+    impl Resource for DuckDbResource {
+        async fn provision(
+            &mut self,
+            scenario_id: &ScenarioId,
+        ) -> Result<Vec<ResourceHandle>, InfrastructureError> {
+            if self.connection.is_some() {
+                return Err(InfrastructureError::AlreadyProvisioned(
+                    RESOURCE_NAME.into(),
+                ));
+            }
+
+            let database_url = duckdb_named_memory_database_path(scenario_id.as_str());
+            let open_path = database_url.clone();
+            let connection = tokio::task::spawn_blocking(move || {
+                Connection::open(Path::new(open_path.as_str()))
+            })
+            .await
+            .map_err(|join_error| InfrastructureError::Provision {
+                resource: RESOURCE_NAME.into(),
+                source: Box::new(std::io::Error::other(join_error.to_string())),
+            })?
+            .map_err(|source| InfrastructureError::Provision {
+                resource: RESOURCE_NAME.into(),
+                source: Box::new(source),
+            })?;
+
+            self.connection = Some(Arc::new(Mutex::new(connection)));
+            self.database_url.clone_from(&database_url);
+
+            Ok(vec![ResourceHandle {
+                id: format!("duckdb_{scenario_id}"),
+                connection_string: database_url.clone(),
+                metadata: Some(serde_json::json!({
+                    "database_url": database_url,
+                    "engine": "duckdb",
+                })),
+            }])
+        }
+
+        async fn check_ready(&self) -> Result<(), InfrastructureError> {
+            let arc = self
+                .connection
+                .as_ref()
+                .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+            let arc = Arc::clone(arc);
+            tokio::task::spawn_blocking(move || {
+                let connection = arc
+                    .lock()
+                    .map_err(|poison| InfrastructureError::Readiness {
+                        resource: RESOURCE_NAME.into(),
+                        source: Box::new(std::io::Error::other(poison.to_string())),
+                    })?;
+                connection
+                    .query_row("SELECT 1", [], |row| row.get::<_, i32>(0))
+                    .map_err(|source| InfrastructureError::Readiness {
+                        resource: RESOURCE_NAME.into(),
+                        source: Box::new(source),
+                    })?;
+                Ok::<(), InfrastructureError>(())
+            })
+            .await
+            .map_err(|join_error| InfrastructureError::Readiness {
+                resource: RESOURCE_NAME.into(),
+                source: Box::new(std::io::Error::other(join_error.to_string())),
+            })?
+        }
+
+        async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+            Ok(())
+        }
+
+        async fn teardown(&mut self) -> Result<(), InfrastructureError> {
+            self.connection.take();
+            self.database_url.clear();
+            Ok(())
+        }
+    }
+}
+
 #[cfg(feature = "fault-injection")]
 mod toxiproxy_impl {
     //! Suite-shared Toxiproxy (`ghcr.io/shopify/toxiproxy`) for fault injection (SPECS §2).
@@ -3920,6 +4065,9 @@ pub use mysql_impl::MysqlResource;
 #[cfg(feature = "sqlite")]
 pub use sqlite_impl::SqliteResource;
 
+#[cfg(feature = "duckdb")]
+pub use duckdb_impl::DuckDbResource;
+
 #[cfg(feature = "redis")]
 pub use redis_impl::RedisResource;
 
@@ -4107,6 +4255,17 @@ pub struct MysqlBindings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SqliteBindings {
     /// URI string for this scenario's database (named in-memory with shared cache; see feature SPECS).
+    pub database_url: String,
+}
+
+/// Connection details for a provisioned in-process DuckDB database (`duckdb` feature).
+///
+/// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
+/// [`crate::lifecycle::Context::duckdb_bindings`] after provision.
+#[cfg(feature = "duckdb")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuckDbBindings {
+    /// Path string for this scenario's database (named in-memory; see [`super::duckdb_named_memory_database_path`]).
     pub database_url: String,
 }
 
@@ -4495,6 +4654,15 @@ mod tests {
         assert!(a.starts_with("file:shakedown_"));
         assert!(a.contains("mode=memory"));
         assert!(a.contains("cache=shared"));
+    }
+
+    #[cfg(feature = "duckdb")]
+    #[test]
+    fn duckdb_named_memory_database_path_is_unique_per_scenario() {
+        let a = super::duckdb_named_memory_database_path("test_a");
+        let b = super::duckdb_named_memory_database_path("test_b");
+        assert_ne!(a, b);
+        assert!(a.starts_with(":memory:shakedown_"));
     }
 
     #[test]

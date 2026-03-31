@@ -81,6 +81,9 @@ prost = { version = "0.14", optional = true }
 tokio-stream = { version = "0.1", optional = true, default-features = false }
 tower = { version = "0.5", optional = true, default-features = false, features = ["util"] }
 
+# DuckDB in-process per-scenario resource (no Docker; SPECS: duckdb + spawn_blocking)
+duckdb = { version = "1", default-features = false, features = ["bundled"], optional = true }
+
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 async-nats = "0.46"
@@ -156,6 +159,8 @@ mysql = [
 ]
 # In-memory SQLite per scenario (no Docker)
 sqlite = ["dep:rusqlite"]
+# In-process DuckDB per scenario (no Docker; no diagnostics)
+duckdb = ["dep:duckdb"]
 # Outbox helpers (requires at least one relational feature)
 outbox = []
 # RabbitMQ integration (Docker + lapin; aligns with kafka: diagnostics via testcontainers)
@@ -251,6 +256,12 @@ name = "helpers_sqlite"
 path = "tests/helpers_sqlite.rs"
 required-features = ["sqlite"]
 
+# DuckDB typed helpers execute/assert integration (no Docker)
+[[test]]
+name = "helpers_duckdb"
+path = "tests/helpers_duckdb.rs"
+required-features = ["duckdb"]
+
 # Postgres suite + bindings (Docker); ignored unless --ignored
 [[test]]
 name = "postgres_vertical"
@@ -286,6 +297,12 @@ required-features = ["kafka", "fault-injection"]
 name = "sqlite_vertical"
 path = "tests/sqlite_vertical.rs"
 required-features = ["sqlite"]
+
+# DuckDB bindings + in-process proof (no Docker)
+[[test]]
+name = "duckdb_vertical"
+path = "tests/duckdb_vertical.rs"
+required-features = ["duckdb"]
 
 # Infrastructure diagnostics (bollard log stream, Docker events, stats rings); Docker required
 [[test]]

@@ -58,6 +58,8 @@ use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownErr
 #[cfg(feature = "bridges")]
 use crate::event::Event;
 use crate::event::{EventLevel, EventLog};
+#[cfg(feature = "duckdb")]
+use crate::helpers::DuckDbHelpers;
 #[cfg(feature = "kafka")]
 use crate::helpers::KafkaHelpers;
 #[cfg(feature = "mariadb")]
@@ -88,6 +90,8 @@ use crate::helpers::SqliteHelpers;
     )
 ))]
 use crate::outbox::Outbox;
+#[cfg(feature = "duckdb")]
+use crate::resources::DuckDbBindings;
 #[cfg(feature = "mariadb")]
 use crate::resources::MariaDBBindings;
 #[cfg(feature = "mongodb")]
@@ -243,6 +247,9 @@ pub struct Context {
     /// SQLite bindings when a SQLite resource populated them (`sqlite` feature).
     #[cfg(feature = "sqlite")]
     sqlite_bindings: Option<SqliteBindings>,
+    /// DuckDB bindings when a DuckDB resource populated them (`duckdb` feature).
+    #[cfg(feature = "duckdb")]
+    duckdb_bindings: Option<DuckDbBindings>,
     /// Redis / Valkey bindings when a matching resource populated them (`redis` / `valkey` features).
     #[cfg(any(feature = "redis", feature = "valkey"))]
     redis_bindings: Option<RedisBindings>,
@@ -331,6 +338,8 @@ impl Context {
             mysql_bindings: None,
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
+            #[cfg(feature = "duckdb")]
+            duckdb_bindings: None,
             #[cfg(any(feature = "redis", feature = "valkey"))]
             redis_bindings: None,
             #[cfg(feature = "mongodb")]
@@ -401,6 +410,8 @@ impl Context {
             mysql_bindings: None,
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
+            #[cfg(feature = "duckdb")]
+            duckdb_bindings: None,
             #[cfg(any(feature = "redis", feature = "valkey"))]
             redis_bindings: None,
             #[cfg(feature = "mongodb")]
@@ -471,6 +482,8 @@ impl Context {
             mysql_bindings: None,
             #[cfg(feature = "sqlite")]
             sqlite_bindings: None,
+            #[cfg(feature = "duckdb")]
+            duckdb_bindings: None,
             #[cfg(any(feature = "redis", feature = "valkey"))]
             redis_bindings: None,
             #[cfg(feature = "mongodb")]
@@ -628,6 +641,18 @@ impl Context {
     #[cfg(feature = "sqlite")]
     pub fn sqlite_bindings(&self) -> Option<&SqliteBindings> {
         self.sqlite_bindings.as_ref()
+    }
+
+    /// Set DuckDB bindings for this scenario (typically after DuckDB provision).
+    #[cfg(feature = "duckdb")]
+    pub fn set_duckdb_bindings(&mut self, duckdb_bindings: DuckDbBindings) {
+        self.duckdb_bindings = Some(duckdb_bindings);
+    }
+
+    /// DuckDB connection path when a DuckDB resource populated them (`duckdb` feature).
+    #[cfg(feature = "duckdb")]
+    pub fn duckdb_bindings(&self) -> Option<&DuckDbBindings> {
+        self.duckdb_bindings.as_ref()
     }
 
     /// Set Redis / Valkey bindings for this scenario (typically after Redis or Valkey provision).
@@ -827,6 +852,12 @@ impl Context {
     #[cfg(feature = "sqlite")]
     pub fn sqlite(&self) -> SqliteHelpers<'_> {
         SqliteHelpers::new(self)
+    }
+
+    /// DuckDB execute/query helpers (`duckdb` feature).
+    #[cfg(feature = "duckdb")]
+    pub fn duckdb(&self) -> DuckDbHelpers<'_> {
+        DuckDbHelpers::new(self)
     }
 
     /// Redis / Valkey key/value helpers (`redis` and/or `valkey` features).
@@ -1403,6 +1434,28 @@ fn apply_resource_handles_to_sqlite_bindings(ctx: &mut Context, handles: &[Resou
             continue;
         };
         ctx.set_sqlite_bindings(SqliteBindings {
+            database_url: database_url.to_string(),
+        });
+    }
+}
+
+#[cfg(feature = "duckdb")]
+/// If any handle metadata carries DuckDB engine fields, set [`Context::set_duckdb_bindings`].
+fn apply_resource_handles_to_duckdb_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for h in handles {
+        let Some(meta) = &h.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if engine != "duckdb" {
+            continue;
+        }
+        let Some(database_url) = meta.get("database_url").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        ctx.set_duckdb_bindings(DuckDbBindings {
             database_url: database_url.to_string(),
         });
     }
@@ -2234,6 +2287,8 @@ where
                 apply_resource_handles_to_mysql_bindings(ctx, &handles);
                 #[cfg(feature = "sqlite")]
                 apply_resource_handles_to_sqlite_bindings(ctx, &handles);
+                #[cfg(feature = "duckdb")]
+                apply_resource_handles_to_duckdb_bindings(ctx, &handles);
                 #[cfg(any(feature = "redis", feature = "valkey"))]
                 apply_resource_handles_to_redis_bindings(ctx, &handles);
                 #[cfg(feature = "mongodb")]

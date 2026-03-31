@@ -259,7 +259,12 @@ pub use crate::resources::{MysqlBindings, MysqlResource};
 #[cfg(feature = "sqlite")]
 pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResource};
 
+#[cfg(feature = "duckdb")]
+pub use crate::resources::{duckdb_named_memory_database_path, DuckDbBindings, DuckDbResource};
+
 pub use crate::helpers::ConsumedMessage;
+#[cfg(feature = "duckdb")]
+pub use crate::helpers::DuckDbHelpers;
 #[cfg(feature = "kafka")]
 pub use crate::helpers::KafkaHelpers;
 #[cfg(feature = "mariadb")]
