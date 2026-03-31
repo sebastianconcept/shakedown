@@ -27,6 +27,7 @@ pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
     feature = "qdrant",
     feature = "weaviate",
     feature = "influxdb",
+    feature = "timescaledb",
 ))]
 pub(crate) fn map_backend_error(
     error: impl std::error::Error + Send + Sync + 'static,
@@ -78,7 +79,7 @@ pub mod kafka;
 #[cfg(feature = "rabbitmq")]
 pub mod rabbit;
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
 pub mod postgres;
 
 #[cfg(any(feature = "mariadb", feature = "mysql"))]
@@ -122,6 +123,9 @@ pub mod weaviate;
 
 #[cfg(feature = "influxdb")]
 pub mod influxdb;
+
+#[cfg(feature = "timescaledb")]
+pub mod timescaledb;
 
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
@@ -170,3 +174,6 @@ pub use weaviate::WeaviateHelpers;
 
 #[cfg(feature = "influxdb")]
 pub use influxdb::{InfluxDbHelpers, InfluxFieldValue};
+
+#[cfg(feature = "timescaledb")]
+pub use timescaledb::TimescaledbHelpers;

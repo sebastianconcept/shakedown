@@ -13,7 +13,7 @@ use crate::resources::KafkaBindings;
 
 #[cfg(feature = "mariadb")]
 use crate::resources::MariaDBBindings;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
 use crate::resources::PostgresBindings;
 #[cfg(feature = "rabbitmq")]
 use crate::resources::RabbitBindings;
@@ -34,6 +34,8 @@ pub struct BridgeResources {
     pub rabbit_channel: Option<Channel>,
     #[cfg(feature = "postgres")]
     pub postgres_bindings: Option<PostgresBindings>,
+    #[cfg(feature = "timescaledb")]
+    pub timescaledb_bindings: Option<PostgresBindings>,
     #[cfg(feature = "mariadb")]
     pub mariadb_bindings: Option<MariaDBBindings>,
 }
@@ -60,6 +62,10 @@ impl fmt::Debug for BridgeResources {
         #[cfg(feature = "postgres")]
         {
             s.field("postgres_bindings", &self.postgres_bindings);
+        }
+        #[cfg(feature = "timescaledb")]
+        {
+            s.field("timescaledb_bindings", &self.timescaledb_bindings);
         }
         #[cfg(feature = "mariadb")]
         {

@@ -88,6 +88,8 @@ use crate::helpers::RabbitHelpers;
 use crate::helpers::RedisHelpers;
 #[cfg(feature = "sqlite")]
 use crate::helpers::SqliteHelpers;
+#[cfg(feature = "timescaledb")]
+use crate::helpers::TimescaledbHelpers;
 #[cfg(feature = "weaviate")]
 use crate::helpers::WeaviateHelpers;
 #[cfg(all(
@@ -118,7 +120,7 @@ use crate::resources::NatsBindings;
 use crate::resources::Neo4jBindings;
 #[cfg(feature = "opensearch")]
 use crate::resources::OpenSearchBindings;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
 use crate::resources::PostgresBindings;
 #[cfg(feature = "qdrant")]
 use crate::resources::QdrantBindings;
@@ -242,6 +244,7 @@ impl std::fmt::Display for ScenarioKind {
 /// [`Context::mongo`] (with the `mongodb` feature), [`Context::nats_bindings`] / [`Context::nats`]
 /// (with the `nats` feature), [`Context::neo4j_bindings`] / [`Context::neo4j`] (with the `neo4j` feature),
 /// [`Context::elasticsearch_bindings`] / [`Context::elasticsearch`] (with the `elasticsearch` feature),
+/// [`Context::timescaledb_bindings`] / [`Context::timescaledb`] (with the `timescaledb` feature),
 /// and (with the `postgres` / `mariadb` / `mysql` / `sqlite` features)
 /// relational bindings accessors.
 pub struct Context {
@@ -298,6 +301,9 @@ pub struct Context {
     /// InfluxDB bindings when an InfluxDB resource populated them (`influxdb` feature).
     #[cfg(feature = "influxdb")]
     influxdb_bindings: Option<InfluxDbBindings>,
+    /// TimescaleDB bindings when a TimescaleDB resource populated them (`timescaledb` feature).
+    #[cfg(feature = "timescaledb")]
+    timescaledb_bindings: Option<PostgresBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -332,6 +338,7 @@ pub struct Context {
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -399,6 +406,8 @@ impl Context {
             weaviate_bindings: None,
             #[cfg(feature = "influxdb")]
             influxdb_bindings: None,
+            #[cfg(feature = "timescaledb")]
+            timescaledb_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -426,6 +435,7 @@ impl Context {
                     feature = "qdrant",
                     feature = "weaviate",
                     feature = "influxdb",
+                    feature = "timescaledb",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -486,6 +496,8 @@ impl Context {
             weaviate_bindings: None,
             #[cfg(feature = "influxdb")]
             influxdb_bindings: None,
+            #[cfg(feature = "timescaledb")]
+            timescaledb_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -513,6 +525,7 @@ impl Context {
                     feature = "qdrant",
                     feature = "weaviate",
                     feature = "influxdb",
+                    feature = "timescaledb",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -573,6 +586,8 @@ impl Context {
             weaviate_bindings: None,
             #[cfg(feature = "influxdb")]
             influxdb_bindings: None,
+            #[cfg(feature = "timescaledb")]
+            timescaledb_bindings: None,
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -600,6 +615,7 @@ impl Context {
                     feature = "qdrant",
                     feature = "weaviate",
                     feature = "influxdb",
+                    feature = "timescaledb",
                     feature = "services",
                 ),
                 feature = "diagnostics",
@@ -849,6 +865,18 @@ impl Context {
         self.influxdb_bindings.as_ref()
     }
 
+    /// Set TimescaleDB bindings for this scenario (typically after TimescaleDB provision).
+    #[cfg(feature = "timescaledb")]
+    pub fn set_timescaledb_bindings(&mut self, timescaledb_bindings: PostgresBindings) {
+        self.timescaledb_bindings = Some(timescaledb_bindings);
+    }
+
+    /// TimescaleDB connection details when a TimescaleDB resource populated them (`timescaledb` feature).
+    #[cfg(feature = "timescaledb")]
+    pub fn timescaledb_bindings(&self) -> Option<&PostgresBindings> {
+        self.timescaledb_bindings.as_ref()
+    }
+
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
     ///
     /// Call before [`run_scenario`]. After servers start, use [`Self::bridge_url`] and [`Self::bridge`].
@@ -1060,6 +1088,12 @@ impl Context {
         InfluxDbHelpers::new(self)
     }
 
+    /// TimescaleDB SQL + hypertable helpers (`timescaledb` feature).
+    #[cfg(feature = "timescaledb")]
+    pub fn timescaledb(&self) -> TimescaledbHelpers<'_> {
+        TimescaledbHelpers::new(self)
+    }
+
     /// Check if the context has any registered resources.
     pub fn is_empty(&self) -> bool {
         self.resources.is_empty()
@@ -1175,6 +1209,7 @@ impl Context {
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1204,6 +1239,7 @@ impl Context {
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1234,6 +1270,7 @@ impl Context {
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -1997,6 +2034,49 @@ fn apply_resource_handles_to_influxdb_bindings(ctx: &mut Context, handles: &[Res
     }
 }
 
+#[cfg(feature = "timescaledb")]
+/// If any handle metadata carries TimescaleDB engine fields, set [`Context::set_timescaledb_bindings`].
+fn apply_resource_handles_to_timescaledb_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if engine != "timescaledb" {
+            continue;
+        }
+        let host = meta.get("host").and_then(|value| value.as_str());
+        let port = meta
+            .get("port")
+            .and_then(|value| value.as_u64())
+            .map(|port| port as u16);
+        let database = meta.get("database").and_then(|value| value.as_str());
+        let username = meta.get("username").and_then(|value| value.as_str());
+        let password = meta.get("password").and_then(|value| value.as_str());
+        let connection_url = meta.get("connection_url").and_then(|value| value.as_str());
+        if let (
+            Some(host),
+            Some(port),
+            Some(database),
+            Some(username),
+            Some(password),
+            Some(connection_url),
+        ) = (host, port, database, username, password, connection_url)
+        {
+            ctx.set_timescaledb_bindings(PostgresBindings {
+                host: host.to_string(),
+                port,
+                database: database.to_string(),
+                username: username.to_string(),
+                password: password.to_string(),
+                connection_url: connection_url.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(feature = "qdrant")]
 /// If any handle metadata carries Qdrant engine fields, set [`Context::set_qdrant_bindings`].
 fn apply_resource_handles_to_qdrant_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
@@ -2221,6 +2301,7 @@ async fn teardown_all_resources(ctx: &mut Context) {
         feature = "qdrant",
         feature = "weaviate",
         feature = "influxdb",
+        feature = "timescaledb",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2256,6 +2337,7 @@ macro_rules! shakedown_merge_diagnostics {
         feature = "qdrant",
         feature = "weaviate",
         feature = "influxdb",
+        feature = "timescaledb",
         feature = "services",
     ),
     not(feature = "no-diagnostics"),
@@ -2301,6 +2383,10 @@ fn bridge_resources_from_context(ctx: &Context) -> Arc<BridgeResources> {
     #[cfg(feature = "postgres")]
     {
         resources.postgres_bindings = ctx.postgres_bindings().cloned();
+    }
+    #[cfg(feature = "timescaledb")]
+    {
+        resources.timescaledb_bindings = ctx.timescaledb_bindings().cloned();
     }
     #[cfg(feature = "mariadb")]
     {
@@ -2581,6 +2667,7 @@ where
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         feature = "diagnostics",
@@ -2605,6 +2692,7 @@ where
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2689,6 +2777,7 @@ where
                             feature = "qdrant",
                             feature = "weaviate",
                             feature = "influxdb",
+                            feature = "timescaledb",
                             feature = "services",
                         ),
                         not(feature = "no-diagnostics"),
@@ -2733,6 +2822,8 @@ where
                 apply_resource_handles_to_weaviate_bindings(ctx, &handles);
                 #[cfg(feature = "influxdb")]
                 apply_resource_handles_to_influxdb_bindings(ctx, &handles);
+                #[cfg(feature = "timescaledb")]
+                apply_resource_handles_to_timescaledb_bindings(ctx, &handles);
                 #[cfg(feature = "fault-injection")]
                 install_fault_handle_if_toxiproxy_provisioned(ctx, &handles);
                 event_log.append_raw(EventLevel::Debug, "lifecycle", "Provisioned resource(s)");
@@ -2761,6 +2852,7 @@ where
                         feature = "qdrant",
                         feature = "weaviate",
                         feature = "influxdb",
+                        feature = "timescaledb",
                         feature = "services",
                     ),
                     not(feature = "no-diagnostics"),
@@ -2805,6 +2897,7 @@ where
                 feature = "qdrant",
                 feature = "weaviate",
                 feature = "influxdb",
+                feature = "timescaledb",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -2837,6 +2930,7 @@ where
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2868,6 +2962,7 @@ where
                     feature = "qdrant",
                     feature = "weaviate",
                     feature = "influxdb",
+                    feature = "timescaledb",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2901,6 +2996,7 @@ where
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -2928,6 +3024,7 @@ where
                     feature = "qdrant",
                     feature = "weaviate",
                     feature = "influxdb",
+                    feature = "timescaledb",
                     feature = "services",
                 ),
                 not(feature = "no-diagnostics"),
@@ -2972,6 +3069,7 @@ where
                 feature = "qdrant",
                 feature = "weaviate",
                 feature = "influxdb",
+                feature = "timescaledb",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -3015,6 +3113,7 @@ where
                 feature = "qdrant",
                 feature = "weaviate",
                 feature = "influxdb",
+                feature = "timescaledb",
                 feature = "services",
             ),
             not(feature = "no-diagnostics"),
@@ -3047,6 +3146,7 @@ where
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -3104,6 +3204,7 @@ where
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -3129,6 +3230,7 @@ where
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -3167,6 +3269,7 @@ where
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         not(feature = "no-diagnostics"),
@@ -3195,6 +3298,7 @@ where
             feature = "qdrant",
             feature = "weaviate",
             feature = "influxdb",
+            feature = "timescaledb",
             feature = "services",
         ),
         feature = "diagnostics",

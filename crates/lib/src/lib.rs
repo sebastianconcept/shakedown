@@ -121,6 +121,7 @@ pub mod bridge;
     feature = "qdrant",
     feature = "weaviate",
     feature = "influxdb",
+    feature = "timescaledb",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -229,6 +230,9 @@ pub use crate::timeline::{
     feature = "elasticsearch",
     feature = "opensearch",
     feature = "qdrant",
+    feature = "weaviate",
+    feature = "influxdb",
+    feature = "timescaledb",
     feature = "services",
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
@@ -250,6 +254,9 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
         feature = "elasticsearch",
         feature = "opensearch",
         feature = "qdrant",
+        feature = "weaviate",
+        feature = "influxdb",
+        feature = "timescaledb",
         feature = "services",
     ),
 ))]
@@ -262,8 +269,14 @@ pub use crate::resources::{
     BuiltinResource, FakeResource, KafkaBindings, RegisteredResource, Resource,
 };
 
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+pub use crate::resources::PostgresBindings;
+
 #[cfg(feature = "postgres")]
-pub use crate::resources::{PostgresBindings, PostgresResource};
+pub use crate::resources::PostgresResource;
+
+#[cfg(feature = "timescaledb")]
+pub use crate::resources::TimescaledbResource;
 
 #[cfg(feature = "mariadb")]
 pub use crate::resources::{MariaDBBindings, MariaDBResource};
@@ -310,6 +323,9 @@ pub use crate::helpers::WeaviateHelpers;
 pub use crate::helpers::{ExchangeKind, RabbitHelpers};
 #[cfg(feature = "influxdb")]
 pub use crate::helpers::{InfluxDbHelpers, InfluxFieldValue};
+
+#[cfg(feature = "timescaledb")]
+pub use crate::helpers::TimescaledbHelpers;
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
 

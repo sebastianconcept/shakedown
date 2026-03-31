@@ -259,6 +259,13 @@ influxdb = [
     "shakedown-macros/influxdb",
     "diagnostics",
 ]
+# TimescaleDB (`timescale/timescaledb` via GenericImage; same wire protocol as Postgres)
+timescaledb = [
+    "dep:tokio-postgres",
+    "dep:testcontainers",
+    "shakedown-macros/timescaledb",
+    "diagnostics",
+]
 # MCP server support (post-MVP, optional)
 mcp = []
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
@@ -522,3 +529,15 @@ required-features = ["influxdb"]
 name = "helpers_influxdb"
 path = "tests/helpers_influxdb.rs"
 required-features = ["influxdb"]
+
+# TimescaleDB suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "timescaledb_vertical"
+path = "tests/timescaledb_vertical.rs"
+required-features = ["timescaledb"]
+
+# TimescaleDB helpers + hypertable assert (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_timescaledb"
+path = "tests/helpers_timescaledb.rs"
+required-features = ["timescaledb"]

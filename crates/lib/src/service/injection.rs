@@ -55,6 +55,7 @@ struct MappingOverrides {
     qdrant: Option<String>,
     weaviate: Option<String>,
     influxdb: Option<String>,
+    timescaledb: Option<String>,
     bridges: HashMap<String, String>,
     services: HashMap<String, String>,
 }
@@ -77,6 +78,7 @@ impl MappingOverrides {
             qdrant: None,
             weaviate: None,
             influxdb: None,
+            timescaledb: None,
             bridges: HashMap::new(),
             services: HashMap::new(),
         };
@@ -97,6 +99,7 @@ impl MappingOverrides {
                 EnvMapping::Qdrant(name) => overrides.qdrant = Some(name.clone()),
                 EnvMapping::Weaviate(name) => overrides.weaviate = Some(name.clone()),
                 EnvMapping::InfluxDb(name) => overrides.influxdb = Some(name.clone()),
+                EnvMapping::Timescaledb(name) => overrides.timescaledb = Some(name.clone()),
                 EnvMapping::Bridge {
                     bridge_name,
                     env_var,
@@ -130,6 +133,7 @@ fn inject_conventions(
         feature = "mariadb",
         feature = "mysql",
         feature = "mongodb",
+        feature = "timescaledb",
     ))]
     let partition_relational = context.registered_service_count() > 1;
 
@@ -255,6 +259,21 @@ fn inject_conventions(
         environment.insert("INFLUXDB_BUCKET".to_string(), bindings.bucket.clone());
     }
 
+    #[cfg(feature = "timescaledb")]
+    if let Some(bindings) = context.timescaledb_bindings() {
+        let key = overrides
+            .timescaledb
+            .as_deref()
+            .unwrap_or("TIMESCALEDB_URL");
+        let url = relational_url_for_service(
+            bindings.connection_url.as_str(),
+            bindings.database.as_str(),
+            service_spec.name(),
+            partition_relational,
+        );
+        environment.insert(key.to_string(), url);
+    }
+
     // Bridge URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::Bridge`.
     #[cfg(all(feature = "bridges", feature = "services"))]
     {
@@ -308,6 +327,7 @@ fn resolve_env_mapping(
         feature = "mariadb",
         feature = "mysql",
         feature = "mongodb",
+        feature = "timescaledb",
     ))]
     let partition_relational = context.registered_service_count() > 1;
     #[cfg(not(any(
@@ -315,6 +335,7 @@ fn resolve_env_mapping(
         feature = "mariadb",
         feature = "mysql",
         feature = "mongodb",
+        feature = "timescaledb",
     )))]
     let _ = service_name;
     match mapping {
@@ -437,6 +458,20 @@ fn resolve_env_mapping(
             .map(|bindings| (key.clone(), bindings.url.clone())),
         #[cfg(not(feature = "influxdb"))]
         EnvMapping::InfluxDb(_) => None,
+        #[cfg(feature = "timescaledb")]
+        EnvMapping::Timescaledb(key) => context.timescaledb_bindings().map(|bindings| {
+            (
+                key.clone(),
+                relational_url_for_service(
+                    bindings.connection_url.as_str(),
+                    bindings.database.as_str(),
+                    service_name,
+                    partition_relational,
+                ),
+            )
+        }),
+        #[cfg(not(feature = "timescaledb"))]
+        EnvMapping::Timescaledb(_) => None,
         EnvMapping::Bridge {
             bridge_name,
             env_var,
