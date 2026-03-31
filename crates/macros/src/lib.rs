@@ -600,6 +600,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "Elasticsearch" => Ok(quote! {
+            #[cfg(feature = "elasticsearch")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::Elasticsearch(
+                    ::shakedown::ElasticsearchResource::new(),
+                ));
+            }
+            #[cfg(not(feature = "elasticsearch"))]
+            {
+                ::core::compile_error!(
+                    "Elasticsearch in #[shakedown::test(resources = [...])] requires `elasticsearch` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Toxiproxy" => Ok(quote! {
             #[cfg(feature = "fault-injection")]
             {
@@ -617,7 +631,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `Nats`, `Neo4j`, `Elasticsearch`, and `Toxiproxy`"
             ),
         )),
     }

@@ -97,6 +97,10 @@
 
 mod docker_labels;
 
+/// HTTP helpers for Elasticsearch/OpenSearch (reqwest; `elasticsearch` feature).
+#[cfg(feature = "elasticsearch")]
+pub(crate) mod search_operations;
+
 /// Service bridge types and traits (`bridges` feature, default).
 #[cfg(feature = "bridges")]
 pub mod bridge;
@@ -112,6 +116,7 @@ pub mod bridge;
     feature = "mongodb",
     feature = "nats",
     feature = "neo4j",
+    feature = "elasticsearch",
     feature = "services",
 ))]
 pub mod diagnostics;
@@ -217,6 +222,7 @@ pub use crate::timeline::{
     feature = "mongodb",
     feature = "nats",
     feature = "neo4j",
+    feature = "elasticsearch",
     feature = "services",
 ))]
 pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsHandle};
@@ -235,6 +241,7 @@ pub use crate::diagnostics::{suite_diagnostics_handle, try_connect, DiagnosticsH
         feature = "mongodb",
         feature = "nats",
         feature = "neo4j",
+        feature = "elasticsearch",
         feature = "services",
     ),
 ))]
@@ -265,6 +272,8 @@ pub use crate::resources::{duckdb_named_memory_database_path, DuckDbBindings, Du
 pub use crate::helpers::ConsumedMessage;
 #[cfg(feature = "duckdb")]
 pub use crate::helpers::DuckDbHelpers;
+#[cfg(feature = "elasticsearch")]
+pub use crate::helpers::ElasticsearchHelpers;
 #[cfg(feature = "kafka")]
 pub use crate::helpers::KafkaHelpers;
 #[cfg(feature = "mariadb")]
@@ -314,6 +323,11 @@ pub use crate::resources::{MongoBindings, MongoResource};
 
 #[cfg(feature = "neo4j")]
 pub use crate::resources::{Neo4jBindings, Neo4jResource};
+
+#[cfg(feature = "elasticsearch")]
+pub use crate::resources::{
+    sanitize_elasticsearch_index_prefix, ElasticsearchBindings, ElasticsearchResource,
+};
 
 #[cfg(feature = "nats")]
 pub use crate::resources::{NatsBindings, NatsResource};

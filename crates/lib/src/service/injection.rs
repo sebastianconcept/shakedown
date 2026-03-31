@@ -50,6 +50,7 @@ struct MappingOverrides {
     nats: Option<String>,
     neo4j: Option<String>,
     duckdb: Option<String>,
+    elasticsearch: Option<String>,
     bridges: HashMap<String, String>,
     services: HashMap<String, String>,
 }
@@ -67,6 +68,7 @@ impl MappingOverrides {
             nats: None,
             neo4j: None,
             duckdb: None,
+            elasticsearch: None,
             bridges: HashMap::new(),
             services: HashMap::new(),
         };
@@ -82,6 +84,7 @@ impl MappingOverrides {
                 EnvMapping::Nats(name) => overrides.nats = Some(name.clone()),
                 EnvMapping::Neo4j(name) => overrides.neo4j = Some(name.clone()),
                 EnvMapping::DuckDb(name) => overrides.duckdb = Some(name.clone()),
+                EnvMapping::Elasticsearch(name) => overrides.elasticsearch = Some(name.clone()),
                 EnvMapping::Bridge {
                     bridge_name,
                     env_var,
@@ -202,6 +205,15 @@ fn inject_conventions(
     if let Some(bindings) = context.duckdb_bindings() {
         let key = overrides.duckdb.as_deref().unwrap_or("DUCKDB_URL");
         environment.insert(key.to_string(), bindings.database_url.clone());
+    }
+
+    #[cfg(feature = "elasticsearch")]
+    if let Some(bindings) = context.elasticsearch_bindings() {
+        let key = overrides
+            .elasticsearch
+            .as_deref()
+            .unwrap_or("ELASTICSEARCH_URL");
+        environment.insert(key.to_string(), bindings.url.clone());
     }
 
     // Bridge URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::Bridge`.
@@ -356,6 +368,12 @@ fn resolve_env_mapping(
             .map(|bindings| (key.clone(), bindings.database_url.clone())),
         #[cfg(not(feature = "duckdb"))]
         EnvMapping::DuckDb(_) => None,
+        #[cfg(feature = "elasticsearch")]
+        EnvMapping::Elasticsearch(key) => context
+            .elasticsearch_bindings()
+            .map(|bindings| (key.clone(), bindings.url.clone())),
+        #[cfg(not(feature = "elasticsearch"))]
+        EnvMapping::Elasticsearch(_) => None,
         EnvMapping::Bridge {
             bridge_name,
             env_var,

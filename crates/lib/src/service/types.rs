@@ -71,6 +71,8 @@ pub enum EnvMapping {
     Neo4j(String),
     /// DuckDB database path string (`duckdb` feature) → custom env var name.
     DuckDb(String),
+    /// Elasticsearch HTTP API base URL (`elasticsearch` feature) → custom env var name.
+    Elasticsearch(String),
     /// Named HTTP/gRPC bridge base URL → custom env var name.
     Bridge {
         bridge_name: String,
@@ -132,6 +134,11 @@ impl EnvMapping {
     /// Map DuckDB bindings to `environment_variable_name`.
     pub fn duckdb(environment_variable_name: impl Into<String>) -> Self {
         Self::DuckDb(environment_variable_name.into())
+    }
+
+    /// Map Elasticsearch HTTP URL bindings to `environment_variable_name`.
+    pub fn elasticsearch(environment_variable_name: impl Into<String>) -> Self {
+        Self::Elasticsearch(environment_variable_name.into())
     }
 
     /// Map the bridge named `bridge_name` to `environment_variable_name`.
@@ -238,6 +245,12 @@ mod tests {
     fn env_mapping_duckdb() {
         let mapping = EnvMapping::duckdb("ANALYTICS_DUCK");
         assert_eq!(mapping, EnvMapping::DuckDb("ANALYTICS_DUCK".to_string()));
+    }
+
+    #[test]
+    fn env_mapping_elasticsearch() {
+        let mapping = EnvMapping::elasticsearch("ES_URL");
+        assert_eq!(mapping, EnvMapping::Elasticsearch("ES_URL".to_string()));
     }
 
     #[test]
