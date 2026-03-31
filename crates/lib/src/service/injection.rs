@@ -4,7 +4,7 @@
 //! All values are rewritten for service containers via
 //! [`crate::service::address::rewrite_injected_addresses_for_service_container`].
 //!
-//! `inject_service_env` is consumed by service container lifecycle (`run_scenario`, US-009).
+//! `inject_service_env` is consumed by service container lifecycle (`run_scenario`).
 
 use std::collections::HashMap;
 

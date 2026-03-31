@@ -1,6 +1,6 @@
 //! Read-only view of a running service-under-test (`services` feature).
 //!
-//! Populated by the harness lifecycle (US-009). Test authors use only the public accessors.
+//! Populated by the harness lifecycle. Test authors use only the public accessors.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -33,7 +33,7 @@ impl fmt::Debug for ServiceHandle {
 }
 
 impl ServiceHandle {
-    /// Constructed by the harness when a service container is running (US-009).
+    /// Constructed by the harness when a service container is running.
     pub(crate) fn new(
         name: String,
         base_url: String,
@@ -70,7 +70,7 @@ impl ServiceHandle {
         self.healthy.load(Ordering::Relaxed)
     }
 
-    /// Used by lifecycle when readiness is determined (US-009); also exercised from unit tests.
+    /// Used by lifecycle when readiness is determined; also exercised from unit tests.
     #[allow(dead_code)] // Not called from production lifecycle yet (health is set at construction).
     pub(crate) fn set_healthy(&self, healthy: bool) {
         self.healthy.store(healthy, Ordering::Relaxed);

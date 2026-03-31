@@ -1,8 +1,8 @@
 //! Kafka bootstrap is rewritten to the Toxiproxy listener for `ScenarioKind::Faulty` when both
-//! Kafka and Toxiproxy are registered (US-004). Built with `--features kafka,fault-injection`.
+//! Kafka and Toxiproxy are registered (fault injection). Built with `--features kafka,fault-injection`.
 //! **`#[ignore]`** — requires Docker.
 //!
-//! [`kafka_helpers_use_same_proxied_bootstrap_as_bindings`] (US-011) proves [`shakedown::KafkaHelpers`]
+//! [`kafka_helpers_use_same_proxied_bootstrap_as_bindings`] proves [`shakedown::KafkaHelpers`]
 //! reads the same effective [`shakedown::KafkaBindings`] as [`shakedown::Context::kafka_bindings`]
 //! (Toxiproxy listen address when Faulty + Kafka + Toxiproxy). `KafkaHelpers` uses
 //! `kafka_bindings.bootstrap_servers` for rdkafka (`helpers/kafka.rs`).
@@ -12,7 +12,7 @@
 //! (common Kafka + transparent-proxy caveat). Bootstrap rewrite and control-plane toxics are proven
 //! in this file and in [`faulty_kafka_bootstrap_matches_toxiproxy_listen_and_toxic_applies`]; end-to-end
 //! rdkafka through the proxy may require broker `advertised.listeners` tuning — see adopted-docs
-//! `feature/mvp-typed-helpers/NOTES.md` (US-011).
+//! `feature/mvp-typed-helpers/NOTES.md`.
 //!
 //! ```text
 //! cargo test -p shakedown --features kafka,fault-injection --test fault_injection_kafka -- --ignored
@@ -117,7 +117,7 @@ async fn kafka_helpers_use_same_proxied_bootstrap_as_bindings(ctx: &mut shakedow
         .to_string();
     assert_eq!(
         bootstrap, proxy_listen,
-        "US-011: helpers must see Toxiproxy bootstrap (Faulty + Kafka + Toxiproxy)"
+        "helpers must see Toxiproxy bootstrap (Faulty + Kafka + Toxiproxy)"
     );
 }
 

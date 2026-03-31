@@ -1,4 +1,4 @@
-//! `host.docker.internal` reachability from a service-style container (US-008).
+//! `host.docker.internal` reachability from a service-style container.
 //!
 //! **Docker:** this test is **`#[ignore]`** so default `cargo test` stays Docker-free.
 //!

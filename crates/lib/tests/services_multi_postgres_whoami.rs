@@ -1,11 +1,11 @@
-//! US-013: multi-service end-to-end — Postgres + two `traefik/whoami` with `depends_on`.
+//! Multi-service end-to-end — Postgres + two `traefik/whoami` with `depends_on`.
 //!
 //! Proves partitioned `DATABASE_URL` (same env var name, distinct DB path per service),
 //! inter-service `UPSTREAM_URL` injection, startup order (upstream healthy before downstream),
 //! and HTTP 200 + env echo on both `service_url()` endpoints.
 //!
 //! ```text
-//! cargo test -p shakedown --features postgres,services --test services_us013_multi_postgres_whoami -- --ignored
+//! cargo test -p shakedown --features postgres,services --test services_multi_postgres_whoami -- --ignored
 //! ```
 
 use std::time::Duration;
@@ -29,7 +29,7 @@ fn database_name_from_postgres_url_line(line: &str) -> Option<&str> {
 }
 
 #[tokio::test]
-#[ignore = "requires Docker; run: cargo test -p shakedown --features postgres,services --test services_us013_multi_postgres_whoami -- --ignored"]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features postgres,services --test services_multi_postgres_whoami -- --ignored"]
 async fn postgres_partitioned_database_urls_depends_on_and_env_echo() {
     let upstream_spec = ServiceUnderTest::docker("traefik/whoami:v1.10")
         .name("upstream")
