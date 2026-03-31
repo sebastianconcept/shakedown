@@ -252,6 +252,13 @@ weaviate = [
     "shakedown-macros/weaviate",
     "diagnostics",
 ]
+# InfluxDB 2.x (`influxdb:2` via GenericImage; HTTP line protocol + Flux via reqwest — OQ-6.1)
+influxdb = [
+    "dep:reqwest",
+    "dep:testcontainers",
+    "shakedown-macros/influxdb",
+    "diagnostics",
+]
 # MCP server support (post-MVP, optional)
 mcp = []
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
@@ -503,3 +510,15 @@ required-features = ["weaviate"]
 name = "helpers_weaviate"
 path = "tests/helpers_weaviate.rs"
 required-features = ["weaviate"]
+
+# InfluxDB 2.x suite + bindings (Docker); ignored unless --ignored
+[[test]]
+name = "influxdb_vertical"
+path = "tests/influxdb_vertical.rs"
+required-features = ["influxdb"]
+
+# InfluxDB helpers write/query/assert (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_influxdb"
+path = "tests/helpers_influxdb.rs"
+required-features = ["influxdb"]

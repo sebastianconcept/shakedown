@@ -54,6 +54,7 @@ struct MappingOverrides {
     opensearch: Option<String>,
     qdrant: Option<String>,
     weaviate: Option<String>,
+    influxdb: Option<String>,
     bridges: HashMap<String, String>,
     services: HashMap<String, String>,
 }
@@ -75,6 +76,7 @@ impl MappingOverrides {
             opensearch: None,
             qdrant: None,
             weaviate: None,
+            influxdb: None,
             bridges: HashMap::new(),
             services: HashMap::new(),
         };
@@ -94,6 +96,7 @@ impl MappingOverrides {
                 EnvMapping::OpenSearch(name) => overrides.opensearch = Some(name.clone()),
                 EnvMapping::Qdrant(name) => overrides.qdrant = Some(name.clone()),
                 EnvMapping::Weaviate(name) => overrides.weaviate = Some(name.clone()),
+                EnvMapping::InfluxDb(name) => overrides.influxdb = Some(name.clone()),
                 EnvMapping::Bridge {
                     bridge_name,
                     env_var,
@@ -241,6 +244,15 @@ fn inject_conventions(
     if let Some(bindings) = context.weaviate_bindings() {
         let key = overrides.weaviate.as_deref().unwrap_or("WEAVIATE_URL");
         environment.insert(key.to_string(), bindings.rest_url.clone());
+    }
+
+    #[cfg(feature = "influxdb")]
+    if let Some(bindings) = context.influxdb_bindings() {
+        let key = overrides.influxdb.as_deref().unwrap_or("INFLUXDB_URL");
+        environment.insert(key.to_string(), bindings.url.clone());
+        environment.insert("INFLUXDB_TOKEN".to_string(), bindings.token.clone());
+        environment.insert("INFLUXDB_ORG".to_string(), bindings.organization.clone());
+        environment.insert("INFLUXDB_BUCKET".to_string(), bindings.bucket.clone());
     }
 
     // Bridge URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::Bridge`.
@@ -419,6 +431,12 @@ fn resolve_env_mapping(
             .map(|bindings| (key.clone(), bindings.rest_url.clone())),
         #[cfg(not(feature = "weaviate"))]
         EnvMapping::Weaviate(_) => None,
+        #[cfg(feature = "influxdb")]
+        EnvMapping::InfluxDb(key) => context
+            .influxdb_bindings()
+            .map(|bindings| (key.clone(), bindings.url.clone())),
+        #[cfg(not(feature = "influxdb"))]
+        EnvMapping::InfluxDb(_) => None,
         EnvMapping::Bridge {
             bridge_name,
             env_var,

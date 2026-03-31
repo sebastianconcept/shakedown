@@ -299,15 +299,21 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 - **Image tag:** [`WeaviateResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_WEAVIATE_IMAGE_TAG`** via [`WeaviateResource::with_image_tag_from_env`](src/resources.rs).
 - [`WeaviateBindings`](src/resources.rs) (`rest_url`, `class_prefix`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::weaviate()`](src/lifecycle/mod.rs) for [`WeaviateHelpers`](src/helpers/weaviate.rs) (`create_class`, `create_object`, `get_object`, assertions). Readiness uses **`GET /v1/.well-known/ready`**.
 
-**Service injection:** with the **`services`** feature, [`EnvMapping::redis`](src/service/types.rs) and convention injection default to **`REDIS_URL`** for [`RedisBindings::connection_url`](src/resources.rs) (shared name for Redis and Valkey). [`EnvMapping::mongo`](src/service/types.rs) and convention injection default to **`MONGODB_URI`** for [`MongoBindings::connection_url`](src/resources.rs) (per-service URL partitioning matches relational DBs when multiple services are registered). [`EnvMapping::nats`](src/service/types.rs) and convention injection default to **`NATS_URL`** for [`NatsBindings::connection_url`](src/resources.rs). [`EnvMapping::neo4j`](src/service/types.rs) and convention injection default to **`NEO4J_URI`** for [`Neo4jBindings::bolt_url`](src/resources.rs). [`EnvMapping::weaviate`](src/service/types.rs) and convention injection default to **`WEAVIATE_URL`** for [`WeaviateBindings::rest_url`](src/resources.rs).
+**InfluxDB 2.x (`influxdb` feature, `influxdb:2` via `GenericImage`):**
 
-Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, Redis, Valkey, MongoDB, NATS, Neo4j, Weaviate, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
+- [`InfluxDbResource`](src/resources.rs) uses a **suite-level** node: first provision starts one container with **`DOCKER_INFLUXDB_INIT_MODE=setup`**, fixed org **`shakedown`**, and admin token **`shakedown-admin-token`**; each scenario gets a **per-scenario bucket** via **`POST /api/v2/buckets`**; refcounted teardown **`DELETE`s** that bucket, then may remove the container. Helpers use **`reqwest`** only (no `influxdb2` client crate — OQ-6.1).
+- **Image tag:** [`InfluxDbResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_INFLUXDB_IMAGE_TAG`** via [`InfluxDbResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`2`** (`influxdb:2`).
+- [`InfluxDbBindings`](src/resources.rs) (`url`, `token`, `organization`, `bucket`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::influxdb()`](src/lifecycle/mod.rs) for [`InfluxDbHelpers`](src/helpers/influxdb.rs) (`write_point`, `query`, `assert_point_exists`). Readiness uses **`GET /health`** with JSON **`status: pass`**.
+
+**Service injection:** with the **`services`** feature, [`EnvMapping::redis`](src/service/types.rs) and convention injection default to **`REDIS_URL`** for [`RedisBindings::connection_url`](src/resources.rs) (shared name for Redis and Valkey). [`EnvMapping::mongo`](src/service/types.rs) and convention injection default to **`MONGODB_URI`** for [`MongoBindings::connection_url`](src/resources.rs) (per-service URL partitioning matches relational DBs when multiple services are registered). [`EnvMapping::nats`](src/service/types.rs) and convention injection default to **`NATS_URL`** for [`NatsBindings::connection_url`](src/resources.rs). [`EnvMapping::neo4j`](src/service/types.rs) and convention injection default to **`NEO4J_URI`** for [`Neo4jBindings::bolt_url`](src/resources.rs). [`EnvMapping::weaviate`](src/service/types.rs) and convention injection default to **`WEAVIATE_URL`** for [`WeaviateBindings::rest_url`](src/resources.rs). [`EnvMapping::influxdb`](src/service/types.rs) and convention injection default to **`INFLUXDB_URL`** for [`InfluxDbBindings::url`](src/resources.rs); **`INFLUXDB_TOKEN`**, **`INFLUXDB_ORG`**, and **`INFLUXDB_BUCKET`** are also set for Influx 2.x clients.
+
+Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, Redis, Valkey, MongoDB, NATS, Neo4j, Weaviate, InfluxDB, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
 
 Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
 
 ## Infrastructure diagnostics (bollard)
 
-When you enable any **Docker-backed** resource feature (`kafka`, `postgres`, `mariadb`, `mysql`, `redis`, `valkey`, `mongodb`, `nats`, `neo4j`, `elasticsearch`, `opensearch`, `qdrant`, `weaviate`), the crate also enables the **`diagnostics`** feature unless you opt out with **`no-diagnostics`**.
+When you enable any **Docker-backed** resource feature (`kafka`, `postgres`, `mariadb`, `mysql`, `redis`, `valkey`, `mongodb`, `nats`, `neo4j`, `elasticsearch`, `opensearch`, `qdrant`, `weaviate`, `influxdb`), the crate also enables the **`diagnostics`** feature unless you opt out with **`no-diagnostics`**.
 
 What it provides (read-only — never starts or stops containers; testcontainers owns lifecycle):
 
@@ -383,6 +389,7 @@ Helpers are gated behind the **same** resource features as the underlying provid
 | `ctx.opensearch()` → [`OpenSearchHelpers`](src/helpers/opensearch.rs) | `opensearch` | `reqwest` (HTTP) |
 | `ctx.qdrant()` → [`QdrantHelpers`](src/helpers/qdrant.rs) | `qdrant` | `qdrant-client` (gRPC) |
 | `ctx.weaviate()` → [`WeaviateHelpers`](src/helpers/weaviate.rs) | `weaviate` | `reqwest` (REST) |
+| `ctx.influxdb()` → [`InfluxDbHelpers`](src/helpers/influxdb.rs) | `influxdb` | `reqwest` (HTTP line protocol + Flux) |
 
 [`ConsumedMessage`](src/helpers/mod.rs) (key, payload, `source` namespaced topic, queue, or NATS subject) is re-exported from the crate root for Kafka, Rabbit, and NATS consume helpers.
 

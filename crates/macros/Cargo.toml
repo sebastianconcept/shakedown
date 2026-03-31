@@ -33,6 +33,8 @@ opensearch = []
 qdrant = []
 # Weaviate (propagates to `resources = [Weaviate]`)
 weaviate = []
+# InfluxDB (propagates to `resources = [InfluxDb]`)
+influxdb = []
 # RabbitMQ integration feature (propagates to generated code in macros)
 rabbitmq = []
 # SQLite in-memory resource (propagates to generated code in macros)

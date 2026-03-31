@@ -26,6 +26,7 @@ pub const DEFAULT_HELPER_CONSUME_TIMEOUT: Duration = Duration::from_secs(20);
     feature = "opensearch",
     feature = "qdrant",
     feature = "weaviate",
+    feature = "influxdb",
 ))]
 pub(crate) fn map_backend_error(
     error: impl std::error::Error + Send + Sync + 'static,
@@ -119,6 +120,9 @@ pub mod qdrant;
 #[cfg(feature = "weaviate")]
 pub mod weaviate;
 
+#[cfg(feature = "influxdb")]
+pub mod influxdb;
+
 #[cfg(feature = "kafka")]
 pub use kafka::KafkaHelpers;
 
@@ -163,3 +167,6 @@ pub use qdrant::QdrantHelpers;
 
 #[cfg(feature = "weaviate")]
 pub use weaviate::WeaviateHelpers;
+
+#[cfg(feature = "influxdb")]
+pub use influxdb::{InfluxDbHelpers, InfluxFieldValue};
