@@ -100,13 +100,13 @@ impl MappingOverrides {
                 EnvMapping::Weaviate(name) => overrides.weaviate = Some(name.clone()),
                 EnvMapping::InfluxDb(name) => overrides.influxdb = Some(name.clone()),
                 EnvMapping::Timescaledb(name) => overrides.timescaledb = Some(name.clone()),
-                EnvMapping::Bridge {
-                    bridge_name,
+                EnvMapping::MockService {
+                    mock_service_name,
                     env_var,
                 } => {
                     overrides
                         .bridges
-                        .insert(bridge_name.clone(), env_var.clone());
+                        .insert(mock_service_name.clone(), env_var.clone());
                 }
                 EnvMapping::Service {
                     service_name,
@@ -274,15 +274,15 @@ fn inject_conventions(
         environment.insert(key.to_string(), url);
     }
 
-    // Bridge URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::Bridge`.
-    #[cfg(all(feature = "bridges", feature = "services"))]
+    // MockService URLs: default `{UPPER_NAME}_URL`, optional rename via `EnvMapping::MockService`.
+    #[cfg(all(feature = "mock-services", feature = "services"))]
     {
-        context.for_each_bridge_url(|bridge_name, client_url| {
+        context.for_each_mock_service_url(|mock_service_name, client_url| {
             let key = overrides
                 .bridges
-                .get(bridge_name)
+                .get(mock_service_name)
                 .cloned()
-                .unwrap_or_else(|| default_bridge_env_key(bridge_name));
+                .unwrap_or_else(|| default_bridge_env_key(mock_service_name));
             environment.insert(key, client_url.to_string());
         });
     }
@@ -472,19 +472,19 @@ fn resolve_env_mapping(
         }),
         #[cfg(not(feature = "timescaledb"))]
         EnvMapping::Timescaledb(_) => None,
-        EnvMapping::Bridge {
-            bridge_name,
+        EnvMapping::MockService {
+            mock_service_name,
             env_var,
         } => {
-            #[cfg(all(feature = "bridges", feature = "services"))]
+            #[cfg(all(feature = "mock-services", feature = "services"))]
             {
                 context
-                    .bridge_url(bridge_name.as_str())
+                    .mock_service_url(mock_service_name.as_str())
                     .map(|url| (env_var.clone(), url))
             }
-            #[cfg(not(all(feature = "bridges", feature = "services")))]
+            #[cfg(not(all(feature = "mock-services", feature = "services")))]
             {
-                let _ = bridge_name;
+                let _ = mock_service_name;
                 let _ = env_var;
                 None
             }
@@ -554,8 +554,8 @@ fn replace_database_path(connection_url: &str, old_database: &str, new_database:
     connection_url.to_string()
 }
 
-fn default_bridge_env_key(bridge_name: &str) -> String {
-    format!("{}_URL", upper_snake_case(bridge_name))
+fn default_bridge_env_key(mock_service_name: &str) -> String {
+    format!("{}_URL", upper_snake_case(mock_service_name))
 }
 
 fn default_service_env_key(service_name: &str) -> String {

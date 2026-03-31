@@ -1,11 +1,11 @@
-//! [`BridgeError`] — failures from bridge request helpers and response builders.
+//! [`MockServiceError`] — failures from mock service request helpers and response builders.
 
 use displaydoc::Display;
 use thiserror::Error;
 
-/// Errors surfaced by bridge request helpers and response builders.
+/// Errors surfaced by mock service request helpers and response builders.
 #[derive(Debug, Display, Error)]
-pub enum BridgeError {
+pub enum MockServiceError {
     /// JSON deserialization failed: {source}
     Deserialization {
         #[source]
@@ -16,20 +16,20 @@ pub enum BridgeError {
         /// Human-readable detail (UTF-8, JSON serialization, …).
         message: String,
     },
-    /// bridge server failed to start: {source}
+    /// mock service server failed to start: {source}
     ServerStart {
         /// Underlying I/O error (bind/listen, …).
         #[source]
         source: std::io::Error,
     },
-    /// bridge `{name}` is not registered
+    /// mock service `{name}` is not registered
     NotRegistered {
-        /// Logical bridge name passed to harness `Context` APIs.
+        /// Logical mock service name passed to harness `Context` APIs.
         name: String,
     },
     /// response header name is not a valid HTTP token: {name}
     InvalidResponseHeaderName {
-        /// Header name supplied by the bridge or stub.
+        /// Header name supplied by the mock service or stub.
         name: String,
     },
     /// failed to build HTTP response: {message}

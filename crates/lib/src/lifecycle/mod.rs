@@ -43,19 +43,22 @@
 //! }
 //! ```
 
-#[cfg(feature = "bridges")]
-use crate::bridge::server::{spawn_http_bridge_server, HttpBridgeRuntime};
-#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-use crate::bridge::{
-    grpc_server::{spawn_grpc_bridge_server, GrpcBridgeRuntime},
-    GrpcBridge,
-};
-#[cfg(feature = "bridges")]
-use crate::bridge::{BridgeHandle, BridgeResources, HttpBridge};
-#[cfg(any(feature = "bridges", feature = "services"))]
+#[cfg(feature = "mock-services")]
+use crate::mock_service::http::server::{spawn_http_mock_service_server, HttpMockServiceRuntime};
+#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+use crate::mock_service::grpc::server::{spawn_grpc_mock_service_server, GrpcMockServiceRuntime};
+#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+use crate::mock_service::grpc::GrpcMockServiceTrait;
+#[cfg(feature = "mock-services")]
+use crate::mock_service::http::HttpMockServiceTrait;
+#[cfg(feature = "mock-services")]
+use crate::mock_service::handle::MockServiceHandle;
+#[cfg(feature = "mock-services")]
+use crate::mock_service::types::MockServiceResources;
+#[cfg(any(feature = "mock-services", feature = "services"))]
 use crate::error::InternalError;
 use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownError};
-#[cfg(feature = "bridges")]
+#[cfg(feature = "mock-services")]
 use crate::event::Event;
 use crate::event::{EventLevel, EventLog};
 #[cfg(feature = "duckdb")]
@@ -138,9 +141,9 @@ use crate::resources::{
 #[cfg(feature = "services")]
 use crate::service::ServiceHandle;
 use async_trait::async_trait;
-#[cfg(any(feature = "bridges", feature = "services"))]
+#[cfg(any(feature = "mock-services", feature = "services"))]
 use std::collections::HashMap;
-#[cfg(feature = "bridges")]
+#[cfg(feature = "mock-services")]
 use std::sync::Arc;
 
 pub use crate::phase::Phase;
@@ -338,22 +341,22 @@ pub struct Context {
     ))]
     stats_rings: Option<crate::diagnostics::SharedResourceStatsRings>,
     /// HTTP bridges registered before [`run_scenario`] starts servers (after seed).
-    #[cfg(feature = "bridges")]
-    pending_http_bridges: Vec<(String, Arc<dyn HttpBridge>)>,
+    #[cfg(feature = "mock-services")]
+    pending_http_mock_services: Vec<(String, Arc<dyn HttpMockServiceTrait>)>,
     /// Running HTTP bridge handles (populated when servers start).
-    #[cfg(feature = "bridges")]
-    bridge_handles: HashMap<String, Arc<BridgeHandle>>,
+    #[cfg(feature = "mock-services")]
+    mock_service_handles: HashMap<String, Arc<MockServiceHandle>>,
     /// Shutdown handles for HTTP bridge accept loops (paired with names for timeline messages).
-    #[cfg(feature = "bridges")]
-    http_bridge_runtimes: Vec<(String, HttpBridgeRuntime)>,
+    #[cfg(feature = "mock-services")]
+    http_mock_service_runtimes: Vec<(String, HttpMockServiceRuntime)>,
     /// gRPC bridges registered before [`run_scenario`] starts tonic servers (after seed).
-    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-    pending_grpc_bridges: Vec<(String, Arc<dyn GrpcBridge>)>,
-    /// Running gRPC bridge servers (tonic transport).
-    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-    grpc_bridge_runtimes: Vec<(String, GrpcBridgeRuntime)>,
-    /// True once HTTP and gRPC bridge servers have been started for this [`run_scenario`] invocation.
-    #[cfg(feature = "bridges")]
+    #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+    pending_grpc_mock_services: Vec<(String, Arc<dyn GrpcMockServiceTrait>)>,
+    /// Running gRPC mock service servers (tonic transport).
+    #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+    grpc_mock_service_runtimes: Vec<(String, GrpcMockServiceRuntime)>,
+    /// True once HTTP and gRPC mock service servers have been started for this [`run_scenario`] invocation.
+    #[cfg(feature = "mock-services")]
     bridge_servers_phase_complete: bool,
     /// Staged [`crate::service::ServiceSpec`] entries; [`ServiceHandle`] filled when containers are healthy (service container lifecycle).
     #[cfg(feature = "services")]
@@ -434,17 +437,17 @@ impl Context {
                 not(feature = "no-diagnostics"),
             ))]
             stats_rings: None,
-            #[cfg(feature = "bridges")]
-            pending_http_bridges: Vec::new(),
-            #[cfg(feature = "bridges")]
-            bridge_handles: HashMap::new(),
-            #[cfg(feature = "bridges")]
-            http_bridge_runtimes: Vec::new(),
-            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-            pending_grpc_bridges: Vec::new(),
-            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-            grpc_bridge_runtimes: Vec::new(),
-            #[cfg(feature = "bridges")]
+            #[cfg(feature = "mock-services")]
+            pending_http_mock_services: Vec::new(),
+            #[cfg(feature = "mock-services")]
+            mock_service_handles: HashMap::new(),
+            #[cfg(feature = "mock-services")]
+            http_mock_service_runtimes: Vec::new(),
+            #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+            pending_grpc_mock_services: Vec::new(),
+            #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+            grpc_mock_service_runtimes: Vec::new(),
+            #[cfg(feature = "mock-services")]
             bridge_servers_phase_complete: false,
             #[cfg(feature = "services")]
             services: HashMap::new(),
@@ -524,17 +527,17 @@ impl Context {
                 not(feature = "no-diagnostics"),
             ))]
             stats_rings: None,
-            #[cfg(feature = "bridges")]
-            pending_http_bridges: Vec::new(),
-            #[cfg(feature = "bridges")]
-            bridge_handles: HashMap::new(),
-            #[cfg(feature = "bridges")]
-            http_bridge_runtimes: Vec::new(),
-            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-            pending_grpc_bridges: Vec::new(),
-            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-            grpc_bridge_runtimes: Vec::new(),
-            #[cfg(feature = "bridges")]
+            #[cfg(feature = "mock-services")]
+            pending_http_mock_services: Vec::new(),
+            #[cfg(feature = "mock-services")]
+            mock_service_handles: HashMap::new(),
+            #[cfg(feature = "mock-services")]
+            http_mock_service_runtimes: Vec::new(),
+            #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+            pending_grpc_mock_services: Vec::new(),
+            #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+            grpc_mock_service_runtimes: Vec::new(),
+            #[cfg(feature = "mock-services")]
             bridge_servers_phase_complete: false,
             #[cfg(feature = "services")]
             services: HashMap::new(),
@@ -614,17 +617,17 @@ impl Context {
                 not(feature = "no-diagnostics"),
             ))]
             stats_rings: None,
-            #[cfg(feature = "bridges")]
-            pending_http_bridges: Vec::new(),
-            #[cfg(feature = "bridges")]
-            bridge_handles: HashMap::new(),
-            #[cfg(feature = "bridges")]
-            http_bridge_runtimes: Vec::new(),
-            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-            pending_grpc_bridges: Vec::new(),
-            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-            grpc_bridge_runtimes: Vec::new(),
-            #[cfg(feature = "bridges")]
+            #[cfg(feature = "mock-services")]
+            pending_http_mock_services: Vec::new(),
+            #[cfg(feature = "mock-services")]
+            mock_service_handles: HashMap::new(),
+            #[cfg(feature = "mock-services")]
+            http_mock_service_runtimes: Vec::new(),
+            #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+            pending_grpc_mock_services: Vec::new(),
+            #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+            grpc_mock_service_runtimes: Vec::new(),
+            #[cfg(feature = "mock-services")]
             bridge_servers_phase_complete: false,
             #[cfg(feature = "services")]
             services: HashMap::new(),
@@ -871,31 +874,31 @@ impl Context {
 
     /// Register an HTTP bridge to be started after the seed phase of [`run_scenario`] (requires `bridges`).
     ///
-    /// Call before [`run_scenario`]. After servers start, use [`Self::bridge_url`] and [`Self::bridge`].
-    #[cfg(feature = "bridges")]
+    /// Call before [`run_scenario`]. After servers start, use [`Self::mock_service_url`] and [`Self::bridge`].
+    #[cfg(feature = "mock-services")]
     pub fn register_http_bridge(
         &mut self,
         name: &str,
-        bridge: impl HttpBridge,
+        bridge: impl HttpMockServiceTrait,
     ) -> Result<(), ShakedownError> {
         if self.bridge_servers_phase_complete {
             return Err(ShakedownError::Internal(InternalError::InvalidConfiguration(
                 String::from(
-                    "register_http_bridge called after bridge servers were started for this scenario run",
+                    "register_http_bridge called after mock service servers were started for this scenario run",
                 ),
             )));
         }
-        #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+        #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
         let grpc_name_taken = self
-            .pending_grpc_bridges
+            .pending_grpc_mock_services
             .iter()
             .any(|(registered_name, _)| registered_name == name);
-        #[cfg(not(all(feature = "bridges", feature = "grpc-bridges")))]
+        #[cfg(not(all(feature = "mock-services", feature = "grpc-mock-services")))]
         let grpc_name_taken = false;
 
-        if self.bridge_handles.contains_key(name)
+        if self.mock_service_handles.contains_key(name)
             || self
-                .pending_http_bridges
+                .pending_http_mock_services
                 .iter()
                 .any(|(registered_name, _)| registered_name == name)
             || grpc_name_taken
@@ -904,34 +907,34 @@ impl Context {
                 InternalError::InvalidConfiguration(format!("duplicate bridge name '{name}'")),
             ));
         }
-        self.pending_http_bridges
+        self.pending_http_mock_services
             .push((name.to_owned(), Arc::new(bridge)));
         Ok(())
     }
 
     /// Register a gRPC bridge to be started after the seed phase of [`run_scenario`] (`grpc-bridges` + `bridges`).
     ///
-    /// Call before [`run_scenario`]. After servers start, use [`Self::bridge_url`] and [`Self::bridge`].
-    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    /// Call before [`run_scenario`]. After servers start, use [`Self::mock_service_url`] and [`Self::bridge`].
+    #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
     pub fn register_grpc_bridge(
         &mut self,
         name: &str,
-        bridge: impl GrpcBridge,
+        bridge: impl GrpcMockServiceTrait,
     ) -> Result<(), ShakedownError> {
         if self.bridge_servers_phase_complete {
             return Err(ShakedownError::Internal(InternalError::InvalidConfiguration(
                 String::from(
-                    "register_grpc_bridge called after bridge servers were started for this scenario run",
+                    "register_grpc_bridge called after mock service servers were started for this scenario run",
                 ),
             )));
         }
-        if self.bridge_handles.contains_key(name)
+        if self.mock_service_handles.contains_key(name)
             || self
-                .pending_http_bridges
+                .pending_http_mock_services
                 .iter()
                 .any(|(registered_name, _)| registered_name == name)
             || self
-                .pending_grpc_bridges
+                .pending_grpc_mock_services
                 .iter()
                 .any(|(registered_name, _)| registered_name == name)
         {
@@ -939,35 +942,35 @@ impl Context {
                 InternalError::InvalidConfiguration(format!("duplicate bridge name '{name}'")),
             ));
         }
-        self.pending_grpc_bridges
+        self.pending_grpc_mock_services
             .push((name.to_owned(), Arc::new(bridge)));
         Ok(())
     }
 
     /// Test-only: control [`Self::register_http_bridge`] / [`Self::register_grpc_bridge`] phase guards.
-    #[cfg(all(test, feature = "bridges"))]
+    #[cfg(all(test, feature = "mock-services"))]
     pub(crate) fn set_bridge_servers_phase_complete_for_test(&mut self, complete: bool) {
         self.bridge_servers_phase_complete = complete;
     }
 
     /// Client-facing base URL for a registered bridge (HTTP or gRPC).
     ///
-    /// Returns [`None`] if no bridge was registered under `name` or bridge servers have not
+    /// Returns [`None`] if no bridge was registered under `name` or mock service servers have not
     /// started yet for this run (e.g. called before [`run_scenario`] has bound listeners).
-    #[cfg(feature = "bridges")]
-    pub fn bridge_url(&self, name: &str) -> Option<String> {
-        self.bridge_handles
+    #[cfg(feature = "mock-services")]
+    pub fn mock_service_url(&self, name: &str) -> Option<String> {
+        self.mock_service_handles
             .get(name)
             .map(|handle| handle.client_url.clone())
     }
 
     /// Handle for assertions on recorded bridge traffic (HTTP or gRPC).
     ///
-    /// Returns [`None`] if no bridge was registered under `name` or bridge servers have not
+    /// Returns [`None`] if no bridge was registered under `name` or mock service servers have not
     /// started yet for this run.
-    #[cfg(feature = "bridges")]
-    pub fn bridge(&self, name: &str) -> Option<&BridgeHandle> {
-        self.bridge_handles.get(name).map(|arc| arc.as_ref())
+    #[cfg(feature = "mock-services")]
+    pub fn mock_service(&self, name: &str) -> Option<&MockServiceHandle> {
+        self.mock_service_handles.get(name).map(|arc| arc.as_ref())
     }
 
     /// Build an outbox helper bound to this context (`outbox` + relational features).
@@ -1348,10 +1351,10 @@ impl Context {
     }
 
     /// Invoke `visit` for each running HTTP/gRPC bridge base URL (service container env injection).
-    #[cfg(all(feature = "bridges", feature = "services"))]
+    #[cfg(all(feature = "mock-services", feature = "services"))]
     #[allow(dead_code)] // `inject_service_env`; service container lifecycle
-    pub(crate) fn for_each_bridge_url(&self, mut visit: impl FnMut(&str, &str)) {
-        for (name, handle) in &self.bridge_handles {
+    pub(crate) fn for_each_mock_service_url(&self, mut visit: impl FnMut(&str, &str)) {
+        for (name, handle) in &self.mock_service_handles {
             visit(name.as_str(), handle.client_url.as_str());
         }
     }
@@ -2359,12 +2362,12 @@ fn emit_failure_timeline_on_infra_err(
     );
 }
 
-#[cfg(feature = "bridges")]
+#[cfg(feature = "mock-services")]
 #[allow(unused_variables)] // `ctx` unused when no resource features are enabled alongside `bridges`
-fn bridge_resources_from_context(ctx: &Context) -> Arc<BridgeResources> {
+fn mock_service_resources_from_context(ctx: &Context) -> Arc<MockServiceResources> {
     #[allow(unused_mut)]
     // assignments are feature-gated; with `bridges` alone the struct stays default
-    let mut resources = BridgeResources::default();
+    let mut resources = MockServiceResources::default();
     #[cfg(feature = "kafka")]
     {
         resources.kafka_bindings = ctx.kafka_bindings().cloned();
@@ -2388,11 +2391,11 @@ fn bridge_resources_from_context(ctx: &Context) -> Arc<BridgeResources> {
     Arc::new(resources)
 }
 
-#[cfg(feature = "bridges")]
+#[cfg(feature = "mock-services")]
 async fn reset_bridges_at_run_start(ctx: &mut Context) {
-    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
     {
-        let runtimes = std::mem::take(&mut ctx.grpc_bridge_runtimes);
+        let runtimes = std::mem::take(&mut ctx.grpc_mock_service_runtimes);
         for (_name, mut runtime) in runtimes {
             if let Some(sender) = runtime.shutdown_tx.take() {
                 let _ = sender.send(());
@@ -2400,18 +2403,18 @@ async fn reset_bridges_at_run_start(ctx: &mut Context) {
             let _ = runtime.join.await;
         }
     }
-    let runtimes = std::mem::take(&mut ctx.http_bridge_runtimes);
+    let runtimes = std::mem::take(&mut ctx.http_mock_service_runtimes);
     for (_name, mut runtime) in runtimes {
         if let Some(sender) = runtime.shutdown_tx.take() {
             let _ = sender.send(());
         }
         let _ = runtime.join.await;
     }
-    ctx.bridge_handles.clear();
+    ctx.mock_service_handles.clear();
     ctx.bridge_servers_phase_complete = false;
 }
 
-#[cfg(feature = "bridges")]
+#[cfg(feature = "mock-services")]
 async fn tcp_probe_local_bind_address(bind_address: &str) -> std::io::Result<()> {
     let socket_address: std::net::SocketAddr = bind_address.parse().map_err(|_| {
         std::io::Error::new(
@@ -2437,22 +2440,22 @@ async fn tcp_probe_local_bind_address(bind_address: &str) -> std::io::Result<()>
     }
 }
 
-#[cfg(feature = "bridges")]
+#[cfg(feature = "mock-services")]
 fn recorded_bridge_call_count(
-    handles: &HashMap<String, Arc<BridgeHandle>>,
-    bridge_name: &str,
+    handles: &HashMap<String, Arc<MockServiceHandle>>,
+    mock_service_name: &str,
 ) -> usize {
     handles
-        .get(bridge_name)
+        .get(mock_service_name)
         .map(|handle| handle.calls().len())
         .unwrap_or(0)
 }
 
-#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-async fn shutdown_grpc_bridge_runtimes_with_log(ctx: &mut Context, event_log: &mut EventLog) {
-    let runtimes = std::mem::take(&mut ctx.grpc_bridge_runtimes);
+#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+async fn shutdown_grpc_mock_service_runtimes_with_log(ctx: &mut Context, event_log: &mut EventLog) {
+    let runtimes = std::mem::take(&mut ctx.grpc_mock_service_runtimes);
     for (name, mut runtime) in runtimes {
-        let recorded_count = recorded_bridge_call_count(&ctx.bridge_handles, name.as_str());
+        let recorded_count = recorded_bridge_call_count(&ctx.mock_service_handles, name.as_str());
         if let Some(sender) = runtime.shutdown_tx.take() {
             let _ = sender.send(());
         }
@@ -2464,9 +2467,9 @@ async fn shutdown_grpc_bridge_runtimes_with_log(ctx: &mut Context, event_log: &m
     }
 }
 
-#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-async fn shutdown_grpc_bridge_runtimes_silent(ctx: &mut Context) {
-    let runtimes = std::mem::take(&mut ctx.grpc_bridge_runtimes);
+#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+async fn shutdown_grpc_mock_service_runtimes_silent(ctx: &mut Context) {
+    let runtimes = std::mem::take(&mut ctx.grpc_mock_service_runtimes);
     for (_name, mut runtime) in runtimes {
         if let Some(sender) = runtime.shutdown_tx.take() {
             let _ = sender.send(());
@@ -2475,11 +2478,11 @@ async fn shutdown_grpc_bridge_runtimes_silent(ctx: &mut Context) {
     }
 }
 
-#[cfg(feature = "bridges")]
-async fn shutdown_http_bridge_runtimes_with_log(ctx: &mut Context, event_log: &mut EventLog) {
-    let runtimes = std::mem::take(&mut ctx.http_bridge_runtimes);
+#[cfg(feature = "mock-services")]
+async fn shutdown_http_mock_service_runtimes_with_log(ctx: &mut Context, event_log: &mut EventLog) {
+    let runtimes = std::mem::take(&mut ctx.http_mock_service_runtimes);
     for (name, mut runtime) in runtimes {
-        let recorded_count = recorded_bridge_call_count(&ctx.bridge_handles, name.as_str());
+        let recorded_count = recorded_bridge_call_count(&ctx.mock_service_handles, name.as_str());
         if let Some(sender) = runtime.shutdown_tx.take() {
             let _ = sender.send(());
         }
@@ -2491,9 +2494,9 @@ async fn shutdown_http_bridge_runtimes_with_log(ctx: &mut Context, event_log: &m
     }
 }
 
-#[cfg(feature = "bridges")]
-async fn shutdown_http_bridge_runtimes_silent(ctx: &mut Context) {
-    let runtimes = std::mem::take(&mut ctx.http_bridge_runtimes);
+#[cfg(feature = "mock-services")]
+async fn shutdown_http_mock_service_runtimes_silent(ctx: &mut Context) {
+    let runtimes = std::mem::take(&mut ctx.http_mock_service_runtimes);
     for (_name, mut runtime) in runtimes {
         if let Some(sender) = runtime.shutdown_tx.take() {
             let _ = sender.send(());
@@ -2502,18 +2505,18 @@ async fn shutdown_http_bridge_runtimes_silent(ctx: &mut Context) {
     }
 }
 
-#[cfg(feature = "bridges")]
+#[cfg(feature = "mock-services")]
 async fn start_and_readiness_bridges(
     ctx: &mut Context,
     event_log: &mut EventLog,
 ) -> Result<(), ShakedownError> {
-    let pending_http = std::mem::take(&mut ctx.pending_http_bridges);
-    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-    let pending_grpc = std::mem::take(&mut ctx.pending_grpc_bridges);
+    let pending_http = std::mem::take(&mut ctx.pending_http_mock_services);
+    #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+    let pending_grpc = std::mem::take(&mut ctx.pending_grpc_mock_services);
 
-    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
     let nothing_to_start = pending_http.is_empty() && pending_grpc.is_empty();
-    #[cfg(not(all(feature = "bridges", feature = "grpc-bridges")))]
+    #[cfg(not(all(feature = "mock-services", feature = "grpc-mock-services")))]
     let nothing_to_start = pending_http.is_empty();
 
     if nothing_to_start {
@@ -2521,13 +2524,13 @@ async fn start_and_readiness_bridges(
         return Ok(());
     }
 
-    let resources = bridge_resources_from_context(ctx);
+    let resources = mock_service_resources_from_context(ctx);
     let scenario_id_string = ctx.scenario_id().to_string();
 
-    let mut started_http_runtimes: Vec<(String, HttpBridgeRuntime)> = Vec::new();
-    for (bridge_name, bridge_impl) in pending_http {
-        match spawn_http_bridge_server(
-            bridge_name.clone(),
+    let mut started_http_runtimes: Vec<(String, HttpMockServiceRuntime)> = Vec::new();
+    for (mock_service_name, bridge_impl) in pending_http {
+        match spawn_http_mock_service_server(
+            mock_service_name.clone(),
             bridge_impl,
             scenario_id_string.clone(),
             Arc::clone(&resources),
@@ -2537,11 +2540,11 @@ async fn start_and_readiness_bridges(
         {
             Ok((handle, runtime)) => {
                 let bind_display = handle.bind_address.clone();
-                ctx.bridge_handles.insert(bridge_name.clone(), handle);
-                started_http_runtimes.push((bridge_name.clone(), runtime));
+                ctx.mock_service_handles.insert(mock_service_name.clone(), handle);
+                started_http_runtimes.push((mock_service_name.clone(), runtime));
                 event_log.append(Event::info(
                     "bridge",
-                    format!("bridge '{bridge_name}' started on {bind_display}"),
+                    format!("bridge '{mock_service_name}' started on {bind_display}"),
                 ));
             }
             Err(error) => {
@@ -2551,23 +2554,23 @@ async fn start_and_readiness_bridges(
                     }
                     let _ = runtime.join.await;
                 }
-                ctx.bridge_handles.clear();
+                ctx.mock_service_handles.clear();
                 return Err(InfrastructureError::Provision {
-                    resource: format!("bridge:{bridge_name}"),
+                    resource: format!("bridge:{mock_service_name}"),
                     source: Box::new(error),
                 }
                 .into());
             }
         }
     }
-    ctx.http_bridge_runtimes = started_http_runtimes;
+    ctx.http_mock_service_runtimes = started_http_runtimes;
 
-    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
+    #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
     {
-        let mut started_grpc_runtimes: Vec<(String, GrpcBridgeRuntime)> = Vec::new();
-        for (bridge_name, bridge_impl) in pending_grpc {
-            match spawn_grpc_bridge_server(
-                bridge_name.clone(),
+        let mut started_grpc_runtimes: Vec<(String, GrpcMockServiceRuntime)> = Vec::new();
+        for (mock_service_name, bridge_impl) in pending_grpc {
+            match spawn_grpc_mock_service_server(
+                mock_service_name.clone(),
                 bridge_impl,
                 scenario_id_string.clone(),
                 Arc::clone(&resources),
@@ -2577,46 +2580,46 @@ async fn start_and_readiness_bridges(
             {
                 Ok((handle, runtime)) => {
                     let bind_display = handle.bind_address.clone();
-                    ctx.bridge_handles.insert(bridge_name.clone(), handle);
-                    started_grpc_runtimes.push((bridge_name.clone(), runtime));
+                    ctx.mock_service_handles.insert(mock_service_name.clone(), handle);
+                    started_grpc_runtimes.push((mock_service_name.clone(), runtime));
                     event_log.append(Event::info(
                         "bridge",
-                        format!("bridge '{bridge_name}' started on {bind_display}"),
+                        format!("bridge '{mock_service_name}' started on {bind_display}"),
                     ));
                 }
                 Err(error) => {
-                    shutdown_http_bridge_runtimes_silent(ctx).await;
+                    shutdown_http_mock_service_runtimes_silent(ctx).await;
                     for (_rollback_name, mut runtime) in started_grpc_runtimes {
                         if let Some(sender) = runtime.shutdown_tx.take() {
                             let _ = sender.send(());
                         }
                         let _ = runtime.join.await;
                     }
-                    ctx.bridge_handles.clear();
+                    ctx.mock_service_handles.clear();
                     return Err(InfrastructureError::Provision {
-                        resource: format!("bridge:{bridge_name}"),
+                        resource: format!("bridge:{mock_service_name}"),
                         source: Box::new(error),
                     }
                     .into());
                 }
             }
         }
-        ctx.grpc_bridge_runtimes = started_grpc_runtimes;
+        ctx.grpc_mock_service_runtimes = started_grpc_runtimes;
     }
 
     let readiness_targets: Vec<(String, String)> = ctx
-        .bridge_handles
+        .mock_service_handles
         .iter()
-        .map(|(bridge_name, handle)| (bridge_name.clone(), handle.bind_address.clone()))
+        .map(|(mock_service_name, handle)| (mock_service_name.clone(), handle.bind_address.clone()))
         .collect();
-    for (bridge_name, bind_address) in readiness_targets {
+    for (mock_service_name, bind_address) in readiness_targets {
         if let Err(source) = tcp_probe_local_bind_address(bind_address.as_str()).await {
-            shutdown_http_bridge_runtimes_silent(ctx).await;
-            #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-            shutdown_grpc_bridge_runtimes_silent(ctx).await;
-            ctx.bridge_handles.clear();
+            shutdown_http_mock_service_runtimes_silent(ctx).await;
+            #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+            shutdown_grpc_mock_service_runtimes_silent(ctx).await;
+            ctx.mock_service_handles.clear();
             return Err(InfrastructureError::Readiness {
-                resource: format!("bridge:{bridge_name}"),
+                resource: format!("bridge:{mock_service_name}"),
                 source: Box::new(source),
             }
             .into());
@@ -2640,7 +2643,7 @@ where
     // Update scenario ID
     ctx.set_scenario_id(scenario_id);
 
-    #[cfg(feature = "bridges")]
+    #[cfg(feature = "mock-services")]
     reset_bridges_at_run_start(ctx).await;
 
     #[cfg(all(
@@ -3033,7 +3036,7 @@ where
         }
     }
 
-    #[cfg(feature = "bridges")]
+    #[cfg(feature = "mock-services")]
     if let Err(error) = start_and_readiness_bridges(ctx, event_log).await {
         let infrastructure_error = match &error {
             ShakedownError::Infrastructure(ref infrastructure) => Some(infrastructure),
@@ -3042,7 +3045,7 @@ where
         event_log.append_raw(
             EventLevel::Error,
             "lifecycle",
-            format!("Bridge phase failed: {error}"),
+            format!("MockService phase failed: {error}"),
         );
         teardown_all_resources(ctx).await;
         #[cfg(all(
@@ -3239,10 +3242,10 @@ where
             format!("Service container teardown failed: {error}"),
         );
     }
-    #[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-    shutdown_grpc_bridge_runtimes_with_log(ctx, event_log).await;
-    #[cfg(feature = "bridges")]
-    shutdown_http_bridge_runtimes_with_log(ctx, event_log).await;
+    #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+    shutdown_grpc_mock_service_runtimes_with_log(ctx, event_log).await;
+    #[cfg(feature = "mock-services")]
+    shutdown_http_mock_service_runtimes_with_log(ctx, event_log).await;
     teardown_all_resources(ctx).await;
 
     #[cfg(all(

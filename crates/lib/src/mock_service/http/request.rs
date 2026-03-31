@@ -1,12 +1,12 @@
-//! Inbound HTTP request presented to an [`super::super::HttpBridge`].
+//! Inbound HTTP request presented to an [`super::super::HttpMockServiceTrait`].
 
 use bytes::Bytes;
 
-use super::error::BridgeError;
+use super::super::types::MockServiceError;
 
-/// Inbound HTTP request presented to an [`super::super::HttpBridge`].
+/// Inbound HTTP request presented to an [`super::super::HttpMockServiceTrait`].
 #[derive(Debug, Clone)]
-pub struct BridgeRequest {
+pub struct HttpMockServiceRequest {
     /// HTTP method (uppercase by convention, e.g. `GET`).
     pub method: String,
     /// Path without query string (e.g. `/v1/orders`).
@@ -18,7 +18,7 @@ pub struct BridgeRequest {
     pub body: Bytes,
 }
 
-impl BridgeRequest {
+impl HttpMockServiceRequest {
     /// HTTP method as a string slice.
     pub fn method(&self) -> &str {
         self.method.as_str()
@@ -45,19 +45,19 @@ impl BridgeRequest {
     }
 
     /// Decode the body as UTF-8 text.
-    pub fn text(&self) -> Result<String, BridgeError> {
-        String::from_utf8(self.body.to_vec()).map_err(|error| BridgeError::Encoding {
+    pub fn text(&self) -> Result<String, MockServiceError> {
+        String::from_utf8(self.body.to_vec()).map_err(|error| MockServiceError::Encoding {
             message: error.to_string(),
         })
     }
 
     /// Deserialize a JSON body.
-    pub fn json<T: serde::de::DeserializeOwned>(&self) -> Result<T, BridgeError> {
+    pub fn json<T: serde::de::DeserializeOwned>(&self) -> Result<T, MockServiceError> {
         serde_json::from_slice(self.body.as_ref())
-            .map_err(|source| BridgeError::Deserialization { source })
+            .map_err(|source| MockServiceError::Deserialization { source })
     }
 
-    /// Builds a [`BridgeRequest`] from `http` crate parts and body (optional interop, D-brief-8).
+    /// Builds a [`HttpMockServiceRequest`] from `http` crate parts and body (optional interop, D-brief-8).
     pub fn from_http_parts(parts: http::request::Parts, body: Bytes) -> Self {
         let method = parts.method.as_str().to_owned();
         let path = parts.uri.path().to_owned();
@@ -68,7 +68,7 @@ impl BridgeRequest {
                 headers.push((name.as_str().to_ascii_lowercase(), value_str.to_owned()));
             }
         }
-        BridgeRequest {
+        HttpMockServiceRequest {
             method,
             path,
             query,
@@ -77,7 +77,7 @@ impl BridgeRequest {
         }
     }
 
-    /// Converts an owned [`http::Request`] with a [`Bytes`] body into a [`BridgeRequest`].
+    /// Converts an owned [`http::Request`] with a [`Bytes`] body into a [`HttpMockServiceRequest`].
     pub fn from_http_request(request: http::Request<Bytes>) -> Self {
         let (parts, body) = request.into_parts();
         Self::from_http_parts(parts, body)

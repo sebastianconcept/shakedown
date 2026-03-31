@@ -1,4 +1,4 @@
-//! Shared infrastructure handles available to bridge implementations while handling a request.
+//! Shared infrastructure handles available to mock service implementations while handling a request.
 
 use std::fmt;
 
@@ -18,12 +18,12 @@ use crate::resources::PostgresBindings;
 #[cfg(feature = "rabbitmq")]
 use crate::resources::RabbitBindings;
 
-/// Shared infrastructure handles available to bridge implementations while handling a request.
+/// Shared infrastructure handles available to mock service implementations while handling a request.
 ///
-/// Populated by the harness after resource provision; use [`BridgeResources::default`] for unit tests
+/// Populated by the harness after resource provision; use [`MockServiceResources::default`] for unit tests
 /// when no infrastructure is wired.
 #[derive(Default)]
-pub struct BridgeResources {
+pub struct MockServiceResources {
     #[cfg(feature = "kafka")]
     pub kafka_bindings: Option<KafkaBindings>,
     #[cfg(feature = "kafka")]
@@ -40,9 +40,9 @@ pub struct BridgeResources {
     pub mariadb_bindings: Option<MariaDBBindings>,
 }
 
-impl fmt::Debug for BridgeResources {
+impl fmt::Debug for MockServiceResources {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s = f.debug_struct("BridgeResources");
+        let mut s = f.debug_struct("MockServiceResources");
         #[cfg(feature = "kafka")]
         {
             s.field("kafka_bindings", &self.kafka_bindings);

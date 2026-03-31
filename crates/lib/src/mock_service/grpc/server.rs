@@ -1,4 +1,4 @@
-//! Tonic-hosted gRPC bridge server (`grpc-bridges`): [`tower::Service`] over unary payloads.
+//! Tonic-hosted gRPC mock service server (`grpc-mock-services`): [`tower::Service`] over unary payloads.
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -23,46 +23,46 @@ use tonic::Code;
 use tonic::Status;
 use tower::Service;
 
-use super::grpc_protocol_error::GrpcBridgeProtocolError;
-use super::grpc_types::{GrpcBridgeRequest, GrpcBridgeResponse};
-use super::handle::{BridgeHandle, RecordedExchange};
-use super::traits::GrpcBridge;
-use super::types::{BridgeContext, BridgeError, BridgeResources};
+use super::protocol_error::GrpcMockServiceProtocolError;
+use super::types::{GrpcMockServiceRequest, GrpcMockServiceResponse};
+use super::super::handle::{MockServiceHandle, RecordedExchange};
+use super::r#trait::GrpcMockServiceTrait;
+use super::super::types::{MockServiceContext, MockServiceError, MockServiceResources};
 
-/// Join handle and shutdown signal for one gRPC bridge server task.
-pub(crate) struct GrpcBridgeRuntime {
+/// Join handle and shutdown signal for one gRPC mock service server task.
+pub(crate) struct GrpcMockServiceRuntime {
     pub shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
     pub join: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
 }
 
-/// Bind `127.0.0.1:0`, spawn [`tonic::transport::Server`], return [`BridgeHandle`] and runtime.
-pub(crate) async fn spawn_grpc_bridge_server(
-    bridge_name: String,
-    bridge: Arc<dyn GrpcBridge>,
+/// Bind `127.0.0.1:0`, spawn [`tonic::transport::Server`], return [`MockServiceHandle`] and runtime.
+pub(crate) async fn spawn_grpc_mock_service_server(
+    mock_service_name: String,
+    mock_service: Arc<dyn GrpcMockServiceTrait>,
     scenario_id: String,
-    resources: Arc<BridgeResources>,
+    resources: Arc<MockServiceResources>,
     max_recorded_body_size: Option<usize>,
-) -> Result<(Arc<BridgeHandle>, GrpcBridgeRuntime), BridgeError> {
+) -> Result<(Arc<MockServiceHandle>, GrpcMockServiceRuntime), MockServiceError> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
-        .map_err(|source| BridgeError::ServerStart { source })?;
+        .map_err(|source| MockServiceError::ServerStart { source })?;
     let bind_addr = listener
         .local_addr()
-        .map_err(|source| BridgeError::ServerStart { source })?;
+        .map_err(|source| MockServiceError::ServerStart { source })?;
     let bind_display = bind_addr.to_string();
     let client_url = format!("http://{bind_display}");
     let incoming = TcpIncoming::from(listener);
 
-    let handle = Arc::new(BridgeHandle::new(
-        bridge_name.clone(),
+    let handle = Arc::new(MockServiceHandle::new(
+        mock_service_name.clone(),
         bind_display,
         client_url,
         max_recorded_body_size,
     ));
 
-    let service = GrpcBridgeTowerService {
-        bridge,
-        bridge_label: bridge_name.clone(),
+    let service = GrpcMockServiceTowerService {
+        mock_service,
+        mock_service_label: mock_service_name.clone(),
         scenario_id,
         resources,
         recorder: Arc::clone(&handle),
@@ -80,30 +80,30 @@ pub(crate) async fn spawn_grpc_bridge_server(
 
     Ok((
         handle,
-        GrpcBridgeRuntime {
+        GrpcMockServiceRuntime {
             shutdown_tx: Some(shutdown_tx),
             join,
         },
     ))
 }
 
-/// Per-request [`tower::Service`] that decodes unary gRPC frames and delegates to [`GrpcBridge`].
+/// Per-request [`tower::Service`] that decodes unary gRPC frames and delegates to [`GrpcMockServiceTrait`].
 #[derive(Clone)]
-pub(crate) struct GrpcBridgeTowerService {
-    bridge: Arc<dyn GrpcBridge>,
-    bridge_label: String,
+pub(crate) struct GrpcMockServiceTowerService {
+    mock_service: Arc<dyn GrpcMockServiceTrait>,
+    mock_service_label: String,
     scenario_id: String,
-    resources: Arc<BridgeResources>,
-    recorder: Arc<BridgeHandle>,
+    resources: Arc<MockServiceResources>,
+    recorder: Arc<MockServiceHandle>,
 }
 
-impl GrpcBridgeTowerService {
+impl GrpcMockServiceTowerService {
     async fn handle_request_inner(
         &self,
         request: Request<Body>,
-    ) -> Result<Response<Body>, GrpcBridgeProtocolError> {
+    ) -> Result<Response<Body>, GrpcMockServiceProtocolError> {
         if request.method() != http::Method::POST {
-            return Err(GrpcBridgeProtocolError::RequestMethodNotPost);
+            return Err(GrpcMockServiceProtocolError::RequestMethodNotPost);
         }
 
         let timestamp = OffsetDateTime::now_utc();
@@ -114,36 +114,36 @@ impl GrpcBridgeTowerService {
         let body_bytes = body
             .collect()
             .await
-            .map_err(|_| GrpcBridgeProtocolError::RequestBodyReadFailed)?
+            .map_err(|_| GrpcMockServiceProtocolError::RequestBodyReadFailed)?
             .to_bytes();
 
         let (service_name, method_name) =
-            parse_grpc_path(grpc_path.as_str()).ok_or(GrpcBridgeProtocolError::InvalidGrpcPath)?;
+            parse_grpc_path(grpc_path.as_str()).ok_or(GrpcMockServiceProtocolError::InvalidGrpcPath)?;
 
         let payload = decode_unary_grpc_payload(body_bytes.as_ref())?;
 
-        let grpc_request = GrpcBridgeRequest {
+        let grpc_request = GrpcMockServiceRequest {
             service: service_name,
             method: method_name,
             metadata: request_headers.clone(),
             body: Bytes::copy_from_slice(payload),
         };
 
-        let bridge_context = BridgeContext::new(
+        let mock_service_context = MockServiceContext::new(
             self.scenario_id.clone(),
-            self.bridge_label.clone(),
+            self.mock_service_label.clone(),
             Arc::clone(&self.resources),
         );
 
         let started = Instant::now();
-        let bridge_response = self.bridge.handle(grpc_request, &bridge_context).await;
+        let mock_service_response = self.mock_service.handle(grpc_request, &mock_service_context).await;
         let duration = started.elapsed();
 
-        let http_response = grpc_bridge_response_to_http(&bridge_response)?;
+        let http_response = grpc_mock_service_response_to_http(&mock_service_response)?;
 
         let response_status = 200u16;
-        let response_body = if bridge_response.status_code == Code::Ok {
-            encode_grpc_frame(bridge_response.body.as_ref())
+        let response_body = if mock_service_response.status_code == Code::Ok {
+            encode_grpc_frame(mock_service_response.body.as_ref())
         } else {
             Bytes::new()
         };
@@ -164,7 +164,7 @@ impl GrpcBridgeTowerService {
     }
 }
 
-impl Service<Request<Body>> for GrpcBridgeTowerService {
+impl Service<Request<Body>> for GrpcMockServiceTowerService {
     type Response = Response<Body>;
     type Error = Infallible;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -211,20 +211,20 @@ fn header_map_to_pairs(headers: &HeaderMap) -> Vec<(String, String)> {
     pairs
 }
 
-fn decode_unary_grpc_payload(input: &[u8]) -> Result<&[u8], GrpcBridgeProtocolError> {
+fn decode_unary_grpc_payload(input: &[u8]) -> Result<&[u8], GrpcMockServiceProtocolError> {
     if input.len() < 5 {
-        return Err(GrpcBridgeProtocolError::UnaryFrameTooShort);
+        return Err(GrpcMockServiceProtocolError::UnaryFrameTooShort);
     }
     let compressed = input[0];
     if compressed != 0 {
-        return Err(GrpcBridgeProtocolError::CompressedUnaryPayloadNotSupported);
+        return Err(GrpcMockServiceProtocolError::CompressedUnaryPayloadNotSupported);
     }
     let length_prefix: [u8; 4] = input[1..5]
         .try_into()
-        .map_err(|_| GrpcBridgeProtocolError::UnaryLengthPrefixLayoutInvalid)?;
+        .map_err(|_| GrpcMockServiceProtocolError::UnaryLengthPrefixLayoutInvalid)?;
     let message_length = u32::from_be_bytes(length_prefix) as usize;
     if input.len() < 5 + message_length {
-        return Err(GrpcBridgeProtocolError::UnaryPayloadLengthExceedsFrame);
+        return Err(GrpcMockServiceProtocolError::UnaryPayloadLengthExceedsFrame);
     }
     Ok(&input[5..5 + message_length])
 }
@@ -241,14 +241,14 @@ fn encode_grpc_frame(message: &[u8]) -> Bytes {
     buffer.freeze()
 }
 
-fn status_from_bridge_response(response: &GrpcBridgeResponse) -> Status {
+fn status_from_mock_service_response(response: &GrpcMockServiceResponse) -> Status {
     let message = response.message.clone().unwrap_or_default();
     Status::new(response.status_code, message)
 }
 
-fn grpc_bridge_response_to_http(
-    response: &GrpcBridgeResponse,
-) -> Result<Response<Body>, GrpcBridgeProtocolError> {
+fn grpc_mock_service_response_to_http(
+    response: &GrpcMockServiceResponse,
+) -> Result<Response<Body>, GrpcMockServiceProtocolError> {
     if response.status_code == Code::Ok {
         let framed = encode_grpc_frame(response.body.as_ref());
         let mut trailers = HeaderMap::new();
@@ -265,23 +265,23 @@ fn grpc_bridge_response_to_http(
             .status(http::StatusCode::OK)
             .header(http::header::CONTENT_TYPE, GRPC_CONTENT_TYPE)
             .body(Body::new(StreamBody::new(stream)))
-            .map_err(|_| GrpcBridgeProtocolError::GrpcOkHttpResponseBuildFailed)
+            .map_err(|_| GrpcMockServiceProtocolError::GrpcOkHttpResponseBuildFailed)
     } else {
-        Ok(status_to_http_response(status_from_bridge_response(
+        Ok(status_to_http_response(status_from_mock_service_response(
             response,
         )))
     }
 }
 
 fn merge_trailing_metadata(
-    response: &GrpcBridgeResponse,
+    response: &GrpcMockServiceResponse,
     trailers: &mut HeaderMap,
-) -> Result<(), GrpcBridgeProtocolError> {
+) -> Result<(), GrpcMockServiceProtocolError> {
     for (key, value) in &response.metadata {
         let name = HeaderName::try_from(key.as_str())
-            .map_err(|_| GrpcBridgeProtocolError::TrailingMetadataHeaderNameInvalid)?;
+            .map_err(|_| GrpcMockServiceProtocolError::TrailingMetadataHeaderNameInvalid)?;
         let header_value = HeaderValue::try_from(value.as_str())
-            .map_err(|_| GrpcBridgeProtocolError::TrailingMetadataHeaderValueInvalid)?;
+            .map_err(|_| GrpcMockServiceProtocolError::TrailingMetadataHeaderValueInvalid)?;
         trailers.insert(name, header_value);
     }
     Ok(())
@@ -291,7 +291,7 @@ fn status_to_http_response(status: Status) -> Response<Body> {
     let mut trailers = HeaderMap::new();
     if status.add_header(&mut trailers).is_err() {
         trailers.clear();
-        let fallback = GrpcBridgeProtocolError::GrpcStatusTrailerEncodingFailed;
+        let fallback = GrpcMockServiceProtocolError::GrpcStatusTrailerEncodingFailed;
         let _ = Status::new(fallback.status_code(), fallback.to_string()).add_header(&mut trailers);
     }
     let stream = stream_iter(vec![Ok::<_, Infallible>(Frame::trailers(trailers))]);
@@ -303,7 +303,7 @@ fn status_to_http_response(status: Status) -> Response<Body> {
         Ok(response) => response,
         Err(error) => {
             tracing::error!(
-                target: "shakedown::bridge",
+                target: "shakedown::mock_service",
                 "failed to build gRPC error HTTP response: {}",
                 error
             );
@@ -314,11 +314,11 @@ fn status_to_http_response(status: Status) -> Response<Body> {
     }
 }
 
-#[cfg(all(test, feature = "grpc-bridges"))]
+#[cfg(all(test, feature = "grpc-mock-services"))]
 mod tests {
     use http::header::{HeaderMap, HeaderName, HeaderValue};
 
-    use super::super::grpc_protocol_error::GrpcBridgeProtocolError;
+    use super::super::protocol_error::GrpcMockServiceProtocolError;
     use super::*;
 
     #[test]
@@ -364,7 +364,7 @@ mod tests {
         // Then we get UnaryFrameTooShort
         assert!(matches!(
             decode_unary_grpc_payload(&[0, 1, 2]),
-            Err(GrpcBridgeProtocolError::UnaryFrameTooShort)
+            Err(GrpcMockServiceProtocolError::UnaryFrameTooShort)
         ));
     }
 
@@ -376,7 +376,7 @@ mod tests {
         // Then compressed payloads are rejected
         assert!(matches!(
             decode_unary_grpc_payload(&frame),
-            Err(GrpcBridgeProtocolError::CompressedUnaryPayloadNotSupported)
+            Err(GrpcMockServiceProtocolError::CompressedUnaryPayloadNotSupported)
         ));
     }
 
@@ -397,7 +397,7 @@ mod tests {
         // Then we get UnaryPayloadLengthExceedsFrame
         assert!(matches!(
             decode_unary_grpc_payload(&frame),
-            Err(GrpcBridgeProtocolError::UnaryPayloadLengthExceedsFrame)
+            Err(GrpcMockServiceProtocolError::UnaryPayloadLengthExceedsFrame)
         ));
     }
 

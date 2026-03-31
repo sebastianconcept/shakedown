@@ -21,7 +21,7 @@ tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "
 async-trait = "0.1"
 
 # Kafka integration (behind feature gate per D-2)
-# `tokio` enables `FutureProducer` + `AsyncRuntime` (helpers and bridges use async send).
+# `tokio` enables `FutureProducer` + `AsyncRuntime` (helpers and mock services use async send).
 rdkafka = { version = "=0.38", optional = true, default-features = false, features = ["ssl-vendored", "tokio"] }
 
 # Testcontainers (base container runtime)
@@ -68,14 +68,14 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 # Structured logging for diagnostics connection and future ShakedownLayer (SPECS §1)
 tracing = "0.1"
 
-# HTTP bridges (MVP `mvp-bridges`; hyper 1.x + http 1.x per SPECS)
+# HTTP mock services (MVP `mvp-mock-services`; hyper 1.x + http 1.x per SPECS)
 hyper = { version = "1", optional = true, default-features = false, features = ["server", "http1"] }
 hyper-util = { version = "0.1", optional = true, default-features = false, features = ["tokio"] }
 http = { version = "1", optional = true }
 http-body = { version = "1", optional = true }
 http-body-util = { version = "0.1", optional = true }
 bytes = { version = "1", optional = true }
-# gRPC bridges (optional; tonic aligns with lockfile via testcontainers stack)
+# gRPC mock services (optional; tonic aligns with lockfile via testcontainers stack)
 tonic = { version = "0.14", optional = true, default-features = false, features = ["transport"] }
 prost = { version = "0.14", optional = true }
 tokio-stream = { version = "0.1", optional = true, default-features = false }
@@ -97,16 +97,16 @@ serial_test = "3"
 time = { version = "0.3", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-# Unary gRPC client for `bridge_grpc` integration test (no codegen; uses `tonic_prost::ProstCodec`).
+# Unary gRPC client for `mock_service_grpc` integration test (no codegen; uses `tonic_prost::ProstCodec`).
 http = "1"
 prost = "0.14"
 tonic = { version = "0.14", default-features = false, features = ["transport"] }
 tonic-prost = "0.14"
 
 [features]
-# HTTP bridge types and `hyper` stack (default-on per `mvp-bridges` milestone)
-default = ["bridges"]
-bridges = [
+# HTTP mock service types and `hyper` stack (default-on per `mvp-mock-services` milestone)
+default = ["mock-services"]
+mock-services = [
     "dep:hyper",
     "dep:hyper-util",
     "dep:http",
@@ -114,8 +114,8 @@ bridges = [
     "dep:http-body-util",
     "dep:bytes",
 ]
-grpc-bridges = [
-    "bridges",
+grpc-mock-services = [
+    "mock-services",
     "dep:tonic",
     "dep:prost",
     "dep:tokio-stream",
@@ -362,17 +362,17 @@ name = "diagnostics_graceful"
 path = "tests/diagnostics_graceful.rs"
 required-features = ["kafka"]
 
-# HTTP bridge server + Context (`bridges` is default; gate for no-default-features builds)
+# HTTP mock service server + Context (`mock-services` is default; gate for no-default-features builds)
 [[test]]
-name = "bridge_http"
-path = "tests/bridge_http.rs"
-required-features = ["bridges"]
+name = "mock_service_http"
+path = "tests/mock_service_http.rs"
+required-features = ["mock-services"]
 
-# gRPC stub bridge + tonic unary client (localhost only; `grpc-bridges`)
+# gRPC stub mock service + tonic unary client (localhost only; `grpc-mock-services`)
 [[test]]
-name = "bridge_grpc"
-path = "tests/bridge_grpc.rs"
-required-features = ["grpc-bridges"]
+name = "mock_service_grpc"
+path = "tests/mock_service_grpc.rs"
+required-features = ["grpc-mock-services"]
 
 # Service container → host.docker.internal connectivity (Docker); ignored in test body
 [[test]]
@@ -398,10 +398,10 @@ name = "services_diagnostics"
 path = "tests/services_diagnostics.rs"
 required-features = ["services"]
 
-# Kafka + HTTP bridge + whoami env echo + diagnostics (Docker); ignored unless --ignored
+# Kafka + HTTP mock service + whoami env echo + diagnostics (Docker); ignored unless --ignored
 [[test]]
-name = "services_kafka_bridge_whoami"
-path = "tests/services_kafka_bridge_whoami.rs"
+name = "services_kafka_mock_service_whoami"
+path = "tests/services_kafka_mock_service_whoami.rs"
 required-features = ["kafka", "services"]
 
 # Postgres partitioned DATABASE_URL + two whoami + depends_on (Docker); ignored unless --ignored
