@@ -17,7 +17,7 @@ use shakedown::diagnostics::labels::{
 use shakedown::event::{InfraEvent, LogEntry};
 use shakedown::{
     render_failure_timeline, run_scenario, BuiltinResource, Context, EventLog,
-    FailureTimelineOptions, HealthCheck, KafkaResource, ServiceUnderTest, StubBridge,
+    FailureTimelineOptions, HealthCheck, KafkaResource, ServiceUnderTest, HttpMockService,
     HOST_DOCKER_INTERNAL,
 };
 
@@ -31,7 +31,7 @@ async fn kafka_http_bridge_whoami_env_injection_and_diagnostics() {
         KafkaResource::new().with_image_tag_from_env(),
     ));
 
-    let order_gateway_stub = StubBridge::new("order-gateway")
+    let order_gateway_stub = HttpMockService::new("order-gateway")
         .on("GET", "/health")
         .respond(200)
         .default_response(404);
@@ -85,7 +85,7 @@ async fn kafka_http_bridge_whoami_env_injection_and_diagnostics() {
                 assert!(
                     body.contains("ORDER_GATEWAY_URL=")
                         && body.contains(HOST_DOCKER_INTERNAL),
-                    "Bridge base URL inside the container should use {HOST_DOCKER_INTERNAL}: {body}"
+                    "MockService base URL inside the container should use {HOST_DOCKER_INTERNAL}: {body}"
                 );
 
                 let handle = scenario_context

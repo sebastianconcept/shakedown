@@ -1,4 +1,4 @@
-//! Per-bridge call recording and assertion helpers.
+//! Per-mock-service call recording and assertion helpers.
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -9,9 +9,9 @@ use time::OffsetDateTime;
 
 use crate::error::{AssertionError, ShakedownError};
 
-use super::types::BridgeError;
+use super::types::MockServiceError;
 
-/// One recorded inbound HTTP request and its response (bridge server wrapper).
+/// One recorded inbound HTTP request and its response (mock service server wrapper).
 #[derive(Debug, Clone)]
 pub struct RecordedCall {
     pub timestamp: OffsetDateTime,
@@ -23,7 +23,7 @@ pub struct RecordedCall {
     pub response_status: u16,
     pub response_body: Bytes,
     pub duration: Duration,
-    /// True if request or response body was truncated when recording (see [`BridgeHandle::max_recorded_body_size`]).
+    /// True if request or response body was truncated when recording (see [`MockServiceHandle::max_recorded_body_size`]).
     pub body_truncated: bool,
 }
 
@@ -71,13 +71,13 @@ impl RecordedCall {
     }
 
     /// Deserialize the **request** body as JSON.
-    pub fn json<T: serde::de::DeserializeOwned>(&self) -> Result<T, BridgeError> {
+    pub fn json<T: serde::de::DeserializeOwned>(&self) -> Result<T, MockServiceError> {
         serde_json::from_slice(self.request_body.as_ref())
-            .map_err(|source| BridgeError::Deserialization { source })
+            .map_err(|source| MockServiceError::Deserialization { source })
     }
 }
 
-/// Full request/response snapshot passed to [`BridgeHandle::push_recorded_exchange`].
+/// Full request/response snapshot passed to [`MockServiceHandle::push_recorded_exchange`].
 #[derive(Debug)]
 pub struct RecordedExchange {
     pub timestamp: OffsetDateTime,
@@ -91,8 +91,8 @@ pub struct RecordedExchange {
     pub duration: Duration,
 }
 
-/// Handle for one bridge instance: bind URL, client URL, and recorded traffic.
-pub struct BridgeHandle {
+/// Handle for one mock service instance: bind URL, client URL, and recorded traffic.
+pub struct MockServiceHandle {
     pub name: String,
     /// Actual socket address the server bound to (e.g. `127.0.0.1:54321`).
     pub bind_address: String,
@@ -106,7 +106,7 @@ pub struct BridgeHandle {
 /// Locks the recorded-calls buffer. If the mutex is poisoned (a panicking thread held the lock),
 /// recovers the inner data via [`std::sync::PoisonError::into_inner`] so teardown and assertions
 /// can still run after a panic elsewhere.
-fn lock_bridge_calls(
+fn lock_mock_service_calls(
     storage: &Arc<Mutex<Vec<RecordedCall>>>,
 ) -> std::sync::MutexGuard<'_, Vec<RecordedCall>> {
     storage
@@ -114,10 +114,10 @@ fn lock_bridge_calls(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-impl fmt::Debug for BridgeHandle {
+impl fmt::Debug for MockServiceHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let count = lock_bridge_calls(&self.calls_storage).len();
-        f.debug_struct("BridgeHandle")
+        let count = lock_mock_service_calls(&self.calls_storage).len();
+        f.debug_struct("MockServiceHandle")
             .field("name", &self.name)
             .field("bind_address", &self.bind_address)
             .field("client_url", &self.client_url)
@@ -127,7 +127,7 @@ impl fmt::Debug for BridgeHandle {
     }
 }
 
-impl BridgeHandle {
+impl MockServiceHandle {
     /// Create a handle (typically by the harness after binding a listener).
     pub fn new(
         name: impl Into<String>,
@@ -162,18 +162,18 @@ impl BridgeHandle {
             duration: exchange.duration,
             body_truncated: rb_trunc || resp_trunc,
         };
-        let mut calls = lock_bridge_calls(&self.calls_storage);
+        let mut calls = lock_mock_service_calls(&self.calls_storage);
         calls.push(recorded);
     }
 
     /// Returns a clone of all recorded calls.
     pub fn calls(&self) -> Vec<RecordedCall> {
-        lock_bridge_calls(&self.calls_storage).clone()
+        lock_mock_service_calls(&self.calls_storage).clone()
     }
 
     /// Calls whose method and path match exactly (case-sensitive for method).
     pub fn calls_matching(&self, method: &str, path: &str) -> Vec<RecordedCall> {
-        let calls = lock_bridge_calls(&self.calls_storage);
+        let calls = lock_mock_service_calls(&self.calls_storage);
         calls
             .iter()
             .filter(|call| call.method() == method && call.path() == path)
@@ -183,13 +183,13 @@ impl BridgeHandle {
 
     /// On mismatch returns [`ShakedownError::Scenario`].
     pub fn assert_called_times(&self, expected: usize) -> Result<(), ShakedownError> {
-        let calls = lock_bridge_calls(&self.calls_storage);
+        let calls = lock_mock_service_calls(&self.calls_storage);
         let actual = calls.len();
         if actual == expected {
             return Ok(());
         }
-        Err(AssertionError::BridgeCallCountMismatch {
-            bridge_name: self.name.clone(),
+        Err(AssertionError::MockServiceCallCountMismatch {
+            mock_service_name: self.name.clone(),
             expected,
             actual,
             recorded_calls_diagnostic: format_calls_diagnostic(&calls),
@@ -204,7 +204,7 @@ impl BridgeHandle {
         path: &str,
         expected: usize,
     ) -> Result<(), ShakedownError> {
-        let calls = lock_bridge_calls(&self.calls_storage);
+        let calls = lock_mock_service_calls(&self.calls_storage);
         let actual = calls
             .iter()
             .filter(|call| call.method() == method && call.path() == path)
@@ -212,8 +212,8 @@ impl BridgeHandle {
         if actual == expected {
             return Ok(());
         }
-        Err(AssertionError::BridgePathCallCountMismatch {
-            bridge_name: self.name.clone(),
+        Err(AssertionError::MockServicePathCallCountMismatch {
+            mock_service_name: self.name.clone(),
             method: method.to_string(),
             path: path.to_string(),
             expected,
@@ -230,7 +230,7 @@ impl BridgeHandle {
         path: &str,
         predicate: impl Fn(&RecordedCall) -> bool,
     ) -> Result<(), ShakedownError> {
-        let calls = lock_bridge_calls(&self.calls_storage);
+        let calls = lock_mock_service_calls(&self.calls_storage);
         let matched = calls
             .iter()
             .filter(|call| call.method() == method && call.path() == path)
@@ -238,8 +238,8 @@ impl BridgeHandle {
         if matched {
             return Ok(());
         }
-        Err(AssertionError::BridgePredicateUnmatched {
-            bridge_name: self.name.clone(),
+        Err(AssertionError::MockServicePredicateUnmatched {
+            mock_service_name: self.name.clone(),
             method: method.to_string(),
             path: path.to_string(),
             recorded_calls_diagnostic: format_calls_diagnostic(&calls),
@@ -249,12 +249,12 @@ impl BridgeHandle {
 
     /// See [`Self::assert_called_times`] for error semantics.
     pub fn assert_not_called(&self) -> Result<(), ShakedownError> {
-        let calls = lock_bridge_calls(&self.calls_storage);
+        let calls = lock_mock_service_calls(&self.calls_storage);
         if calls.is_empty() {
             return Ok(());
         }
-        Err(AssertionError::BridgeUnexpectedCalls {
-            bridge_name: self.name.clone(),
+        Err(AssertionError::MockServiceUnexpectedCalls {
+            mock_service_name: self.name.clone(),
             actual: calls.len(),
             recorded_calls_diagnostic: format_calls_diagnostic(&calls),
         }
@@ -263,7 +263,7 @@ impl BridgeHandle {
 
     /// See [`Self::assert_called_times`] for error semantics.
     pub fn assert_path_not_called(&self, method: &str, path: &str) -> Result<(), ShakedownError> {
-        let calls = lock_bridge_calls(&self.calls_storage);
+        let calls = lock_mock_service_calls(&self.calls_storage);
         let matching = calls
             .iter()
             .filter(|call| call.method() == method && call.path() == path)
@@ -271,8 +271,8 @@ impl BridgeHandle {
         if matching == 0 {
             return Ok(());
         }
-        Err(AssertionError::BridgePathUnexpectedCalls {
-            bridge_name: self.name.clone(),
+        Err(AssertionError::MockServicePathUnexpectedCalls {
+            mock_service_name: self.name.clone(),
             method: method.to_string(),
             path: path.to_string(),
             matching_call_count: matching,
@@ -314,7 +314,7 @@ fn format_timestamp(timestamp: OffsetDateTime) -> String {
         .unwrap_or_else(|_| timestamp.to_string())
 }
 
-#[cfg(all(test, feature = "bridges"))]
+#[cfg(all(test, feature = "mock-services"))]
 mod tests {
     use super::*;
 
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn recorded_call_json_and_accessors() {
-        let handle = BridgeHandle::new("h", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let handle = MockServiceHandle::new("h", "127.0.0.1:1", "http://127.0.0.1:1", None);
         handle.push_recorded_exchange(RecordedExchange {
             timestamp: sample_time(),
             method: String::from("POST"),
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn calls_matching_filters_method_and_path() {
-        let handle = BridgeHandle::new("pay", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let handle = MockServiceHandle::new("pay", "127.0.0.1:1", "http://127.0.0.1:1", None);
         handle.push_recorded_exchange(make_call("GET", "/health", b"", 200, b""));
         handle.push_recorded_exchange(make_call("POST", "/charge", b"{}", 201, b""));
         handle.push_recorded_exchange(make_call("POST", "/charge", b"[]", 400, b""));
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn assert_called_times_pass_and_fail() {
-        let handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let handle = MockServiceHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
         handle.push_recorded_exchange(make_call("GET", "/", b"", 200, b""));
         assert!(handle.assert_called_times(1).is_ok());
         let err = handle.assert_called_times(0).unwrap_err();
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn assert_path_called_times_pass_and_fail() {
-        let handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let handle = MockServiceHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
         handle.push_recorded_exchange(make_call("POST", "/v1/x", b"", 200, b""));
         assert!(handle.assert_path_called_times("POST", "/v1/x", 1).is_ok());
         let err = handle
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn assert_called_with_pass_and_fail() {
-        let handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let handle = MockServiceHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
         handle.push_recorded_exchange(make_call(
             "POST",
             "/v1/charge",
@@ -430,9 +430,9 @@ mod tests {
 
     #[test]
     fn assert_not_called_pass_and_fail() {
-        let empty = BridgeHandle::new("e", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let empty = MockServiceHandle::new("e", "127.0.0.1:1", "http://127.0.0.1:1", None);
         assert!(empty.assert_not_called().is_ok());
-        let handle = BridgeHandle::new("e", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let handle = MockServiceHandle::new("e", "127.0.0.1:1", "http://127.0.0.1:1", None);
         handle.push_recorded_exchange(make_call("GET", "/", b"", 200, b""));
         let err = handle.assert_not_called().unwrap_err();
         assert!(err.to_string().contains("expected no calls"));
@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn assert_path_not_called_pass_and_fail() {
-        let handle = BridgeHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let handle = MockServiceHandle::new("a", "127.0.0.1:1", "http://127.0.0.1:1", None);
         handle.push_recorded_exchange(make_call("DELETE", "/v1/x", b"", 204, b""));
         assert!(handle.assert_path_not_called("GET", "/v1/x").is_ok());
         let err = handle
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn push_recorded_exchange_truncates_and_sets_flag() {
-        let handle = BridgeHandle::new("t", "127.0.0.1:1", "http://proxy.example:9", Some(4));
+        let handle = MockServiceHandle::new("t", "127.0.0.1:1", "http://proxy.example:9", Some(4));
         handle.push_recorded_exchange(RecordedExchange {
             timestamp: sample_time(),
             method: String::from("POST"),
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn push_recorded_exchange_no_limit_no_truncation() {
-        let handle = BridgeHandle::new("t", "127.0.0.1:1", "http://127.0.0.1:1", None);
+        let handle = MockServiceHandle::new("t", "127.0.0.1:1", "http://127.0.0.1:1", None);
         handle.push_recorded_exchange(RecordedExchange {
             timestamp: sample_time(),
             method: String::from("GET"),

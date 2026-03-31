@@ -1,10 +1,12 @@
-//! Declarative HTTP stub bridge (`StubBridge`) implementing [`HttpBridge`](super::HttpBridge).
+//! Declarative HTTP mock service (`HttpMockService`) implementing [`HttpMockServiceTrait`](super::super::HttpMockServiceTrait).
 
 use async_trait::async_trait;
 use serde::Serialize;
 
-use super::traits::HttpBridge;
-use super::types::{BridgeContext, BridgeError, BridgeRequest, BridgeResponse};
+use super::r#trait::HttpMockServiceTrait;
+use super::super::types::{MockServiceContext, MockServiceError};
+use super::request::HttpMockServiceRequest;
+use super::response::HttpMockServiceResponse;
 
 /// Path matching mode for a stub route (D-brief-6: enum-based, registration order, not a map).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,78 +62,78 @@ fn normalize_method(method: &str) -> String {
     method.to_ascii_uppercase()
 }
 
-/// Builder for route → response mappings; implements [`HttpBridge`](super::HttpBridge).
+/// Builder for route → response mappings; implements [`HttpMockServiceTrait`](super::HttpMockServiceTrait).
 #[derive(Debug, Clone)]
-pub struct StubBridge {
+pub struct HttpMockService {
     name: String,
-    routes: Vec<(String, RouteMatch, BridgeResponse)>,
-    default_response: BridgeResponse,
+    routes: Vec<(String, RouteMatch, HttpMockServiceResponse)>,
+    default_response: HttpMockServiceResponse,
 }
 
-/// Fluent step after [`StubBridge::on`]: finish the route with a status or JSON body.
+/// Fluent step after [`HttpMockService::on`]: finish the route with a status or JSON body.
 #[derive(Debug)]
-pub struct StubRoutePending {
-    stub: StubBridge,
+pub struct HttpMockServiceRoutePending {
+    mock_service: HttpMockService,
     method: String,
     path: String,
 }
 
-impl StubBridge {
-    /// Starts a stub bridge builder. Default response for unmatched routes is **404** until
-    /// [`StubBridge::default_response`] is called.
+impl HttpMockService {
+    /// Starts a mock service builder. Default response for unmatched routes is **404** until
+    /// [`HttpMockService::default_response`] is called.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             routes: Vec::new(),
-            default_response: BridgeResponse::status(404),
+            default_response: HttpMockServiceResponse::status(404),
         }
     }
 
-    /// Logical bridge name (for diagnostics; routing does not use this field).
+    /// Logical mock service name (for diagnostics; routing does not use this field).
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
 
     /// Sets the fallback response when no route matches (default **404**).
     pub fn default_response(mut self, status: u16) -> Self {
-        self.default_response = BridgeResponse::status(status);
+        self.default_response = HttpMockServiceResponse::status(status);
         self
     }
 
     /// Registers a route for the given HTTP method and path. Path may use `*` for a single-segment
     /// glob (see [`RouteMatch::Glob`]).
-    pub fn on(self, method: impl AsRef<str>, path: impl Into<String>) -> StubRoutePending {
-        StubRoutePending {
-            stub: self,
+    pub fn on(self, method: impl AsRef<str>, path: impl Into<String>) -> HttpMockServiceRoutePending {
+        HttpMockServiceRoutePending {
+            mock_service: self,
             method: normalize_method(method.as_ref()),
             path: path.into(),
         }
     }
 }
 
-impl StubRoutePending {
+impl HttpMockServiceRoutePending {
     /// Empty body with the given status.
-    pub fn respond(self, status: u16) -> StubBridge {
+    pub fn respond(self, status: u16) -> HttpMockService {
         let route_match = RouteMatch::for_path(self.path);
-        let mut stub = self.stub;
-        stub.routes
-            .push((self.method, route_match, BridgeResponse::status(status)));
-        stub
+        let mut mock_service = self.mock_service;
+        mock_service.routes
+            .push((self.method, route_match, HttpMockServiceResponse::status(status)));
+        mock_service
     }
 
     /// JSON body with `Content-Type: application/json` (and status **200** unless set in a later builder).
-    pub fn respond_json(self, value: &impl Serialize) -> Result<StubBridge, BridgeError> {
-        let response = BridgeResponse::json(value)?;
+    pub fn respond_json(self, value: &impl Serialize) -> Result<HttpMockService, MockServiceError> {
+        let response = HttpMockServiceResponse::json(value)?;
         let route_match = RouteMatch::for_path(self.path);
-        let mut stub = self.stub;
-        stub.routes.push((self.method, route_match, response));
-        Ok(stub)
+        let mut mock_service = self.mock_service;
+        mock_service.routes.push((self.method, route_match, response));
+        Ok(mock_service)
     }
 }
 
 #[async_trait]
-impl HttpBridge for StubBridge {
-    async fn handle(&self, request: BridgeRequest, _context: &BridgeContext) -> BridgeResponse {
+impl HttpMockServiceTrait for HttpMockService {
+    async fn handle(&self, request: HttpMockServiceRequest, _context: &MockServiceContext) -> HttpMockServiceResponse {
         let method = normalize_method(request.method());
         let path = request.path();
         for (registered_method, route_match, response) in &self.routes {
@@ -146,130 +148,130 @@ impl HttpBridge for StubBridge {
     }
 }
 
-#[cfg(all(test, feature = "bridges"))]
+#[cfg(all(test, feature = "mock-services"))]
 mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
 
-    use super::super::types::BridgeResources;
+    use super::super::super::types::MockServiceResources;
     use super::*;
 
-    fn ctx() -> BridgeContext {
-        BridgeContext::new("s1", "stub", Arc::new(BridgeResources::default()))
+    fn ctx() -> MockServiceContext {
+        MockServiceContext::new("s1", "stub", Arc::new(MockServiceResources::default()))
     }
 
     #[tokio::test]
     async fn exact_match_returns_registered_response() {
-        let stub = StubBridge::new("api").on("GET", "/health").respond(204);
-        let request = BridgeRequest {
+        let mock_service = HttpMockService::new("api").on("GET", "/health").respond(204);
+        let request = HttpMockServiceRequest {
             method: String::from("GET"),
             path: String::from("/health"),
             query: None,
             headers: Vec::new(),
             body: Bytes::new(),
         };
-        let response = stub.handle(request, &ctx()).await;
+        let response = mock_service.handle(request, &ctx()).await;
         assert_eq!(response.status, 204);
     }
 
     #[tokio::test]
     async fn glob_matches_single_segment() {
-        let stub = StubBridge::new("users")
+        let mock_service = HttpMockService::new("users")
             .on("GET", "/users/*/profile")
             .respond(200);
-        let request = BridgeRequest {
+        let request = HttpMockServiceRequest {
             method: String::from("GET"),
             path: String::from("/users/42/profile"),
             query: None,
             headers: Vec::new(),
             body: Bytes::new(),
         };
-        let response = stub.handle(request, &ctx()).await;
+        let response = mock_service.handle(request, &ctx()).await;
         assert_eq!(response.status, 200);
     }
 
     #[tokio::test]
     async fn unmatched_uses_default_404() {
-        let stub = StubBridge::new("api").on("GET", "/known").respond(200);
-        let request = BridgeRequest {
+        let mock_service = HttpMockService::new("api").on("GET", "/known").respond(200);
+        let request = HttpMockServiceRequest {
             method: String::from("GET"),
             path: String::from("/other"),
             query: None,
             headers: Vec::new(),
             body: Bytes::new(),
         };
-        let response = stub.handle(request, &ctx()).await;
+        let response = mock_service.handle(request, &ctx()).await;
         assert_eq!(response.status, 404);
     }
 
     #[tokio::test]
     async fn unmatched_uses_configured_default() {
-        let stub = StubBridge::new("api")
+        let mock_service = HttpMockService::new("api")
             .on("GET", "/known")
             .respond(200)
             .default_response(503);
-        let request = BridgeRequest {
+        let request = HttpMockServiceRequest {
             method: String::from("GET"),
             path: String::from("/missing"),
             query: None,
             headers: Vec::new(),
             body: Bytes::new(),
         };
-        let response = stub.handle(request, &ctx()).await;
+        let response = mock_service.handle(request, &ctx()).await;
         assert_eq!(response.status, 503);
     }
 
     #[tokio::test]
     async fn registration_order_first_match_wins() {
-        let stub = StubBridge::new("order")
+        let mock_service = HttpMockService::new("order")
             .on("GET", "/users/*")
             .respond(111)
             .on("GET", "/users/42")
             .respond(222);
-        let request = BridgeRequest {
+        let request = HttpMockServiceRequest {
             method: String::from("GET"),
             path: String::from("/users/42"),
             query: None,
             headers: Vec::new(),
             body: Bytes::new(),
         };
-        let response = stub.handle(request, &ctx()).await;
+        let response = mock_service.handle(request, &ctx()).await;
         assert_eq!(response.status, 111);
     }
 
     #[tokio::test]
     async fn registration_order_exact_before_glob() {
-        let stub = StubBridge::new("order")
+        let mock_service = HttpMockService::new("order")
             .on("GET", "/users/42")
             .respond(222)
             .on("GET", "/users/*")
             .respond(111);
-        let request = BridgeRequest {
+        let request = HttpMockServiceRequest {
             method: String::from("GET"),
             path: String::from("/users/42"),
             query: None,
             headers: Vec::new(),
             body: Bytes::new(),
         };
-        let response = stub.handle(request, &ctx()).await;
+        let response = mock_service.handle(request, &ctx()).await;
         assert_eq!(response.status, 222);
     }
 
     #[tokio::test]
     async fn respond_json_sets_content_type() {
-        let stub = StubBridge::new("json")
+        let mock_service = HttpMockService::new("json")
             .on("POST", "/v1/validate")
             .respond_json(&serde_json::json!({ "valid": true }))
             .expect("json");
-        let request = BridgeRequest {
+        let request = HttpMockServiceRequest {
             method: String::from("POST"),
             path: String::from("/v1/validate"),
             query: None,
             headers: Vec::new(),
             body: Bytes::new(),
         };
-        let response = stub.handle(request, &ctx()).await;
+        let response = mock_service.handle(request, &ctx()).await;
         assert_eq!(response.status, 200);
         assert!(response
             .headers

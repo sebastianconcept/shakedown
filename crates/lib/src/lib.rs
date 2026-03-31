@@ -101,9 +101,9 @@ mod docker_labels;
 #[cfg(any(feature = "elasticsearch", feature = "opensearch"))]
 pub(crate) mod search_operations;
 
-/// Service bridge types and traits (`bridges` feature, default).
-#[cfg(feature = "bridges")]
-pub mod bridge;
+/// Service mock service types and traits (`mock-services` feature, default).
+#[cfg(feature = "mock-services")]
+pub mod mock_service;
 /// Docker Engine diagnostics (bollard) when a Docker-backed resource or `services` is enabled.
 #[cfg(any(
     feature = "kafka",
@@ -177,16 +177,18 @@ pub use crate::lifecycle::{
 };
 pub use crate::phase::Phase;
 
-#[cfg(feature = "bridges")]
-pub use crate::bridge::{
-    BridgeContext, BridgeError, BridgeHandle, BridgeRequest, BridgeResources, BridgeResponse,
-    BridgeResponseBuilder, HttpBridge, RecordedCall, RecordedExchange, RouteMatch, StubBridge,
-    StubRoutePending,
+#[cfg(feature = "mock-services")]
+pub use crate::mock_service::{
+    HttpMockService, HttpMockServiceRequest, HttpMockServiceResponse,
+    HttpMockServiceResponseBuilder, HttpMockServiceRoutePending, MockServiceContext,
+    MockServiceError, MockServiceHandle, MockServiceResources, RecordedCall, RecordedExchange,
+    RouteMatch,
 };
 
-#[cfg(all(feature = "bridges", feature = "grpc-bridges"))]
-pub use crate::bridge::{
-    GrpcBridge, GrpcBridgeRequest, GrpcBridgeResponse, GrpcStubBridge, GrpcStubMethodPending,
+#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+pub use crate::mock_service::{
+    GrpcMockService, GrpcMockServiceMethodPending, GrpcMockServiceRequest, GrpcMockServiceResponse,
+    GrpcMockServiceTrait, HttpMockServiceTrait,
 };
 
 #[cfg(feature = "outbox")]

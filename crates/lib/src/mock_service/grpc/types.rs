@@ -1,14 +1,14 @@
-//! gRPC bridge request and response types (`grpc-bridges` feature).
+//! gRPC mock service request and response types (`grpc-mock-services` feature).
 
 use bytes::Bytes;
 use prost::Message;
 use tonic::Code;
 
-use super::types::BridgeError;
+use super::super::types::MockServiceError;
 
-/// Inbound unary gRPC request presented to a [`super::traits::GrpcBridge`].
+/// Inbound unary gRPC request presented to a [`super::r#trait::GrpcMockService`].
 #[derive(Debug, Clone)]
-pub struct GrpcBridgeRequest {
+pub struct GrpcMockServiceRequest {
     /// gRPC service name (e.g. `inventory.InventoryService`).
     pub service: String,
     /// RPC method name (e.g. `CheckStock`).
@@ -19,16 +19,16 @@ pub struct GrpcBridgeRequest {
     pub body: Bytes,
 }
 
-impl GrpcBridgeRequest {
+impl GrpcMockServiceRequest {
     /// Full gRPC method path: `/Service/Method` (leading slash).
     pub fn grpc_path(&self) -> String {
         format!("/{}/{}", self.service, self.method)
     }
 }
 
-/// Outbound unary gRPC response from a [`super::traits::GrpcBridge`].
+/// Outbound unary gRPC response from a [`super::r#trait::GrpcMockService`].
 #[derive(Debug, Clone)]
-pub struct GrpcBridgeResponse {
+pub struct GrpcMockServiceResponse {
     /// gRPC status code (`Code::Ok` = success). Use [`Self::status`] for non-OK replies.
     pub status_code: Code,
     /// gRPC status message (non-OK).
@@ -39,7 +39,7 @@ pub struct GrpcBridgeResponse {
     pub body: Bytes,
 }
 
-impl GrpcBridgeResponse {
+impl GrpcMockServiceResponse {
     /// Successful response with a raw protobuf body (will be length-prefixed by the server).
     pub fn ok(message: Bytes) -> Self {
         Self {
@@ -51,11 +51,11 @@ impl GrpcBridgeResponse {
     }
 
     /// Successful response encoding a [`prost::Message`].
-    pub fn ok_proto(message: &impl Message) -> Result<Self, BridgeError> {
+    pub fn ok_proto(message: &impl Message) -> Result<Self, MockServiceError> {
         let mut encoded = Vec::new();
         message
             .encode(&mut encoded)
-            .map_err(|error| BridgeError::Encoding {
+            .map_err(|error| MockServiceError::Encoding {
                 message: format!("prost encode: {error}"),
             })?;
         Ok(Self::ok(Bytes::from(encoded)))

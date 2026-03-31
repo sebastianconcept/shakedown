@@ -1,4 +1,4 @@
-//! Hyper HTTP/1 listener for [`super::HttpBridge`].
+//! Hyper HTTP/1 listener for [`super::super::HttpMockServiceTrait`].
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -16,38 +16,37 @@ use time::OffsetDateTime;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
-use super::handle::{BridgeHandle, RecordedExchange};
-use super::traits::HttpBridge;
-use super::types::{
-    internal_server_error_http_response, BridgeContext, BridgeError, BridgeRequest,
-    BridgeResources, BridgeResponse,
-};
+use super::super::handle::{MockServiceHandle, RecordedExchange};
+use super::r#trait::HttpMockServiceTrait;
+use super::super::types::{MockServiceContext, MockServiceError, MockServiceResources};
+use super::request::HttpMockServiceRequest;
+use super::response::{internal_server_error_http_response, HttpMockServiceResponse};
 
-/// Join handle and shutdown signal for one HTTP bridge accept loop.
-pub(crate) struct HttpBridgeRuntime {
+/// Join handle and shutdown signal for one HTTP mock service accept loop.
+pub(crate) struct HttpMockServiceRuntime {
     pub shutdown_tx: Option<oneshot::Sender<()>>,
     pub join: tokio::task::JoinHandle<()>,
 }
 
 /// Bind `127.0.0.1:0`, spawn the accept loop, return the public handle (in an [`Arc`]) and runtime.
-pub(crate) async fn spawn_http_bridge_server(
-    bridge_name: String,
-    bridge: Arc<dyn HttpBridge>,
+pub(crate) async fn spawn_http_mock_service_server(
+    mock_service_name: String,
+    mock_service: Arc<dyn HttpMockServiceTrait>,
     scenario_id: String,
-    resources: Arc<BridgeResources>,
+    resources: Arc<MockServiceResources>,
     max_recorded_body_size: Option<usize>,
-) -> Result<(Arc<BridgeHandle>, HttpBridgeRuntime), BridgeError> {
+) -> Result<(Arc<MockServiceHandle>, HttpMockServiceRuntime), MockServiceError> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
-        .map_err(|source| BridgeError::ServerStart { source })?;
+        .map_err(|source| MockServiceError::ServerStart { source })?;
     let bind_addr = listener
         .local_addr()
-        .map_err(|source| BridgeError::ServerStart { source })?;
+        .map_err(|source| MockServiceError::ServerStart { source })?;
     let bind_display = bind_addr.to_string();
     let client_url = format!("http://{bind_display}");
 
-    let handle = Arc::new(BridgeHandle::new(
-        bridge_name.clone(),
+    let handle = Arc::new(MockServiceHandle::new(
+        mock_service_name.clone(),
         bind_display,
         client_url,
         max_recorded_body_size,
@@ -59,8 +58,8 @@ pub(crate) async fn spawn_http_bridge_server(
     let join = tokio::spawn(run_listener(
         listener,
         shutdown_rx,
-        bridge,
-        bridge_name,
+        mock_service,
+        mock_service_name,
         scenario_id,
         resources,
         handle_for_task,
@@ -68,7 +67,7 @@ pub(crate) async fn spawn_http_bridge_server(
 
     Ok((
         handle,
-        HttpBridgeRuntime {
+        HttpMockServiceRuntime {
             shutdown_tx: Some(shutdown_tx),
             join,
         },
@@ -78,11 +77,11 @@ pub(crate) async fn spawn_http_bridge_server(
 async fn run_listener(
     listener: TcpListener,
     mut shutdown_rx: oneshot::Receiver<()>,
-    bridge: Arc<dyn HttpBridge>,
-    bridge_name: String,
+    mock_service: Arc<dyn HttpMockServiceTrait>,
+    mock_service_name: String,
     scenario_id: String,
-    resources: Arc<BridgeResources>,
-    handle: Arc<BridgeHandle>,
+    resources: Arc<MockServiceResources>,
+    handle: Arc<MockServiceHandle>,
 ) {
     loop {
         tokio::select! {
@@ -94,30 +93,30 @@ async fn run_listener(
                 let (tcp, _) = match accept_result {
                     Ok(pair) => pair,
                     Err(error) => {
-                        tracing::warn!(target: "shakedown::bridge", "bridge '{}' accept error: {}", bridge_name, error);
+                        tracing::warn!(target: "shakedown::mock_service", "mock service '{}' accept error: {}", mock_service_name, error);
                         continue;
                     }
                 };
                 let io = TokioIo::new(tcp);
-                let bridge_for_connection = Arc::clone(&bridge);
+                let mock_service_for_connection = Arc::clone(&mock_service);
                 let scenario_id_for_connection = scenario_id.clone();
-                let bridge_name_for_connection = bridge_name.clone();
+                let mock_service_name_for_connection = mock_service_name.clone();
                 let resources_for_connection = Arc::clone(&resources);
                 let handle_for_connection = Arc::clone(&handle);
                 tokio::spawn(async move {
                     let service = service_fn(move |request: Request<Incoming>| {
-                        let bridge = Arc::clone(&bridge_for_connection);
-                        let bridge_context = BridgeContext::new(
+                        let mock_service = Arc::clone(&mock_service_for_connection);
+                        let mock_service_context = MockServiceContext::new(
                             scenario_id_for_connection.clone(),
-                            bridge_name_for_connection.clone(),
+                            mock_service_name_for_connection.clone(),
                             Arc::clone(&resources_for_connection),
                         );
                         let recorder = Arc::clone(&handle_for_connection);
-                        async move { serve_one(bridge, bridge_context, recorder, request).await }
+                        async move { serve_one(mock_service, mock_service_context, recorder, request).await }
                     });
                     let connection = http1::Builder::new().serve_connection(io, service);
                     if let Err(error) = connection.await {
-                        tracing::debug!(target: "shakedown::bridge", "bridge connection ended: {}", error);
+                        tracing::debug!(target: "shakedown::mock_service", "mock service connection ended: {}", error);
                     }
                 });
             }
@@ -126,22 +125,22 @@ async fn run_listener(
 }
 
 async fn serve_one(
-    bridge: Arc<dyn HttpBridge>,
-    bridge_context: BridgeContext,
-    recorder: Arc<BridgeHandle>,
+    mock_service: Arc<dyn HttpMockServiceTrait>,
+    mock_service_context: MockServiceContext,
+    recorder: Arc<MockServiceHandle>,
     request: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let (parts, body) = request.into_parts();
     let body_bytes = match body.collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(_) => {
-            return Ok(match BridgeResponse::status(400).into_http_response() {
+            return Ok(match HttpMockServiceResponse::status(400).into_http_response() {
                 Ok(response) => response,
                 Err(error) => {
                     tracing::error!(
-                        target: "shakedown::bridge",
-                        "bridge '{}' failed to build 400 response: {}",
-                        bridge_context.bridge_name,
+                        target: "shakedown::mock_service",
+                        "mock service '{}' failed to build 400 response: {}",
+                        mock_service_context.mock_service_name,
                         error
                     );
                     internal_server_error_http_response()
@@ -149,27 +148,27 @@ async fn serve_one(
             });
         }
     };
-    let bridge_request = BridgeRequest::from_http_parts(parts, body_bytes);
+    let mock_service_request = HttpMockServiceRequest::from_http_parts(parts, body_bytes);
     let timestamp = OffsetDateTime::now_utc();
-    let method = bridge_request.method().to_owned();
-    let path = bridge_request.path().to_owned();
-    let query = bridge_request.query().map(str::to_owned);
-    let request_headers = bridge_request.headers().to_vec();
-    let request_body = bridge_request.bytes().clone();
+    let method = mock_service_request.method().to_owned();
+    let path = mock_service_request.path().to_owned();
+    let query = mock_service_request.query().map(str::to_owned);
+    let request_headers = mock_service_request.headers().to_vec();
+    let request_body = mock_service_request.bytes().clone();
 
     let started = Instant::now();
-    let bridge_response = bridge.handle(bridge_request, &bridge_context).await;
+    let mock_service_response = mock_service.handle(mock_service_request, &mock_service_context).await;
     let duration = started.elapsed();
 
-    let response_status = bridge_response.status;
-    let response_body = bridge_response.body.clone();
-    let http_response = match bridge_response.into_http_response() {
+    let response_status = mock_service_response.status;
+    let response_body = mock_service_response.body.clone();
+    let http_response = match mock_service_response.into_http_response() {
         Ok(response) => response,
         Err(error) => {
             tracing::error!(
-                target: "shakedown::bridge",
-                "bridge '{}' invalid HTTP response from stub: {}",
-                bridge_context.bridge_name,
+                target: "shakedown::mock_service",
+                "mock service '{}' invalid HTTP response from stub: {}",
+                mock_service_context.mock_service_name,
                 error
             );
             internal_server_error_http_response()

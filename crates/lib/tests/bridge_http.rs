@@ -1,36 +1,36 @@
 //! HTTP bridge server + [`run_scenario`] integration (`bridges` feature).
 //!
 //! Reference scenarios for registering bridges, issuing real HTTP requests against localhost
-//! stubs, and asserting on [`BridgeHandle`] recordings. No Docker — only `127.0.0.1` listeners.
+//! stubs, and asserting on [`MockServiceHandle`] recordings. No Docker — only `127.0.0.1` listeners.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 
 use shakedown::{
-    run_scenario, BridgeContext, BridgeRequest, BridgeResponse, Context, EventLog, HttpBridge,
-    StubBridge,
+    run_scenario, MockServiceContext, HttpMockServiceRequest, HttpMockServiceResponse, Context, EventLog, HttpMockServiceTrait,
+    HttpMockService,
 };
 
 /// **Given** a stateful counter. **When** each request hits any path, **then** return JSON
 /// `{"n": <incrementing count>}` so callers can observe ordering via recorded response bodies.
-struct CountingJsonBridge {
+struct CountingJsonMockService {
     hits: AtomicU32,
 }
 
 #[async_trait]
-impl HttpBridge for CountingJsonBridge {
-    async fn handle(&self, _request: BridgeRequest, _context: &BridgeContext) -> BridgeResponse {
+impl HttpMockServiceTrait for CountingJsonMockService {
+    async fn handle(&self, _request: HttpMockServiceRequest, _context: &MockServiceContext) -> HttpMockServiceResponse {
         let next = self.hits.fetch_add(1, Ordering::SeqCst) + 1;
-        BridgeResponse::json(&serde_json::json!({ "n": next })).expect("json body")
+        HttpMockServiceResponse::json(&serde_json::json!({ "n": next })).expect("json body")
     }
 }
 
 #[tokio::test]
 async fn stub_bridge_multiple_routes_register_request_assert() {
-    // **Given** a [`StubBridge`] with several routes (plain status, JSON POST, glob GET) and a
+    // **Given** a [`HttpMockService`] with several routes (plain status, JSON POST, glob GET) and a
     // default 404 for unknown paths.
-    let stub = StubBridge::new("auth-api")
+    let stub = HttpMockService::new("auth-api")
         .on("GET", "/health")
         .respond(200)
         .on("POST", "/v1/validate")
@@ -52,7 +52,7 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
         |context| {
             Box::pin(async move {
                 let client = reqwest::Client::new();
-                let base = context.bridge_url("auth-api").expect("auth-api bridge url");
+                let base = context.mock_service_url("auth-api").expect("auth-api bridge url");
 
                 // **When** the scenario exercises multiple endpoints (and leaves one path unused).
                 let health = client
@@ -77,7 +77,7 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
                     .expect("GET profile");
                 assert_eq!(profile.status(), 200);
 
-                let handle = context.bridge("auth-api").expect("auth-api bridge handle");
+                let handle = context.mock_service("auth-api").expect("auth-api bridge handle");
 
                 // **Then** total traffic, a POST body predicate, and absence of an unused route
                 // are all assertable.
@@ -125,11 +125,11 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
 
 #[tokio::test]
 async fn coded_http_bridge_stateful_calls_matching_order() {
-    // **Given** a coded [`HttpBridge`] that returns a different JSON body on each call.
+    // **Given** a coded [`HttpMockServiceTrait`] that returns a different JSON body on each call.
     let mut ctx = Context::new();
     ctx.register_http_bridge(
         "counter",
-        CountingJsonBridge {
+        CountingJsonMockService {
             hits: AtomicU32::new(0),
         },
     )
@@ -142,7 +142,7 @@ async fn coded_http_bridge_stateful_calls_matching_order() {
         |context| {
             Box::pin(async move {
                 let client = reqwest::Client::new();
-                let base = context.bridge_url("counter").expect("counter bridge url");
+                let base = context.mock_service_url("counter").expect("counter bridge url");
 
                 // **When** two GETs hit the same path, the handler advances internal state.
                 let first = client
@@ -158,11 +158,11 @@ async fn coded_http_bridge_stateful_calls_matching_order() {
                     .expect("second GET");
                 assert_eq!(second.status(), 200);
 
-                let handle = context.bridge("counter").expect("counter bridge handle");
+                let handle = context.mock_service("counter").expect("counter bridge handle");
                 let matched = handle.calls_matching("GET", "/");
                 assert_eq!(matched.len(), 2, "both GETs recorded for path /");
 
-                // **Then** [`BridgeHandle::calls_matching`] preserves arrival order for inspection.
+                // **Then** [`MockServiceHandle::calls_matching`] preserves arrival order for inspection.
                 let first_n: u64 = serde_json::from_slice(matched[0].response_body().as_ref())
                     .map(|value: serde_json::Value| {
                         value

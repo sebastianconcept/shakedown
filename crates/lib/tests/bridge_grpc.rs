@@ -1,12 +1,12 @@
 //! gRPC bridge + [`run_scenario`] integration (`grpc-bridges` feature).
 //!
-//! Reference scenario: register a [`GrpcStubBridge`], issue a real unary gRPC call via **tonic** and
+//! Reference scenario: register a [`GrpcMockService`], issue a real unary gRPC call via **tonic** and
 //! **tonic-prost** using hand-written [`prost::Message`] types (no `.proto` / build script), assert
-//! on [`shakedown::BridgeHandle`] recordings. Localhost only; no Docker.
+//! on [`shakedown::MockServiceHandle`] recordings. Localhost only; no Docker.
 
 use http::uri::PathAndQuery;
 use prost::Message;
-use shakedown::{run_scenario, BridgeHandle, Context, EventLog, GrpcStubBridge};
+use shakedown::{run_scenario, MockServiceHandle, Context, EventLog, GrpcMockService};
 use tonic::client::Grpc;
 use tonic::transport::Endpoint;
 use tonic_prost::ProstCodec;
@@ -29,8 +29,8 @@ const GRPC_METHOD_PATH: &str = "/echo.EchoService/SayHello";
 
 #[tokio::test]
 async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
-    // **Given** a [`GrpcStubBridge`] that answers `SayHello` with a fixed protobuf payload.
-    let stub = GrpcStubBridge::new("echo")
+    // **Given** a [`GrpcMockService`] that answers `SayHello` with a fixed protobuf payload.
+    let stub = GrpcMockService::new("echo")
         .on_method("echo.EchoService/SayHello")
         .respond_proto(&SayHelloResponse {
             message: String::from("hello alice"),
@@ -47,7 +47,7 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
         "grpc_stub_bridge_unary_register_client_assert_recorded_call",
         |context| {
             Box::pin(async move {
-                let base_url = context.bridge_url("echo").expect("echo bridge url");
+                let base_url = context.mock_service_url("echo").expect("echo bridge url");
                 let origin_uri: http::Uri = base_url.parse().expect("bridge url parses as URI");
                 let channel = Endpoint::from_shared(base_url)
                     .expect("valid endpoint")
@@ -74,7 +74,7 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
 
                 assert_eq!(response.into_inner().message, "hello alice");
 
-                let handle: &BridgeHandle = context.bridge("echo").expect("echo bridge handle");
+                let handle: &MockServiceHandle = context.mock_service("echo").expect("echo bridge handle");
 
                 // **Then** one call is recorded; harness stores the full gRPC path on both
                 // `method` and `path`, and the request body round-trips through prost.

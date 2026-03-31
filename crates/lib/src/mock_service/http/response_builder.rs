@@ -1,19 +1,19 @@
-//! Fluent builder for [`super::response::BridgeResponse`].
+//! Fluent builder for [`super::response::HttpMockServiceResponse`].
 
 use bytes::Bytes;
 use serde::Serialize;
 
-use super::error::BridgeError;
-use super::response::BridgeResponse;
+use super::super::types::MockServiceError;
+use super::response::HttpMockServiceResponse;
 
-/// Fluent builder for [`BridgeResponse`].
+/// Fluent builder for [`HttpMockServiceResponse`].
 #[derive(Debug)]
-pub struct BridgeResponseBuilder {
+pub struct HttpMockServiceResponseBuilder {
     status: u16,
     headers: Vec<(String, String)>,
 }
 
-impl BridgeResponseBuilder {
+impl HttpMockServiceResponseBuilder {
     pub(crate) fn new() -> Self {
         Self {
             status: 200,
@@ -36,8 +36,8 @@ impl BridgeResponseBuilder {
     }
 
     /// Finish with an empty body.
-    pub fn body_empty(self) -> BridgeResponse {
-        BridgeResponse {
+    pub fn body_empty(self) -> HttpMockServiceResponse {
+        HttpMockServiceResponse {
             status: self.status,
             headers: self.headers,
             body: Bytes::new(),
@@ -45,8 +45,8 @@ impl BridgeResponseBuilder {
     }
 
     /// Finish with a raw body.
-    pub fn body_bytes(self, body: impl Into<Bytes>) -> BridgeResponse {
-        BridgeResponse {
+    pub fn body_bytes(self, body: impl Into<Bytes>) -> HttpMockServiceResponse {
+        HttpMockServiceResponse {
             status: self.status,
             headers: self.headers,
             body: body.into(),
@@ -54,8 +54,11 @@ impl BridgeResponseBuilder {
     }
 
     /// Serialize JSON as the body and set `Content-Type: application/json` unless already present.
-    pub fn json(mut self, value: &impl Serialize) -> Result<BridgeResponse, BridgeError> {
-        let raw = serde_json::to_vec(value).map_err(|source| BridgeError::Encoding {
+    pub fn json(
+        mut self,
+        value: &impl Serialize,
+    ) -> Result<HttpMockServiceResponse, MockServiceError> {
+        let raw = serde_json::to_vec(value).map_err(|source| MockServiceError::Encoding {
             message: source.to_string(),
         })?;
         let has_json = self.headers.iter().any(|(key, _)| key == "content-type");
@@ -65,7 +68,7 @@ impl BridgeResponseBuilder {
                 String::from("application/json"),
             ));
         }
-        Ok(BridgeResponse {
+        Ok(HttpMockServiceResponse {
             status: self.status,
             headers: self.headers,
             body: Bytes::from(raw),
