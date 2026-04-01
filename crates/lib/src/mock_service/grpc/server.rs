@@ -35,7 +35,8 @@ pub(crate) struct GrpcMockServiceServer {
     pub join: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
 }
 
-/// Bind `127.0.0.1:0`, spawn [`tonic::transport::Server`], return [`MockServiceHandle`] and runtime.
+/// Bind `127.0.0.1:0`, spawn [`tonic::transport::Server`], return [`MockServiceHandle`] and
+/// [`GrpcMockServiceServer`] (shutdown signal + background task join handle).
 pub(crate) async fn spawn_grpc_mock_service_server(
     mock_service_name: String,
     mock_service: Arc<dyn GrpcMockServiceTrait>,

@@ -346,21 +346,21 @@ pub struct Context {
     /// Running HTTP mock service handles (populated when servers start).
     #[cfg(feature = "mock-services")]
     mock_service_handles: HashMap<String, Arc<MockServiceHandle>>,
-    /// Shutdown handles for HTTP mock service accept loops (paired with names for timeline messages).
+    /// HTTP mock service server tasks: shutdown channel + join handle (paired with names for timeline messages).
     #[cfg(feature = "mock-services")]
-    http_mock_service_runtimes: Vec<(String, HttpMockServiceServer)>,
+    http_mock_service_servers: Vec<(String, HttpMockServiceServer)>,
     /// gRPC mock services registered before [`run_scenario`] starts tonic servers (after seed).
     #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
     pending_grpc_mock_services: Vec<(String, Arc<dyn GrpcMockServiceTrait>)>,
     /// Running gRPC mock service servers (tonic transport).
     #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-    grpc_mock_service_runtimes: Vec<(String, GrpcMockServiceServer)>,
+    grpc_mock_service_servers: Vec<(String, GrpcMockServiceServer)>,
     /// True once HTTP and gRPC mock service servers have been started for this [`run_scenario`] invocation.
     #[cfg(feature = "mock-services")]
     mock_service_servers_phase_complete: bool,
-    /// Staged [`crate::service::ServiceSpec`] entries; [`ServiceHandle`] filled when containers are healthy (service container lifecycle).
+    /// Registered [`crate::service::ServiceSpec`] entries (service configured); [`ServiceHandle`] set when the service is running and healthy.
     #[cfg(feature = "services")]
-    pub(crate) services: HashMap<String, crate::service::ServiceState>,
+    pub(crate) services: HashMap<String, crate::service::ServiceReference>,
 }
 
 impl Context {
@@ -442,11 +442,11 @@ impl Context {
             #[cfg(feature = "mock-services")]
             mock_service_handles: HashMap::new(),
             #[cfg(feature = "mock-services")]
-            http_mock_service_runtimes: Vec::new(),
+            http_mock_service_servers: Vec::new(),
             #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
             pending_grpc_mock_services: Vec::new(),
             #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-            grpc_mock_service_runtimes: Vec::new(),
+            grpc_mock_service_servers: Vec::new(),
             #[cfg(feature = "mock-services")]
             mock_service_servers_phase_complete: false,
             #[cfg(feature = "services")]
@@ -532,11 +532,11 @@ impl Context {
             #[cfg(feature = "mock-services")]
             mock_service_handles: HashMap::new(),
             #[cfg(feature = "mock-services")]
-            http_mock_service_runtimes: Vec::new(),
+            http_mock_service_servers: Vec::new(),
             #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
             pending_grpc_mock_services: Vec::new(),
             #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-            grpc_mock_service_runtimes: Vec::new(),
+            grpc_mock_service_servers: Vec::new(),
             #[cfg(feature = "mock-services")]
             mock_service_servers_phase_complete: false,
             #[cfg(feature = "services")]
@@ -622,11 +622,11 @@ impl Context {
             #[cfg(feature = "mock-services")]
             mock_service_handles: HashMap::new(),
             #[cfg(feature = "mock-services")]
-            http_mock_service_runtimes: Vec::new(),
+            http_mock_service_servers: Vec::new(),
             #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
             pending_grpc_mock_services: Vec::new(),
             #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-            grpc_mock_service_runtimes: Vec::new(),
+            grpc_mock_service_servers: Vec::new(),
             #[cfg(feature = "mock-services")]
             mock_service_servers_phase_complete: false,
             #[cfg(feature = "services")]
@@ -1303,7 +1303,7 @@ impl Context {
         }
         self.services.insert(
             name.clone(),
-            crate::service::ServiceState::new(service_spec),
+            crate::service::ServiceReference::new(service_spec),
         );
         if let Err(error) = crate::service::dependency::service_startup_order(&self.services) {
             self.services.remove(&name);
@@ -2399,20 +2399,20 @@ fn mock_service_resources_from_context(ctx: &Context) -> Arc<MockServiceResource
 async fn reset_mock_services_at_run_start(ctx: &mut Context) {
     #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
     {
-        let runtimes = std::mem::take(&mut ctx.grpc_mock_service_runtimes);
-        for (_name, mut runtime) in runtimes {
-            if let Some(sender) = runtime.shutdown_tx.take() {
+        let servers = std::mem::take(&mut ctx.grpc_mock_service_servers);
+        for (_name, mut server) in servers {
+            if let Some(sender) = server.shutdown_tx.take() {
                 let _ = sender.send(());
             }
-            let _ = runtime.join.await;
+            let _ = server.join.await;
         }
     }
-    let runtimes = std::mem::take(&mut ctx.http_mock_service_runtimes);
-    for (_name, mut runtime) in runtimes {
-        if let Some(sender) = runtime.shutdown_tx.take() {
+    let servers = std::mem::take(&mut ctx.http_mock_service_servers);
+    for (_name, mut server) in servers {
+        if let Some(sender) = server.shutdown_tx.take() {
             let _ = sender.send(());
         }
-        let _ = runtime.join.await;
+        let _ = server.join.await;
     }
     ctx.mock_service_handles.clear();
     ctx.mock_service_servers_phase_complete = false;
@@ -2456,15 +2456,15 @@ fn recorded_mock_service_call_count(
 }
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-async fn shutdown_grpc_mock_service_runtimes_with_log(ctx: &mut Context, event_log: &mut EventLog) {
-    let runtimes = std::mem::take(&mut ctx.grpc_mock_service_runtimes);
-    for (name, mut runtime) in runtimes {
+async fn shutdown_grpc_mock_service_servers_with_log(ctx: &mut Context, event_log: &mut EventLog) {
+    let servers = std::mem::take(&mut ctx.grpc_mock_service_servers);
+    for (name, mut server) in servers {
         let recorded_count =
             recorded_mock_service_call_count(&ctx.mock_service_handles, name.as_str());
-        if let Some(sender) = runtime.shutdown_tx.take() {
+        if let Some(sender) = server.shutdown_tx.take() {
             let _ = sender.send(());
         }
-        let _ = runtime.join.await;
+        let _ = server.join.await;
         event_log.append(Event::info(
             "mock-service",
             format!("mock service '{name}' stopped; {recorded_count} calls recorded"),
@@ -2473,26 +2473,26 @@ async fn shutdown_grpc_mock_service_runtimes_with_log(ctx: &mut Context, event_l
 }
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-async fn shutdown_grpc_mock_service_runtimes_silent(ctx: &mut Context) {
-    let runtimes = std::mem::take(&mut ctx.grpc_mock_service_runtimes);
-    for (_name, mut runtime) in runtimes {
-        if let Some(sender) = runtime.shutdown_tx.take() {
+async fn shutdown_grpc_mock_service_servers_silent(ctx: &mut Context) {
+    let servers = std::mem::take(&mut ctx.grpc_mock_service_servers);
+    for (_name, mut server) in servers {
+        if let Some(sender) = server.shutdown_tx.take() {
             let _ = sender.send(());
         }
-        let _ = runtime.join.await;
+        let _ = server.join.await;
     }
 }
 
 #[cfg(feature = "mock-services")]
-async fn shutdown_http_mock_service_runtimes_with_log(ctx: &mut Context, event_log: &mut EventLog) {
-    let runtimes = std::mem::take(&mut ctx.http_mock_service_runtimes);
-    for (name, mut runtime) in runtimes {
+async fn shutdown_http_mock_service_servers_with_log(ctx: &mut Context, event_log: &mut EventLog) {
+    let servers = std::mem::take(&mut ctx.http_mock_service_servers);
+    for (name, mut server) in servers {
         let recorded_count =
             recorded_mock_service_call_count(&ctx.mock_service_handles, name.as_str());
-        if let Some(sender) = runtime.shutdown_tx.take() {
+        if let Some(sender) = server.shutdown_tx.take() {
             let _ = sender.send(());
         }
-        let _ = runtime.join.await;
+        let _ = server.join.await;
         event_log.append(Event::info(
             "mock-service",
             format!("mock service '{name}' stopped; {recorded_count} calls recorded"),
@@ -2501,13 +2501,13 @@ async fn shutdown_http_mock_service_runtimes_with_log(ctx: &mut Context, event_l
 }
 
 #[cfg(feature = "mock-services")]
-async fn shutdown_http_mock_service_runtimes_silent(ctx: &mut Context) {
-    let runtimes = std::mem::take(&mut ctx.http_mock_service_runtimes);
-    for (_name, mut runtime) in runtimes {
-        if let Some(sender) = runtime.shutdown_tx.take() {
+async fn shutdown_http_mock_service_servers_silent(ctx: &mut Context) {
+    let servers = std::mem::take(&mut ctx.http_mock_service_servers);
+    for (_name, mut server) in servers {
+        if let Some(sender) = server.shutdown_tx.take() {
             let _ = sender.send(());
         }
-        let _ = runtime.join.await;
+        let _ = server.join.await;
     }
 }
 
@@ -2533,7 +2533,7 @@ async fn start_and_readiness_mock_services(
     let resources = mock_service_resources_from_context(ctx);
     let scenario_id_string = ctx.scenario_id().to_string();
 
-    let mut started_http_runtimes: Vec<(String, HttpMockServiceServer)> = Vec::new();
+    let mut started_http_mock_servers: Vec<(String, HttpMockServiceServer)> = Vec::new();
     for (mock_service_name, mock_service_impl) in pending_http {
         match spawn_http_mock_service_server(
             mock_service_name.clone(),
@@ -2544,22 +2544,22 @@ async fn start_and_readiness_mock_services(
         )
         .await
         {
-            Ok((handle, runtime)) => {
+            Ok((handle, server)) => {
                 let bind_display = handle.bind_address.clone();
                 ctx.mock_service_handles
                     .insert(mock_service_name.clone(), handle);
-                started_http_runtimes.push((mock_service_name.clone(), runtime));
+                started_http_mock_servers.push((mock_service_name.clone(), server));
                 event_log.append(Event::info(
                     "mock-service",
                     format!("mock service '{mock_service_name}' started on {bind_display}"),
                 ));
             }
             Err(error) => {
-                for (_rollback_name, mut runtime) in started_http_runtimes {
-                    if let Some(sender) = runtime.shutdown_tx.take() {
+                for (_rollback_name, mut server) in started_http_mock_servers {
+                    if let Some(sender) = server.shutdown_tx.take() {
                         let _ = sender.send(());
                     }
-                    let _ = runtime.join.await;
+                    let _ = server.join.await;
                 }
                 ctx.mock_service_handles.clear();
                 return Err(InfrastructureError::Provision {
@@ -2570,11 +2570,11 @@ async fn start_and_readiness_mock_services(
             }
         }
     }
-    ctx.http_mock_service_runtimes = started_http_runtimes;
+    ctx.http_mock_service_servers = started_http_mock_servers;
 
     #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
     {
-        let mut started_grpc_runtimes: Vec<(String, GrpcMockServiceServer)> = Vec::new();
+        let mut started_grpc_mock_servers: Vec<(String, GrpcMockServiceServer)> = Vec::new();
         for (mock_service_name, mock_service_impl) in pending_grpc {
             match spawn_grpc_mock_service_server(
                 mock_service_name.clone(),
@@ -2585,23 +2585,23 @@ async fn start_and_readiness_mock_services(
             )
             .await
             {
-                Ok((handle, runtime)) => {
+                Ok((handle, server)) => {
                     let bind_display = handle.bind_address.clone();
                     ctx.mock_service_handles
                         .insert(mock_service_name.clone(), handle);
-                    started_grpc_runtimes.push((mock_service_name.clone(), runtime));
+                    started_grpc_mock_servers.push((mock_service_name.clone(), server));
                     event_log.append(Event::info(
                         "mock-service",
                         format!("mock service '{mock_service_name}' started on {bind_display}"),
                     ));
                 }
                 Err(error) => {
-                    shutdown_http_mock_service_runtimes_silent(ctx).await;
-                    for (_rollback_name, mut runtime) in started_grpc_runtimes {
-                        if let Some(sender) = runtime.shutdown_tx.take() {
+                    shutdown_http_mock_service_servers_silent(ctx).await;
+                    for (_rollback_name, mut server) in started_grpc_mock_servers {
+                        if let Some(sender) = server.shutdown_tx.take() {
                             let _ = sender.send(());
                         }
-                        let _ = runtime.join.await;
+                        let _ = server.join.await;
                     }
                     ctx.mock_service_handles.clear();
                     return Err(InfrastructureError::Provision {
@@ -2612,7 +2612,7 @@ async fn start_and_readiness_mock_services(
                 }
             }
         }
-        ctx.grpc_mock_service_runtimes = started_grpc_runtimes;
+        ctx.grpc_mock_service_servers = started_grpc_mock_servers;
     }
 
     let readiness_targets: Vec<(String, String)> = ctx
@@ -2622,9 +2622,9 @@ async fn start_and_readiness_mock_services(
         .collect();
     for (mock_service_name, bind_address) in readiness_targets {
         if let Err(source) = tcp_probe_local_bind_address(bind_address.as_str()).await {
-            shutdown_http_mock_service_runtimes_silent(ctx).await;
+            shutdown_http_mock_service_servers_silent(ctx).await;
             #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-            shutdown_grpc_mock_service_runtimes_silent(ctx).await;
+            shutdown_grpc_mock_service_servers_silent(ctx).await;
             ctx.mock_service_handles.clear();
             return Err(InfrastructureError::Readiness {
                 resource: format!("mock-service:{mock_service_name}"),
@@ -3251,9 +3251,9 @@ where
         );
     }
     #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-    shutdown_grpc_mock_service_runtimes_with_log(ctx, event_log).await;
+    shutdown_grpc_mock_service_servers_with_log(ctx, event_log).await;
     #[cfg(feature = "mock-services")]
-    shutdown_http_mock_service_runtimes_with_log(ctx, event_log).await;
+    shutdown_http_mock_service_servers_with_log(ctx, event_log).await;
     teardown_all_resources(ctx).await;
 
     #[cfg(all(

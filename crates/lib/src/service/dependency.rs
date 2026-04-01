@@ -3,12 +3,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::error::{InternalError, ShakedownError};
-use crate::service::state::ServiceState;
+use crate::service::state::ServiceReference;
 
 /// Returns service names in startup order: dependencies before dependents. Fails on cycles or
 /// missing dependency names.
 pub(crate) fn service_startup_order(
-    services: &HashMap<String, ServiceState>,
+    services: &HashMap<String, ServiceReference>,
 ) -> Result<Vec<String>, ShakedownError> {
     let names: HashSet<String> = services.keys().cloned().collect();
     let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
@@ -85,12 +85,12 @@ mod tests {
     use super::*;
     use crate::service::ServiceUnderTest;
 
-    fn spec_named(name: &str, depends_on: &[&str]) -> ServiceState {
+    fn spec_named(name: &str, depends_on: &[&str]) -> ServiceReference {
         let mut builder = ServiceUnderTest::docker("x:y").name(name).port(80);
         for dependency in depends_on {
             builder = builder.depends_on(*dependency);
         }
-        ServiceState::new(
+        ServiceReference::new(
             builder
                 .build()
                 .unwrap_or_else(|error| panic!("test fixture spec must build: {error:?}")),

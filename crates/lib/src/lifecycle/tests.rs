@@ -327,7 +327,7 @@ async fn test_run_scenario_fails_on_readiness() {
 
 #[tokio::test]
 async fn test_async_resource_phases() {
-    // Given an extension resource whose async phases yield to the runtime
+    // Given an extension resource whose async phases yield to the async executor
     struct AsyncResource;
 
     #[async_trait]

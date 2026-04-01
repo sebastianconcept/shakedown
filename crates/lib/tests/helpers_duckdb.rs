@@ -1,7 +1,7 @@
 //! DuckDB typed helpers: `execute` for setup, then `assert_row_exists` / `assert_row_count` (no Docker).
 //!
 //! This target is listed in `Cargo.toml` with `required-features = ["duckdb"]`. Tests are **not**
-//! ignored — DuckDB uses in-process bindings and does not require a container runtime.
+//! ignored — DuckDB uses in-process bindings and does not require a Docker container.
 //!
 //! ```text
 //! cargo test -p shakedown --features duckdb --test helpers_duckdb

@@ -1,7 +1,7 @@
 //! SQLite typed helpers: `execute` for setup, then `assert_row_exists` / `assert_row_count` (no Docker).
 //!
 //! This target is listed in `Cargo.toml` with `required-features = ["sqlite"]`. Tests are **not**
-//! ignored — SQLite uses in-memory bindings and does not require a container runtime.
+//! ignored — SQLite uses in-memory bindings and does not require a Docker container.
 //!
 //! ```text
 //! cargo test -p shakedown --features sqlite --test helpers_sqlite
