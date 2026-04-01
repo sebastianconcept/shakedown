@@ -30,10 +30,10 @@ jobs:
       - name: Test (services feature, no Docker)
         run: cargo test --features services -p shakedown
 
-      - name: Kafka + bridge + whoami integration (Docker)
+      - name: Kafka + mock service + whoami integration (Docker)
         run: >-
           cargo test -p shakedown --features kafka,services
-          --test services_kafka_bridge_whoami -- --ignored --test-threads=1
+          --test services_kafka_mock_service_whoami -- --ignored --test-threads=1
 
       - name: Postgres + multi-service integration (Docker)
         run: >-

@@ -1,6 +1,6 @@
 //! Host ↔ container address resolution for service-under-test env injection (`services` feature).
 //!
-//! Infrastructure and bridges bind on the host loopback. Service containers must reach them via
+//! Infrastructure and mock services bind on the host loopback. Service containers must reach them via
 //! [`HOST_DOCKER_INTERNAL`]. On Linux, Docker does not define that hostname unless
 //! `--add-host host.docker.internal:host-gateway` is set — use
 //! [`ensure_host_docker_internal_resolution`] when building the container request (service container lifecycle).

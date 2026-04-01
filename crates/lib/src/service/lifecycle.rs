@@ -59,7 +59,7 @@ fn map_service_teardown_error(
     }
 }
 
-/// Start registered service containers after bridges, run readiness probes, and attach handles on `Context`.
+/// Start registered service containers after mock services, run readiness probes, and attach handles on `Context`.
 pub(crate) async fn start_and_readiness_services(
     context: &mut Context,
     event_log: &mut EventLog,

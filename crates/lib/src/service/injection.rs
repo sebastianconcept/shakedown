@@ -56,7 +56,7 @@ struct MappingOverrides {
     weaviate: Option<String>,
     influxdb: Option<String>,
     timescaledb: Option<String>,
-    bridges: HashMap<String, String>,
+    mock_services: HashMap<String, String>,
     services: HashMap<String, String>,
 }
 
@@ -79,7 +79,7 @@ impl MappingOverrides {
             weaviate: None,
             influxdb: None,
             timescaledb: None,
-            bridges: HashMap::new(),
+            mock_services: HashMap::new(),
             services: HashMap::new(),
         };
         for mapping in mappings {
@@ -105,7 +105,7 @@ impl MappingOverrides {
                     env_var,
                 } => {
                     overrides
-                        .bridges
+                        .mock_services
                         .insert(mock_service_name.clone(), env_var.clone());
                 }
                 EnvMapping::Service {
@@ -279,10 +279,10 @@ fn inject_conventions(
     {
         context.for_each_mock_service_url(|mock_service_name, client_url| {
             let key = overrides
-                .bridges
+                .mock_services
                 .get(mock_service_name)
                 .cloned()
-                .unwrap_or_else(|| default_bridge_env_key(mock_service_name));
+                .unwrap_or_else(|| default_mock_service_env_key(mock_service_name));
             environment.insert(key, client_url.to_string());
         });
     }
@@ -554,7 +554,7 @@ fn replace_database_path(connection_url: &str, old_database: &str, new_database:
     connection_url.to_string()
 }
 
-fn default_bridge_env_key(mock_service_name: &str) -> String {
+fn default_mock_service_env_key(mock_service_name: &str) -> String {
     format!("{}_URL", upper_snake_case(mock_service_name))
 }
 
@@ -665,9 +665,12 @@ mod tests {
     }
 
     #[test]
-    fn upper_snake_case_formats_bridge_and_service_keys() {
-        // Given bridge and service names with hyphens
-        assert_eq!(default_bridge_env_key("payments-api"), "PAYMENTS_API_URL");
+    fn upper_snake_case_formats_mock_service_and_service_keys() {
+        // Given mock service and service names with hyphens
+        assert_eq!(
+            default_mock_service_env_key("payments-api"),
+            "PAYMENTS_API_URL"
+        );
         assert_eq!(default_service_env_key("order-svc"), "ORDER_SVC_URL");
     }
 

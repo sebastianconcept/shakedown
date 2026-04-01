@@ -36,8 +36,8 @@ shakedown/
 | `mvp-examples` | **Next** — living `crates/examples` catalog ( **`MVP.md`** row 9 in adopted docs under `~/docs/shakedown/`) |
 
 - **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka** and **RabbitMQ** publication proof (`assert_kafka_published`, `assert_rabbit_published`) on top of relational bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below).
-- **Also shipped:** `mvp-bridges` — **Service bridges** ([`HttpBridge`](src/bridge/traits.rs), [`StubBridge`](src/bridge/stub.rs), [`BridgeHandle`](src/bridge/handle.rs); [`GrpcBridge`](src/bridge/traits.rs) / [`GrpcStubBridge`](src/bridge/grpc_stub.rs) behind **`grpc-bridges`**) host real localhost HTTP/gRPC servers so scenarios assert outbound calls at the **network** layer; see [Service bridges](#service-bridges).
-- **Also shipped:** **`services`** (service-under-test) — opt-in Cargo feature to run **application containers** via testcontainers during scenarios: [`ServiceUnderTest`](src/service/builder.rs) → [`ServiceSpec`](src/service/types.rs), convention-based **env injection** (Kafka, relational DBs, RabbitMQ, Redis/Valkey, MongoDB, Neo4j, bridges, `depends_on` peers), **convergence health checks**, [`Context::service_url`](src/lifecycle/mod.rs) / [`service_handle`](src/lifecycle/mod.rs) on the test host (`127.0.0.1`), and **bollard** diagnostics labels — see [Service under test](#service-under-test-services-feature).
+- **Also shipped:** `mock-services` — mock upstream HTTP/gRPC servers bound on localhost so scenarios assert outbound calls at the **network** layer; see [Mock services](#mock-services).
+- **Also shipped:** **`services`** (service-under-test) — opt-in Cargo feature to run **application containers** via testcontainers during scenarios: [`ServiceUnderTest`](src/service/builder.rs) → [`ServiceSpec`](src/service/types.rs), convention-based **env injection** (Kafka, relational DBs, RabbitMQ, Redis/Valkey, MongoDB, Neo4j, mock services, `depends_on` peers), **convergence health checks**, [`Context::service_url`](src/lifecycle/mod.rs) / [`service_handle`](src/lifecycle/mod.rs) on the test host (`127.0.0.1`), and **bollard** diagnostics labels — see [Service under test](#service-under-test-services-feature).
 - **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle/mod.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
 - **Previous milestone:** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
 - **Roadmap:** Further milestones are listed in adopted product docs (`MVP.md` under `~/docs/shakedown/`).
@@ -127,9 +127,9 @@ Align automation with the same commands as in this section:
 
 | Command | What it runs | Docker |
 |---------|----------------|--------|
-| `cargo test -p shakedown` | Unit + integration tests for default (minimal) features; includes **`bridge_http`** when `bridges` is in default features | Not required for the default set |
-| `cargo test -p shakedown --features bridges --test bridge_http` | HTTP [`StubBridge`](src/bridge/stub.rs) + coded [`HttpBridge`](src/bridge/traits.rs) integration tests only | No |
-| `cargo test -p shakedown --features grpc-bridges --test bridge_grpc` | gRPC [`GrpcStubBridge`](src/bridge/grpc_stub.rs) unary integration test | No |
+| `cargo test -p shakedown` | Unit + integration tests for default (minimal) features; includes **`mock_service_http`** when `mock-services` is in default features | Not required for the default set |
+| `cargo test -p shakedown --features mock-services --test mock_service_http` | HTTP [`HttpMockService`](src/mock_service/http/stub.rs) + coded [`HttpMockServiceTrait`](src/mock_service/http/mod.rs) integration tests only | No |
+| `cargo test -p shakedown --features grpc-mock-services --test mock_service_grpc` | gRPC [`GrpcMockService`](src/mock_service/grpc/stub.rs) unary integration test | No |
 | `cargo test -p shakedown --features outbox,sqlite` | Outbox helpers + SQLite vertical tests | Not required |
 | `cargo test -p shakedown --features outbox,rabbitmq,sqlite` | Adds Rabbit publication helpers’ unit coverage | Not required for SQLite-only tests |
 | `cargo test -p shakedown --features services` | Service-under-test unit tests + integration **targets** (Docker cases still **`#[ignore]`** unless you pass `-- --ignored`) | Optional Docker for ignored targets |
@@ -165,7 +165,7 @@ These need a running Docker engine. They are **skipped** in a normal `cargo test
 | Service host.docker.internal | `cargo test -p shakedown --features services --test service_host_resolution -- --ignored` | — |
 | Multi-service `depends_on` | `cargo test -p shakedown --features services --test services_multi_dependency -- --ignored` | — |
 | Service diagnostics (labels + timeline) | `cargo test -p shakedown --features services --test services_diagnostics -- --ignored` | — |
-| Kafka + bridge + whoami | `cargo test -p shakedown --features kafka,services --test services_kafka_bridge_whoami -- --ignored` | — |
+| Kafka + mock service + whoami | `cargo test -p shakedown --features kafka,services --test services_kafka_mock_service_whoami -- --ignored` | — |
 | Postgres + two whoami | `cargo test -p shakedown --features postgres,services --test services_multi_postgres_whoami -- --ignored` | — |
 | Redis vertical + helpers | `cargo test -p shakedown --features redis --test redis_vertical --test helpers_redis -- --ignored` | — |
 | Valkey vertical | `cargo test -p shakedown --features valkey --test valkey_vertical -- --ignored` | — |
@@ -634,199 +634,40 @@ To use your verifier from tests, call `PublicationVerifier::assert_observed(&you
 
 `SELECT FOR UPDATE SKIP LOCKED` is unavailable on SQLite, so claim-locking / publisher concurrency semantics are not validated on that path. Use Postgres/MariaDB/MySQL when you need lock semantics coverage.
 
-## Service bridges
+## Mock services
 
-**What this is:** The harness starts **real HTTP/1.1 or gRPC servers on `127.0.0.1`** and records every inbound request/response on a [`BridgeHandle`](src/bridge/handle.rs). Your service-under-test keeps its **real HTTP or gRPC client stack** — serialization, timeouts, and status handling match production. This is **network-level** substitution (stub upstreams at URLs you inject into config), **not** in-process trait mocking or swapping implementations inside the same crate.
+**What this is:** The harness starts **real HTTP/1.1 and (optionally) unary gRPC servers on `127.0.0.1`** and records every inbound request/response on a [`MockServiceHandle`](src/mock_service/handle.rs). Your service-under-test keeps its **real HTTP or gRPC client stack** — serialization, timeouts, and status handling match production. This is **network-level** substitution (stub upstreams at URLs you inject into config), not in-process trait mocking.
 
-**Lifecycle:** Register bridges on [`Context`](src/lifecycle/mod.rs) **before** [`run_scenario`](src/lifecycle/mod.rs). The harness starts bridge servers after provisioning/readiness/seed and **before** your scenario body runs, so [`Context::bridge_url`](src/lifecycle/mod.rs) and [`Context::bridge`](src/lifecycle/mod.rs) return `Some(_)` **inside** the scenario closure for registered names (or [`None`] if the name is wrong or servers are not up yet). Events are logged with `source: "bridge"` for failure timelines.
+**Lifecycle:** Register mock services on [`Context`](src/lifecycle/mod.rs) **before** [`run_scenario`](src/lifecycle/mod.rs). The harness starts servers after provisioning/readiness/seed and **before** your scenario body runs, so [`Context::mock_service_url`](src/lifecycle/mod.rs) and [`Context::mock_service`](src/lifecycle/mod.rs) return `Some(_)` inside the scenario closure for registered names. Events are logged with `source: "mock-service"` for failure timelines.
 
 ### Cargo features
 
 | Feature | Default? | What it enables |
 |---------|----------|-----------------|
-| **`bridges`** | Yes | HTTP stack: [`HttpBridge`](src/bridge/traits.rs), [`StubBridge`](src/bridge/stub.rs), [`BridgeRequest`](src/bridge/types/request.rs) / [`BridgeResponse`](src/bridge/types/response.rs), [`BridgeHandle`](src/bridge/handle.rs), hyper server ([`bridge/server.rs`](src/bridge/server.rs)). |
-| **`grpc-bridges`** | No (opt-in) | Unary gRPC: [`GrpcBridge`](src/bridge/traits.rs), [`GrpcStubBridge`](src/bridge/grpc_stub.rs), [`GrpcBridgeRequest`](src/bridge/grpc_types.rs) / [`GrpcBridgeResponse`](src/bridge/grpc_types.rs), tonic-hosted server ([`bridge/grpc_server.rs`](src/bridge/grpc_server.rs)). **Implies `bridges`.** |
+| **`mock-services`** | Yes | HTTP mock services: [`HttpMockService`](src/mock_service/http/stub.rs) and [`HttpMockServiceTrait`](src/mock_service/http/mod.rs) served by hyper. |
+| **`grpc-mock-services`** | No (opt-in) | Unary gRPC mock services: [`GrpcMockService`](src/mock_service/grpc/stub.rs) and [`GrpcMockServiceTrait`](src/mock_service/grpc/mod.rs) served by tonic. |
 
-**gRPC response type:** [`GrpcBridgeResponse::status_code`](src/bridge/grpc_types.rs) is [`tonic::Code`](https://docs.rs/tonic/latest/tonic/enum.Code.html), not a raw `u32`. Match on `Code::Ok` and other variants when branching on status from [`GrpcBridge::handle`](src/bridge/traits.rs).
+### Quick-start (HTTP)
 
-To compile Shakedown **without** HTTP bridge code (smaller graph), depend with `default-features = false` and list only the features you need (omit `bridges`).
-
-```toml
-# Default: HTTP bridges on (typical dev-dependency)
-shakedown = { version = "0.1.0" }
-
-# Opt in to gRPC bridges as well
-shakedown = { version = "0.1.0", features = ["grpc-bridges"] }
-
-# Minimal crate without bridge modules
-shakedown = { version = "0.1.0", default-features = false, features = ["kafka"] }
-```
-
-### HTTP bridges
-
-#### Tier 1: Quick-start (five-line core)
-
-Conceptually: **build** a [`StubBridge`](src/bridge/stub.rs), **register** it, **call** `bridge_url` inside the scenario, **issue** a real HTTP request. The runnable shape is a `#[tokio::test]` with [`run_scenario`](src/lifecycle/mod.rs) (same pattern as [`tests/bridge_http.rs`](tests/bridge_http.rs)):
-
-```rust
-use shakedown::{run_scenario, Context, EventLog, StubBridge};
-
-#[tokio::test]
-async fn bridge_quickstart() {
-    let stub = StubBridge::new("api")
-        .on("GET", "/health")
-        .respond(200);
-    let mut ctx = Context::new();
-    ctx.register_http_bridge("api", stub).expect("register");
-
-    let mut event_log = EventLog::new();
-    run_scenario(
-        &mut ctx,
-        "bridge_quickstart",
-        |context| {
-            Box::pin(async move {
-                let client = reqwest::Client::new();
-                let base = context.bridge_url("api").expect("api bridge url");
-                let response = client
-                    .get(format!("{base}/health"))
-                    .send()
-                    .await
-                    .expect("GET /health");
-                assert!(response.status().is_success());
-            })
-        },
-        &mut event_log,
-    )
-    .await
-    .expect("run_scenario");
-}
-```
-
-The five **API** lines this illustrates are: `StubBridge::new(...).on(...).respond(...)`, `register_http_bridge(...)`, `run_scenario(...)`, `bridge_url(...)`, and the client `GET` — everything else is boilerplate shared with any scenario test.
-
-#### Tier 2: Simple assertions
-
-[`BridgeHandle::assert_called_times`](src/bridge/handle.rs) checks total inbound calls. [`BridgeHandle::assert_not_called`](src/bridge/handle.rs) expects **zero** calls (for example you registered a bridge but the scenario should not hit it, or you assert before traffic). Both return `Result<(), ShakedownError>` with [`ShakedownError::Scenario`](src/error.rs) on assertion failure (the bridge call log survives a poisoned mutex via recovery in [`BridgeHandle`](src/bridge/handle.rs)).
-
-```rust
-// After requests in the scenario body:
-context
-    .bridge("api")
-    .expect("api bridge handle")
-    .assert_called_times(1)
-    .expect("exactly one request");
-
-// When no request should have been sent to this bridge:
-context
-    .bridge("optional-upstream")
-    .expect("optional-upstream bridge handle")
-    .assert_not_called()
-    .expect("upstream not contacted");
-```
-
-#### Tier 3: Targeted assertions (`assert_called_with`)
-
-Use [`BridgeHandle::assert_called_with`](src/bridge/handle.rs) with a predicate over [`RecordedCall`](src/bridge/handle.rs). The predicate typically uses [`RecordedCall::json`](src/bridge/handle.rs) (same idea as [`BridgeRequest::json`](src/bridge/types/request.rs)) for JSON bodies, or inspects headers via [`RecordedCall::headers`](src/bridge/handle.rs).
-
-```rust
-use shakedown::{Context, ShakedownError};
-
-fn assert_charge_payload(context: &Context) -> Result<(), ShakedownError> {
-    context
-        .bridge("payments")
-        .expect("payments bridge handle")
-        .assert_called_with("POST", "/v1/charge", |call| {
-            if let Ok(value) = call.json::<serde_json::Value>() {
-                value["amount"].as_f64() == Some(9.99)
-                    && call
-                        .headers()
-                        .iter()
-                        .any(|(name, value)| name == "x-idempotency-key" && !value.is_empty())
-            } else {
-                false
-            }
-        })?;
-    Ok(())
-}
-```
-
-#### Tier 4: Custom views — `calls_matching`, ordering, nth call
-
-[`BridgeHandle::calls_matching`](src/bridge/handle.rs) returns a `Vec<RecordedCall>` for one method/path pair (HTTP) in arrival order. [`BridgeHandle::calls`](src/bridge/handle.rs) returns **all** calls. Use them when you need ordering guarantees, the **n**th request, or ad-hoc filters beyond the built-in assertions.
-
-```rust
-let handle = context.bridge("counter").expect("counter bridge handle");
-let get_root = handle.calls_matching("GET", "/");
-assert!(get_root.len() >= 2, "expected at least two GET / calls");
-
-let first_serial: u32 = serde_json::from_slice(get_root[0].response_body().as_ref())
-    .ok()
-    .and_then(|value: serde_json::Value| value.get("n")?.as_u64())
-    .and_then(|value| u32::try_from(value).ok())
-    .expect("first response n");
-
-let all_calls = handle.calls();
-assert_eq!(all_calls.len(), get_root.len(), "only GET / in this example");
-```
-
-For gRPC recordings, **method** and **path** are both set to the full gRPC path (for example `/echo.EchoService/SayHello`); use the same strings in `calls_matching` as in your client (see [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs)).
-
-### Coded `HttpBridge` (stateful logic)
-
-Implement [`HttpBridge`](src/bridge/traits.rs) for custom routing, counters, or responses that depend on request content. Recording stays in the server wrapper; the trait stays easy to unit-test with a synthetic [`BridgeRequest`](src/bridge/types/request.rs).
-
-**Sketch** — an [`AtomicU32`](https://doc.rust-lang.org/std/sync/atomic/struct.AtomicU32.html) increments on every call and returns JSON `{"n": …}` (full test: [`coded_http_bridge_stateful_calls_matching_order`](tests/bridge_http.rs) in [`tests/bridge_http.rs`](tests/bridge_http.rs)):
-
-```rust
-use std::sync::atomic::{AtomicU32, Ordering};
-
-use async_trait::async_trait;
-use shakedown::{BridgeContext, BridgeRequest, BridgeResponse, HttpBridge};
-
-struct CountingJsonBridge {
-    hits: AtomicU32,
-}
-
-#[async_trait]
-impl HttpBridge for CountingJsonBridge {
-    async fn handle(&self, _request: BridgeRequest, _context: &BridgeContext) -> BridgeResponse {
-        let next = self.hits.fetch_add(1, Ordering::SeqCst) + 1;
-        BridgeResponse::json(&serde_json::json!({ "n": next })).expect("json body")
-    }
-}
-```
-
-### gRPC bridges (`grpc-bridges`)
-
-Enable **`grpc-bridges`** in `Cargo.toml`. Unary RPCs are matched on the full service/method key (for example `echo.EchoService/SayHello` for [`GrpcStubBridge::on_method`](src/bridge/grpc_stub.rs)); the harness records the HTTP/2 path (leading `/`) on [`RecordedCall`](src/bridge/handle.rs) for assertions.
-
-#### Tier 1: Quick-start (`GrpcStubBridge`)
-
-Define a `prost::Message` response type (hand-written `#[derive(prost::Message)]` or codegen). Register a stub, then call your service through a real tonic client against [`Context::bridge_url`](src/lifecycle/mod.rs) — full unary client setup is in [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs).
+Runnable reference: [`tests/mock_service_http.rs`](tests/mock_service_http.rs).
 
 ```rust,ignore
-use shakedown::{run_scenario, Context, EventLog, GrpcStubBridge};
-// `SayHelloResponse`: prost message type (see tests/bridge_grpc.rs).
+use shakedown::{run_scenario, Context, EventLog, HttpMockService};
 
 #[tokio::test]
-async fn grpc_stub_quickstart() {
-    let stub = GrpcStubBridge::new("echo")
-        .on_method("echo.EchoService/SayHello")
-        .respond_proto(&SayHelloResponse {
-            message: String::from("hello"),
-        });
-
+async fn http_mock_service_quickstart() {
+    let stub = HttpMockService::new("api").on("GET", "/health").respond(200);
     let mut ctx = Context::new();
-    ctx.register_grpc_bridge("echo", stub).expect("register");
+    ctx.register_http_mock_service("api", stub).expect("register");
 
     let mut event_log = EventLog::new();
     run_scenario(
         &mut ctx,
-        "grpc_stub_quickstart",
+        "http_mock_service_quickstart",
         |context| {
             Box::pin(async move {
-                // tonic::transport::Endpoint + tonic::client::Grpc::unary — see tests/bridge_grpc.rs
-                let _base = context.bridge_url("echo").expect("echo bridge url");
+                let base = context.mock_service_url("api").expect("api url");
+                let _ = reqwest::get(format!("{base}/health")).await.expect("GET /health");
             })
         },
         &mut event_log,
@@ -836,7 +677,9 @@ async fn grpc_stub_quickstart() {
 }
 ```
 
-#### Tier 2: Simple gRPC assertions
+### Quick-start (gRPC)
+
+Runnable reference: [`tests/mock_service_grpc.rs`](tests/mock_service_grpc.rs) (requires `grpc-mock-services`).
 
 When you expect calls:
 
@@ -849,85 +692,36 @@ handle
     .expect("path-specific count");
 ```
 
-For gRPC, pass the full HTTP/2 path (leading `/`) for **both** the `method` and `path` arguments to [`assert_path_called_times`](src/bridge/handle.rs) — the recorded [`RecordedCall`](src/bridge/handle.rs) stores that path in both fields.
+For gRPC, pass the full HTTP/2 path (leading `/`) for **both** the `method` and `path` arguments to [`assert_path_called_times`](src/mock_service/handle.rs) — the recorded [`RecordedCall`](src/mock_service/handle.rs) stores that path in both fields.
 
-When the bridge must stay idle:
+When the mock service must stay idle:
 
 ```rust
 handle.assert_not_called().expect("no calls");
 ```
 
-For gRPC, **`assert_path_called_times`** / **`assert_called_with`** take the **same** full path string for both `method` and `path` arguments (the recorded [`RecordedCall`](src/bridge/handle.rs) duplicates the gRPC path in both fields).
-
-#### Tier 3: Predicate on protobuf bytes
-
-```rust,ignore
-use prost::Message;
-// `SayHelloRequest`: prost message type (see tests/bridge_grpc.rs).
-
-handle.assert_called_with(GRPC_PATH, GRPC_PATH, |call| {
-    SayHelloRequest::decode(call.request_body().as_ref())
-        .map(|decoded| decoded.name == "alice")
-        .unwrap_or(false)
-})
-.expect("request body decodes");
-```
-
-#### Tier 4: Ordering and filtered views
-
-Same as HTTP: `calls_matching(GRPC_PATH, GRPC_PATH)` preserves order; index into the `Vec` for first/last/**n**th call; use `calls()` for the full list.
-
-#### Coded `GrpcBridge`
-
-Implement [`GrpcBridge`](src/bridge/traits.rs) when stubs are not enough: decode [`GrpcBridgeRequest::body`](src/bridge/grpc_types.rs), branch on [`service`](src/bridge/grpc_types.rs) / [`method`](src/bridge/grpc_types.rs), return [`GrpcBridgeResponse::ok_proto`](src/bridge/grpc_types.rs) or [`GrpcBridgeResponse::status`](src/bridge/grpc_types.rs). **Reference:** unary flow and client setup in [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs); swap `GrpcStubBridge` for your type in `register_grpc_bridge`.
-
-```rust,ignore
-use async_trait::async_trait;
-use shakedown::{BridgeContext, GrpcBridge, GrpcBridgeRequest, GrpcBridgeResponse};
-// `SayHelloResponse`: prost message type (see tests/bridge_grpc.rs).
-
-struct AlwaysHello;
-
-#[async_trait]
-impl GrpcBridge for AlwaysHello {
-    async fn handle(
-        &self,
-        request: GrpcBridgeRequest,
-        _context: &BridgeContext,
-    ) -> GrpcBridgeResponse {
-        if request.service == "echo.EchoService" && request.method == "SayHello" {
-            GrpcBridgeResponse::ok_proto(&SayHelloResponse {
-                message: "hello".into(),
-            })
-        } else {
-            GrpcBridgeResponse::status(tonic::Code::Unimplemented, "unknown method")
-        }
-    }
-}
-```
-
 ### Verification and tests
 
-Manual verification steps for bridges (feature flags, integration tests, docs walk-through) are in the adopted feature pack: **`~/docs/shakedown/feature/mvp-bridges/VERIFY.md`**. Automated references: [`tests/bridge_http.rs`](tests/bridge_http.rs), [`tests/bridge_grpc.rs`](tests/bridge_grpc.rs).
+Automated references: [`tests/mock_service_http.rs`](tests/mock_service_http.rs) and [`tests/mock_service_grpc.rs`](tests/mock_service_grpc.rs).
 
 ## Service under test (`services` feature)
 
-**What this is:** In addition to **infrastructure** resources (Kafka, Postgres, …) and **bridges** (stub upstreams), Shakedown can start **your service** (or a lightweight stand-in image) as a **Docker container** inside the same [`run_scenario`](src/lifecycle/mod.rs) lifecycle. After infrastructure is ready and bridges are listening, the harness **injects** connection strings and URLs into the container, waits for **readiness** using configurable probes, and exposes each service’s **HTTP base URL** on [`Context`](src/lifecycle/mod.rs) for assertions from the **test process** (loopback). Teardown stops service containers **before** bridges and infrastructure so graceful shutdown still sees live dependencies.
+**What this is:** In addition to **infrastructure** resources (Kafka, Postgres, …) and **mock services** (stub upstreams), Shakedown can start **your service** (or a lightweight stand-in image) as a **Docker container** inside the same [`run_scenario`](src/lifecycle/mod.rs) lifecycle. After infrastructure is ready and mock services are listening, the harness **injects** connection strings and URLs into the container, waits for **readiness** using configurable probes, and exposes each service’s **HTTP base URL** on [`Context`](src/lifecycle/mod.rs) for assertions from the **test process** (loopback). Teardown stops service containers **before** mock services and infrastructure so graceful shutdown still sees live dependencies.
 
-**Cargo feature:** Enable **`services`** (opt-in — not in default features). It pulls **testcontainers**, **reqwest** (HTTP health probes), and **`diagnostics`** (bollard) so service containers can participate in the same observability story as infra. Compose with **`kafka`**, **`postgres`**, **`bridges`**, and other features when you want **convention-based** injection from those bindings.
+**Cargo feature:** Enable **`services`** (opt-in — not in default features). It pulls **testcontainers**, **reqwest** (HTTP health probes), and **`diagnostics`** (bollard) so service containers can participate in the same observability story as infra. Compose with **`kafka`**, **`postgres`**, **`mock-services`**, and other features when you want **convention-based** injection from those bindings.
 
 ```toml
 [dev-dependencies]
-shakedown = { version = "0.1.0", default-features = false, features = ["services", "bridges"] }
+shakedown = { version = "0.1.0", default-features = false, features = ["services", "mock-services"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 ```
 
-`default-features = false` is shown so you opt in explicitly; many teams keep default **`bridges`** on and add **`services`**.
+`default-features = false` is shown so you opt in explicitly; many teams keep default **`mock-services`** on and add **`services`**.
 
 Public entry points (all behind `feature = "services"`): [`ServiceUnderTest`](src/service/builder.rs), [`ServiceSpec`](src/service/types.rs), [`HealthCheck`](src/service/health.rs), [`EnvMapping`](src/service/types.rs) / [`PullPolicy`](src/service/types.rs), [`ServiceHandle`](src/service/handle.rs), [`Context::register_service`](src/lifecycle/mod.rs), [`Context::service_url`](src/lifecycle/mod.rs), [`Context::service_handle`](src/lifecycle/mod.rs). Address rewriting for containers uses [`HOST_DOCKER_INTERNAL`](src/service/address.rs) (see §2).
 
-Runnable references in this repo: [`tests/services_lifecycle.rs`](tests/services_lifecycle.rs) (single container), [`tests/services_us012_kafka_bridge_whoami.rs`](tests/services_us012_kafka_bridge_whoami.rs), [`tests/services_us013_multi_postgres_whoami.rs`](tests/services_us013_multi_postgres_whoami.rs).
+Runnable references in this repo: [`tests/services_lifecycle.rs`](tests/services_lifecycle.rs) (single container), [`tests/services_kafka_mock_service_whoami.rs`](tests/services_kafka_mock_service_whoami.rs), [`tests/services_multi_postgres_whoami.rs`](tests/services_multi_postgres_whoami.rs).
 
 ### 1. Single-service quick-start (register, health check, assert)
 
@@ -997,14 +791,14 @@ When **[`auto_inject(true)`](src/service/builder.rs)** (the default), the harnes
 | Weaviate | `WEAVIATE_URL` | `weaviate` feature (REST) |
 | InfluxDB 2.x | `INFLUXDB_URL` | `influxdb` feature; also sets `INFLUXDB_TOKEN`, `INFLUXDB_ORG`, `INFLUXDB_BUCKET` |
 | TimescaleDB | `TIMESCALEDB_URL` | `timescaledb` feature (distinct from Postgres `DATABASE_URL`) |
-| HTTP/gRPC bridge | `{UPPER_SNAKE(bridge_name)}_URL` | e.g. bridge `"order-gateway"` → `ORDER_GATEWAY_URL` (`bridges` + `services`) |
+| HTTP/gRPC mock service | `{UPPER_SNAKE(mock_service_name)}_URL` | e.g. mock service `"order-gateway"` → `ORDER_GATEWAY_URL` (`mock-services` + `services`) |
 | `depends_on` peer | `{UPPER_SNAKE(service_name)}_URL` | Only for names listed in [`.depends_on`](src/service/builder.rs) (§3) |
 
-**Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`redis`](src/service/types.rs), [`mongo`](src/service/types.rs), [`nats`](src/service/types.rs), [`neo4j`](src/service/types.rs), [`duckdb`](src/service/types.rs), [`elasticsearch`](src/service/types.rs), [`opensearch`](src/service/types.rs), [`qdrant`](src/service/types.rs), [`weaviate`](src/service/types.rs), [`influxdb`](src/service/types.rs), [`timescaledb`](src/service/types.rs), [`bridge`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
+**Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`redis`](src/service/types.rs), [`mongo`](src/service/types.rs), [`nats`](src/service/types.rs), [`neo4j`](src/service/types.rs), [`duckdb`](src/service/types.rs), [`elasticsearch`](src/service/types.rs), [`opensearch`](src/service/types.rs), [`qdrant`](src/service/types.rs), [`weaviate`](src/service/types.rs), [`influxdb`](src/service/types.rs), [`timescaledb`](src/service/types.rs), [`mock_service`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
 
 **Opt out:** [`.auto_inject(false)`](src/service/builder.rs) skips the table above; only `.env` and resolved `.env_mapping` entries are injected.
 
-**Container vs test host:** Injected values rewrite loopback and `localhost` to **`host.docker.internal`** (and add Linux `host-gateway` mapping) so processes **inside** the service container reach Kafka, DBs, and bridges on the host. The test process keeps using **`127.0.0.1`** via [`service_url`](src/lifecycle/mod.rs) — see [`HOST_DOCKER_INTERNAL`](src/service/address.rs).
+**Container vs test host:** Injected values rewrite loopback and `localhost` to **`host.docker.internal`** (and add Linux `host-gateway` mapping) so processes **inside** the service container reach Kafka, DBs, and mock services on the host. The test process keeps using **`127.0.0.1`** via [`service_url`](src/lifecycle/mod.rs) — see [`HOST_DOCKER_INTERNAL`](src/service/address.rs).
 
 #### `PullPolicy`
 
@@ -1055,7 +849,7 @@ let downstream = ServiceUnderTest::docker("traefik/whoami:v1.10")
 // Register `upstream` before `downstream` (or rely on validation errors if order is wrong).
 ```
 
-Full Docker proof: [`tests/services_us013_multi_postgres_whoami.rs`](tests/services_us013_multi_postgres_whoami.rs) (`postgres`, `services`).
+Full Docker proof: [`tests/services_multi_postgres_whoami.rs`](tests/services_multi_postgres_whoami.rs) (`postgres`, `services`).
 
 ### 4. Diagnostics and resource assertions on service containers
 
@@ -1063,7 +857,7 @@ Service containers are labeled like infrastructure: **`io.shakedown.framework=tr
 
 Use the **logical service name** you passed to [`.name`](src/service/builder.rs) with [`Context::assert_resource`](src/lifecycle/mod.rs) for **`peak_memory_under`** / **`avg_cpu_under`** — correlation prefers the `io.shakedown.service` label ([`correlation_name_from_container_summary`](src/diagnostics/labels.rs)). Deeper background: [Infrastructure diagnostics (bollard)](#infrastructure-diagnostics-bollard).
 
-**End-to-end** exercise (Kafka + bridge + whoami + diagnostics): [`tests/services_us012_kafka_bridge_whoami.rs`](tests/services_us012_kafka_bridge_whoami.rs) (`kafka`, `services`, Docker + `--ignored`).
+**End-to-end** exercise (Kafka + mock service + whoami + diagnostics): [`tests/services_kafka_mock_service_whoami.rs`](tests/services_kafka_mock_service_whoami.rs) (`kafka`, `services`, Docker + `--ignored`).
 
 ## See also
 

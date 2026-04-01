@@ -3,7 +3,7 @@
 //! Use it in integration tests or scenarios to stand in for a real HTTP backend with fixed
 //! responses (no real server logic), so callers see predictable status codes, headers, and bodies.
 //!
-//! Minimal example:
+//! Example:
 //!
 //! ```ignore
 //! use std::sync::Arc;

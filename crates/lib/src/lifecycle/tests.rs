@@ -373,37 +373,43 @@ async fn test_async_resource_phases() {
 }
 
 #[cfg(feature = "mock-services")]
-mod bridge_registration_tests {
+mod mock_service_registration_tests {
     use crate::error::{InternalError, ShakedownError};
     use crate::mock_service::HttpMockService;
 
     use super::Context;
 
     #[test]
-    fn register_http_bridge_duplicate_name_returns_error() {
-        // Given a context and one registered HTTP bridge
+    fn register_http_mock_service_duplicate_name_returns_error() {
+        // Given a context and one registered HTTP mock service
         let mut context = Context::new();
         let stub = HttpMockService::new("api").on("GET", "/").respond(200);
-        context.register_http_bridge("edge", stub.clone()).unwrap();
-        // When we register another bridge with the same name
-        let error = context.register_http_bridge("edge", stub).unwrap_err();
+        context
+            .register_http_mock_service("edge", stub.clone())
+            .unwrap();
+        // When we register another mock service with the same name
+        let error = context
+            .register_http_mock_service("edge", stub)
+            .unwrap_err();
         // Then we get invalid configuration mentioning duplicate name
         match error {
             ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
-                assert!(message.contains("duplicate bridge name"));
+                assert!(message.contains("duplicate mock service name"));
             }
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[test]
-    fn register_http_bridge_after_servers_started_returns_error() {
-        // Given a context where the bridge phase is marked complete
+    fn register_http_mock_service_after_servers_started_returns_error() {
+        // Given a context where the mock service phase is marked complete
         let mut context = Context::new();
-        context.set_bridge_servers_phase_complete_for_test(true);
+        context.set_mock_service_servers_phase_complete_for_test(true);
         let stub = HttpMockService::new("api").on("GET", "/").respond(200);
-        // When we try to register a bridge
-        let error = context.register_http_bridge("edge", stub).unwrap_err();
+        // When we try to register a mock service
+        let error = context
+            .register_http_mock_service("edge", stub)
+            .unwrap_err();
         // Then registration is rejected
         match error {
             ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
@@ -415,7 +421,7 @@ mod bridge_registration_tests {
 }
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-mod bridge_grpc_registration_tests {
+mod mock_service_grpc_registration_tests {
     use crate::error::{InternalError, ShakedownError};
     use crate::mock_service::{GrpcMockService, HttpMockService};
     use tonic::Code;
@@ -423,8 +429,8 @@ mod bridge_grpc_registration_tests {
     use super::Context;
 
     #[test]
-    fn register_grpc_bridge_duplicate_name_returns_error() {
-        // Given one registered gRPC bridge
+    fn register_grpc_mock_service_duplicate_name_returns_error() {
+        // Given one registered gRPC mock service
         let mut context = Context::new();
         let first_stub = GrpcMockService::new("grpc")
             .on_method("svc/Method")
@@ -432,37 +438,41 @@ mod bridge_grpc_registration_tests {
         let second_stub = GrpcMockService::new("grpc")
             .on_method("svc/Other")
             .respond_status(Code::Aborted, "second");
-        context.register_grpc_bridge("dup", first_stub).unwrap();
-        // When we register another gRPC bridge with the same name
+        context
+            .register_grpc_mock_service("dup", first_stub)
+            .unwrap();
+        // When we register another gRPC mock service with the same name
         let error = context
-            .register_grpc_bridge("dup", second_stub)
+            .register_grpc_mock_service("dup", second_stub)
             .unwrap_err();
         // Then we get duplicate name
         match error {
             ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
-                assert!(message.contains("duplicate bridge name"));
+                assert!(message.contains("duplicate mock service name"));
             }
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[test]
-    fn register_grpc_mock_service_name_conflicts_with_http_bridge() {
-        // Given an HTTP bridge already registered under a name
+    fn register_grpc_mock_service_name_conflicts_with_http_mock_service() {
+        // Given an HTTP mock service already registered under a name
         let mut context = Context::new();
         let http_stub = HttpMockService::new("api").on("GET", "/").respond(200);
-        context.register_http_bridge("shared", http_stub).unwrap();
+        context
+            .register_http_mock_service("shared", http_stub)
+            .unwrap();
         let grpc_stub = GrpcMockService::new("grpc")
             .on_method("svc/M")
             .respond_status(Code::Ok, "ok");
         // When we register gRPC under the same name
         let error = context
-            .register_grpc_bridge("shared", grpc_stub)
+            .register_grpc_mock_service("shared", grpc_stub)
             .unwrap_err();
         // Then we get duplicate name
         match error {
             ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
-                assert!(message.contains("duplicate bridge name"));
+                assert!(message.contains("duplicate mock service name"));
             }
             other => panic!("unexpected error: {other:?}"),
         }

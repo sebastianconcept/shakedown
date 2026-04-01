@@ -179,15 +179,15 @@ pub use crate::phase::Phase;
 #[cfg(feature = "mock-services")]
 pub use crate::mock_service::{
     HttpMockService, HttpMockServiceRequest, HttpMockServiceResponse,
-    HttpMockServiceResponseBuilder, HttpMockServiceRoutePending, MockServiceContext,
-    MockServiceError, MockServiceHandle, MockServiceResources, RecordedCall, RecordedExchange,
-    RouteMatch,
+    HttpMockServiceResponseBuilder, HttpMockServiceRoutePending, HttpMockServiceTrait,
+    MockServiceContext, MockServiceError, MockServiceHandle, MockServiceResources, RecordedCall,
+    RecordedExchange, RouteMatch,
 };
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
 pub use crate::mock_service::{
     GrpcMockService, GrpcMockServiceMethodPending, GrpcMockServiceRequest, GrpcMockServiceResponse,
-    GrpcMockServiceTrait, HttpMockServiceTrait,
+    GrpcMockServiceTrait,
 };
 
 #[cfg(feature = "outbox")]

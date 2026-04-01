@@ -61,7 +61,7 @@ async fn postgres_partitioned_database_urls_depends_on_and_env_echo() {
 
     run_scenario(
         &mut context,
-        "us013_multi_postgres_whoami",
+        "postgres_multi_service_partitioned_db_depends_on_whoami",
         |scenario_context| {
             Box::pin(async move {
                 let client = reqwest::Client::builder()

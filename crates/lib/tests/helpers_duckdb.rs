@@ -13,6 +13,10 @@ async fn duckdb_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
 
     // When: we create a table and insert a row using only `DuckDbHelpers` (async API over spawn_blocking).
     ctx.duckdb()
+        .execute("DROP TABLE IF EXISTS helper_items", ())
+        .await
+        .expect("execute DROP TABLE via helpers");
+    ctx.duckdb()
         .execute(
             "CREATE TABLE helper_items (value_text VARCHAR NOT NULL)",
             (),
