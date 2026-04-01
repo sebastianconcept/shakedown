@@ -134,9 +134,9 @@ pub enum ShakedownError {
     /// Harness or framework bug: poisoned mutex, invariant violation, invalid harness config (see
     /// [`InternalError`]). Display is delegated — the inner value already starts with “Internal error:”.
     Internal(InternalError),
-    /// No relational database binding on [`crate::lifecycle::Context`]. Outbox row helpers need exactly one of postgres, mariadb, mysql, or sqlite provisioned.
+    /// No outbox storage binding on [`crate::lifecycle::Context`]. Outbox row helpers need exactly one of postgres, mariadb, mysql, sqlite, or mongodb provisioned (see `Outbox` / `mvp-outbox` docs).
     ///
-    /// Cause: `ctx.outbox()` (or similar) was used without registering and provisioning a relational resource.
+    /// Cause: `ctx.outbox()` (or similar) was used without registering and provisioning a supported storage resource.
     NoRelationalBindings,
     /// Outbox row not found for aggregate_id='{aggregate_id}', event_type='{event_type}', expected status='{expected_status}'
     ///
