@@ -18,8 +18,7 @@ This library provides:
 shakedown/
 ├── crates/
 │   ├── lib/          # this crate: orchestration engine
-│   ├── macros/       # procedural macros (shakedown-macros)
-│   └── cli/          # CLI binary (shakedown-cli)
+│   └── macros/       # procedural macros (shakedown-macros)
 ```
 
 ## Extension points
@@ -122,8 +121,7 @@ Align automation with the same commands as in this section:
 1. **Fast gate (no Docker):** `cargo test --workspace` (or `just test-workspace` / `just qa-full` for Cargo-only parity).
 2. **Optional compile-all:** `cargo test --workspace --all-features` — remember this enables `no-diagnostics`, so it does **not** compile bollard diagnostics tests.
 3. **Docker runner:** `just test-shakedown-all-include-ignored` (or the equivalent `cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored`) with a working Docker socket — covers ignored integration tests and diagnostics. Uses **nextest** when installed, same as `just test`.
-4. **Macros only:** `cargo test -p shakedown-macros` when you need trybuild without rebuilding the full workspace.
-5. **CLI:** `cargo test -p shakedown-cli` (or `just test-cli`) — currently the binary crate has no test targets; the recipe is reserved for future tests.
+4. **Macros only:** `cargo test -p shakedown-macros` when you need trybuild without rebuilding the workspace.
 
 ### `shakedown` library crate
 
@@ -147,13 +145,6 @@ Align automation with the same commands as in this section:
 |---------|----------------|--------|
 | `cargo test -p shakedown-macros` | Macro unit tests + **trybuild** compile-pass / compile-fail UI tests | No |
 | `just test-macros` | Same | No |
-
-### `shakedown-cli` binary crate
-
-| Command | What it runs | Docker |
-|---------|----------------|--------|
-| `cargo test -p shakedown-cli` | Tests for the CLI package (none yet; target exists for future `[[test]]` binaries) | No |
-| `just test-cli` | Same | No |
 
 ### Docker-backed `#[ignore]` tests (one binary each)
 
@@ -212,7 +203,6 @@ just test-workspace
 just test-workspace-all-features
 just test-lib
 just test-macros
-just test-cli
 just test-shakedown-all-include-ignored
 just test-outbox-sqlite
 just test-toxiproxy-ignored
