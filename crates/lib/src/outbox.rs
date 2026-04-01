@@ -445,6 +445,33 @@ impl<'ctx> Outbox<'ctx> {
         .await
     }
 
+    /// Assert a Redis Stream entry for `aggregate_id` was observed on the scenario-namespaced stream.
+    ///
+    /// Pass the **logical** stream name (without the per-scenario key prefix); it is combined with
+    /// [`crate::resources::RedisBindings::key_prefix`]. The default [`crate::publication::RedisStreamsPublicationVerifierOptions`]
+    /// reads the `"payload"` field as JSON for [`crate::publication::message_matches_aggregate_id`].
+    /// Override options via [`crate::publication::PublicationVerifier::assert_observed`].
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    pub async fn assert_redis_streams_published(
+        &self,
+        base_stream: &str,
+        aggregate_id: &str,
+    ) -> Result<(), ShakedownError> {
+        use crate::publication::{
+            PublicationObserveSpec, PublicationVerifier, RedisStreamsPublicationVerifier,
+            RedisStreamsPublicationVerifierOptions,
+        };
+
+        let verifier = RedisStreamsPublicationVerifier;
+        let spec = PublicationObserveSpec {
+            aggregate_id: aggregate_id.to_string(),
+            logical_channel: base_stream.to_string(),
+            timeout: None,
+        };
+        let options = RedisStreamsPublicationVerifierOptions::default();
+        PublicationVerifier::assert_observed(&verifier, self.context, &spec, &options).await
+    }
+
     async fn assert_state(
         &self,
         aggregate_id: &str,
