@@ -2,6 +2,10 @@
 //!
 //! This module creates the canonical `outbox_event` table (relational/SQLite/DuckDB) or collection
 //! (MongoDB) in the active storage binding attached to [`crate::lifecycle::Context`].
+//!
+//! **DuckDB and SQLite (assertion-only):** row-state assertions (`assert_pending`, `assert_sent`, …)
+//! do not exercise `SELECT FOR UPDATE SKIP LOCKED` or other claim-locking semantics; they only read
+//! the latest matching row for observability-style checks — same limitation as the SQLite path.
 
 use crate::error::{InfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
@@ -40,8 +44,13 @@ pub struct OutboxEntry {
     pub sent_at: Option<String>,
 }
 
-/// Row tuple returned by outbox `SELECT` helpers (relational backends + SQLite blocking path).
-#[cfg(any(feature = "mariadb", feature = "mysql", feature = "sqlite"))]
+/// Row tuple returned by outbox `SELECT` helpers (relational backends + SQLite/DuckDB blocking path).
+#[cfg(any(
+    feature = "mariadb",
+    feature = "mysql",
+    feature = "sqlite",
+    feature = "duckdb"
+))]
 type OutboxAssertRow = (
     String,
     String,
@@ -185,6 +194,50 @@ CREATE TABLE IF NOT EXISTS outbox_event (
 );
 "#;
 
+/// DuckDB canonical `outbox_event` DDL ([`crate::resources::DuckDbBindings`] — in-process, per scenario).
+#[cfg(feature = "duckdb")]
+const DUCKDB_SETUP_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS outbox_event (
+    id             TEXT PRIMARY KEY DEFAULT (uuid()),
+    aggregate_type TEXT NOT NULL,
+    aggregate_id   TEXT NOT NULL,
+    type           TEXT NOT NULL,
+    payload        TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'pending',
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    next_retry_at  TEXT,
+    created_at     TEXT NOT NULL DEFAULT (current_timestamp),
+    sent_at        TEXT
+);
+"#;
+
+#[cfg(feature = "duckdb")]
+const DUCKDB_OUTBOX_FETCH_WITH_STATUS: &str = r#"
+SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at, sent_at
+FROM outbox_event
+WHERE aggregate_id = ?1 AND type = ?2 AND status = ?3
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(feature = "duckdb")]
+const DUCKDB_OUTBOX_FETCH_LATEST: &str = r#"
+SELECT id, aggregate_type, aggregate_id, type, payload, status, attempts, created_at, sent_at
+FROM outbox_event
+WHERE aggregate_id = ?1 AND type = ?2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
+#[cfg(feature = "duckdb")]
+const DUCKDB_OUTBOX_SELECT_LATEST_STATUS: &str = r#"
+SELECT status
+FROM outbox_event
+WHERE aggregate_id = ?1 AND type = ?2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"#;
+
 /// Feature-gated outbox helper bound to one scenario context.
 pub struct Outbox<'ctx> {
     context: &'ctx Context,
@@ -302,6 +355,22 @@ impl<'ctx> Outbox<'ctx> {
         #[cfg(feature = "mongodb")]
         if let Some(mongo_bindings) = self.context.mongo_bindings() {
             mongo_ensure_outbox_collection(mongo_bindings).await?;
+            return Ok(());
+        }
+
+        #[cfg(feature = "duckdb")]
+        if let Some(duckdb_bindings) = self.context.duckdb_bindings() {
+            let database_url = duckdb_bindings.database_url.clone();
+            tokio::task::spawn_blocking(move || {
+                use std::path::Path;
+                // DuckDB does not support SELECT FOR UPDATE SKIP LOCKED; assertion-only path (see module docs).
+                let connection = duckdb::Connection::open(Path::new(database_url.as_str()))?;
+                connection.execute_batch(DUCKDB_SETUP_SQL)?;
+                Ok::<(), duckdb::Error>(())
+            })
+            .await
+            .map_err(as_backend_error)?
+            .map_err(as_backend_error)?;
             return Ok(());
         }
 
@@ -787,6 +856,75 @@ impl<'ctx> Outbox<'ctx> {
             ));
         }
 
+        #[cfg(feature = "duckdb")]
+        if let Some(duckdb_bindings) = self.context.duckdb_bindings() {
+            let database_url = duckdb_bindings.database_url.clone();
+            let aggregate_id_value = aggregate_id.to_string();
+            let event_type_value = event_type.to_string();
+            let expected_status_string = expected_status.to_string();
+            let maybe_row: Option<OutboxAssertRow> = tokio::task::spawn_blocking(move || {
+                use std::path::Path;
+                let connection = duckdb::Connection::open(Path::new(database_url.as_str()))?;
+                let mut statement = connection.prepare(DUCKDB_OUTBOX_FETCH_WITH_STATUS)?;
+                let mut rows = statement.query(duckdb::params![
+                    aggregate_id_value.as_str(),
+                    event_type_value.as_str(),
+                    expected_status_string.as_str(),
+                ])?;
+                if let Some(row) = rows.next()? {
+                    Ok::<_, duckdb::Error>(Some(duckdb_read_outbox_assert_row(&row)?))
+                } else {
+                    Ok(None)
+                }
+            })
+            .await
+            .map_err(as_backend_error)?
+            .map_err(as_backend_error)?;
+            if let Some(row) = maybe_row {
+                let payload = parse_payload_json(row.4.as_str())?;
+                let status =
+                    parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?;
+                return Ok(OutboxEntry {
+                    id: row.0,
+                    aggregate_type: row.1,
+                    aggregate_id: row.2,
+                    event_type: row.3,
+                    payload,
+                    status,
+                    attempts: row.6,
+                    created_at: row.7,
+                    sent_at: row.8,
+                });
+            }
+            let database_url_latest = duckdb_bindings.database_url.clone();
+            let aggregate_id_latest = aggregate_id.to_string();
+            let event_type_latest = event_type.to_string();
+            let latest_status: Option<String> = tokio::task::spawn_blocking(move || {
+                use std::path::Path;
+                let connection = duckdb::Connection::open(Path::new(database_url_latest.as_str()))?;
+                let mut statement = connection.prepare(DUCKDB_OUTBOX_SELECT_LATEST_STATUS)?;
+                let mut rows = statement.query(duckdb::params![
+                    aggregate_id_latest.as_str(),
+                    event_type_latest.as_str(),
+                ])?;
+                if let Some(row) = rows.next()? {
+                    let status: String = row.get(0)?;
+                    Ok::<_, duckdb::Error>(Some(status))
+                } else {
+                    Ok(None)
+                }
+            })
+            .await
+            .map_err(as_backend_error)?
+            .map_err(as_backend_error)?;
+            return Err(outbox_expected_status_miss_error(
+                aggregate_id,
+                event_type,
+                expected_status,
+                latest_status,
+            ));
+        }
+
         Err(ShakedownError::NoRelationalBindings)
     }
 
@@ -996,8 +1134,71 @@ impl<'ctx> Outbox<'ctx> {
             });
         }
 
+        #[cfg(feature = "duckdb")]
+        if let Some(duckdb_bindings) = self.context.duckdb_bindings() {
+            let database_url = duckdb_bindings.database_url.clone();
+            let aggregate_id_value = aggregate_id.to_string();
+            let event_type_value = event_type.to_string();
+            let maybe_row: Option<OutboxAssertRow> = tokio::task::spawn_blocking(move || {
+                use std::path::Path;
+                let connection = duckdb::Connection::open(Path::new(database_url.as_str()))?;
+                let mut statement = connection.prepare(DUCKDB_OUTBOX_FETCH_LATEST)?;
+                let mut rows = statement.query(duckdb::params![
+                    aggregate_id_value.as_str(),
+                    event_type_value.as_str(),
+                ])?;
+                if let Some(row) = rows.next()? {
+                    Ok::<_, duckdb::Error>(Some(duckdb_read_outbox_assert_row(&row)?))
+                } else {
+                    Ok(None)
+                }
+            })
+            .await
+            .map_err(as_backend_error)?
+            .map_err(as_backend_error)?;
+            if let Some(row) = maybe_row {
+                let payload = parse_payload_json(row.4.as_str())?;
+                let status =
+                    parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?;
+                return Ok(OutboxEntry {
+                    id: row.0,
+                    aggregate_type: row.1,
+                    aggregate_id: row.2,
+                    event_type: row.3,
+                    payload,
+                    status,
+                    attempts: row.6,
+                    created_at: row.7,
+                    sent_at: row.8,
+                });
+            }
+            return Err(ShakedownError::OutboxRowNotFound {
+                aggregate_id: aggregate_id.to_string(),
+                event_type: event_type.to_string(),
+                expected_status: "any".to_string(),
+            });
+        }
+
         Err(ShakedownError::NoRelationalBindings)
     }
+}
+
+#[cfg(feature = "duckdb")]
+fn duckdb_read_outbox_assert_row(row: &duckdb::Row<'_>) -> Result<OutboxAssertRow, duckdb::Error> {
+    let attempts: i64 = row.get(6)?;
+    let attempts = i32::try_from(attempts)
+        .map_err(|_| duckdb::Error::IntegralValueOutOfRange(6, i128::from(attempts)))?;
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        attempts,
+        row.get(7)?,
+        row.get::<_, Option<String>>(8)?,
+    ))
 }
 
 #[cfg(feature = "mongodb")]
