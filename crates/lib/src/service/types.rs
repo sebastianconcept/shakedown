@@ -83,7 +83,7 @@ pub enum EnvMapping {
     InfluxDb(String),
     /// TimescaleDB libpq URL (`timescaledb` feature) → custom env var name (default `TIMESCALEDB_URL`).
     Timescaledb(String),
-    /// Named HTTP/gRPC bridge base URL → custom env var name.
+    /// Named HTTP/gRPC mock service base URL → custom env var name.
     MockService {
         mock_service_name: String,
         env_var: String,
@@ -176,8 +176,8 @@ impl EnvMapping {
         Self::Timescaledb(environment_variable_name.into())
     }
 
-    /// Map the bridge named `mock_service_name` to `environment_variable_name`.
-    pub fn bridge(
+    /// Map the mock service named `mock_service_name` to `environment_variable_name`.
+    pub fn mock_service(
         mock_service_name: impl Into<String>,
         environment_variable_name: impl Into<String>,
     ) -> Self {
@@ -322,8 +322,8 @@ mod tests {
     }
 
     #[test]
-    fn env_mapping_bridge() {
-        let mapping = EnvMapping::bridge("payments", "PAYMENTS_STUB_URL");
+    fn env_mapping_mock_service() {
+        let mapping = EnvMapping::mock_service("payments", "PAYMENTS_STUB_URL");
         assert_eq!(
             mapping,
             EnvMapping::MockService {

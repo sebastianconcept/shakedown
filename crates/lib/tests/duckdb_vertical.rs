@@ -1,9 +1,16 @@
 //! DuckDB in-process resource: no Docker. Run with `cargo test -p shakedown --features duckdb`.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use duckdb::Connection;
 use shakedown::{run_scenario, BuiltinResource, Context, DuckDbResource, EventLog};
+
+fn unique_scenario_id(prefix: &str) -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_{n}")
+}
 
 #[tokio::test]
 async fn duckdb_writes_and_reads_via_bindings_without_docker() {
@@ -12,7 +19,7 @@ async fn duckdb_writes_and_reads_via_bindings_without_docker() {
     let mut event_log = EventLog::new();
     run_scenario(
         &mut ctx,
-        "duckdb_vertical_proof",
+        unique_scenario_id("duckdb_vertical_proof"),
         |c| {
             Box::pin(async move {
                 let url = c
@@ -24,7 +31,8 @@ async fn duckdb_writes_and_reads_via_bindings_without_docker() {
                     let conn =
                         Connection::open(Path::new(url.as_str())).expect("open second connection");
                     conn.execute_batch(
-                        "CREATE TABLE t (x INTEGER);
+                        "DROP TABLE IF EXISTS t;
+                         CREATE TABLE t (x INTEGER);
                          INSERT INTO t VALUES (42);",
                     )
                     .expect("create and insert");
@@ -50,7 +58,7 @@ async fn duckdb_isolates_each_scenario_without_docker() {
     let mut first_event_log = EventLog::new();
     run_scenario(
         &mut ctx,
-        "duckdb_isolation_first",
+        unique_scenario_id("duckdb_isolation_first"),
         |c| {
             Box::pin(async move {
                 let url = c
@@ -62,7 +70,8 @@ async fn duckdb_isolates_each_scenario_without_docker() {
                     let conn = Connection::open(Path::new(url.as_str()))
                         .expect("open first scenario duckdb connection");
                     conn.execute_batch(
-                        "CREATE TABLE isolated_t (x INTEGER);
+                        "DROP TABLE IF EXISTS isolated_t;
+                         CREATE TABLE isolated_t (x INTEGER);
                          INSERT INTO isolated_t VALUES (7);",
                     )
                     .expect("create isolated table");
@@ -79,7 +88,7 @@ async fn duckdb_isolates_each_scenario_without_docker() {
     let mut second_event_log = EventLog::new();
     run_scenario(
         &mut ctx,
-        "duckdb_isolation_second",
+        unique_scenario_id("duckdb_isolation_second"),
         |c| {
             Box::pin(async move {
                 let url = c

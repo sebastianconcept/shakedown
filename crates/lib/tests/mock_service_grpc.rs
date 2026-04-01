@@ -1,4 +1,5 @@
-//! gRPC bridge + [`run_scenario`] integration (`grpc-bridges` feature).
+#![cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+//! gRPC mock service + [`run_scenario`] integration (`grpc-mock-services` feature).
 //!
 //! Reference scenario: register a [`GrpcMockService`], issue a real unary gRPC call via **tonic** and
 //! **tonic-prost** using hand-written [`prost::Message`] types (no `.proto` / build script), assert
@@ -38,8 +39,8 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
         .expect("respond_proto");
 
     let mut ctx = Context::new();
-    ctx.register_grpc_bridge("echo", stub)
-        .expect("register_grpc_bridge");
+    ctx.register_grpc_mock_service("echo", stub)
+        .expect("register_grpc_mock_service");
 
     let mut event_log = EventLog::new();
     run_scenario(
@@ -47,8 +48,11 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
         "grpc_stub_bridge_unary_register_client_assert_recorded_call",
         |context| {
             Box::pin(async move {
-                let base_url = context.mock_service_url("echo").expect("echo bridge url");
-                let origin_uri: http::Uri = base_url.parse().expect("bridge url parses as URI");
+                let base_url = context
+                    .mock_service_url("echo")
+                    .expect("echo mock service url");
+                let origin_uri: http::Uri =
+                    base_url.parse().expect("mock service url parses as URI");
                 let channel = Endpoint::from_shared(base_url)
                     .expect("valid endpoint")
                     .connect()
@@ -74,8 +78,9 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
 
                 assert_eq!(response.into_inner().message, "hello alice");
 
-                let handle: &MockServiceHandle =
-                    context.mock_service("echo").expect("echo bridge handle");
+                let handle: &MockServiceHandle = context
+                    .mock_service("echo")
+                    .expect("echo mock service handle");
 
                 // **Then** one call is recorded; harness stores the full gRPC path on both
                 // `method` and `path`, and the request body round-trips through prost.
@@ -103,12 +108,12 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("bridge 'echo' started on")),
+            .any(|message| message.contains("mock service 'echo' started on")),
         "start event missing: {messages:?}"
     );
     assert!(
         messages.iter().any(|message| {
-            message.contains("bridge 'echo' stopped") && message.contains("calls recorded")
+            message.contains("mock service 'echo' stopped") && message.contains("calls recorded")
         }),
         "stop event missing: {messages:?}"
     );

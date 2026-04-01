@@ -296,7 +296,7 @@ impl From<ResourceNotFoundError> for ShakedownError {
 pub enum ScenarioError {
     /// Scenario assertion error: {0}
     ///
-    /// Cause: bridge call counts, outbox/payload checks, or other [`AssertionError`] variants failed.
+    /// Cause: mock service call counts, outbox/payload checks, or other [`AssertionError`] variants failed.
     Assertion(AssertionError),
     /// Scenario step failed error: {0}
     ///

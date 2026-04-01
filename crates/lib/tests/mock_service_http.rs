@@ -1,15 +1,17 @@
-//! HTTP bridge server + [`run_scenario`] integration (`bridges` feature).
+#![cfg(feature = "mock-services")]
+//! HTTP mock service server + [`run_scenario`] integration (`mock-services` feature).
 //!
-//! Reference scenarios for registering bridges, issuing real HTTP requests against localhost
+//! Reference scenarios for registering mock services, issuing real HTTP requests against localhost
 //! stubs, and asserting on [`MockServiceHandle`] recordings. No Docker — only `127.0.0.1` listeners.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 
+use shakedown::mock_service::HttpMockServiceTrait;
 use shakedown::{
     run_scenario, Context, EventLog, HttpMockService, HttpMockServiceRequest,
-    HttpMockServiceResponse, HttpMockServiceTrait, MockServiceContext,
+    HttpMockServiceResponse, MockServiceContext,
 };
 
 /// **Given** a stateful counter. **When** each request hits any path, **then** return JSON
@@ -46,8 +48,8 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
         .default_response(404);
 
     let mut ctx = Context::new();
-    ctx.register_http_bridge("auth-api", stub)
-        .expect("register_http_bridge");
+    ctx.register_http_mock_service("auth-api", stub)
+        .expect("register_http_mock_service");
 
     let mut event_log = EventLog::new();
     run_scenario(
@@ -58,7 +60,7 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
                 let client = reqwest::Client::new();
                 let base = context
                     .mock_service_url("auth-api")
-                    .expect("auth-api bridge url");
+                    .expect("auth-api mock service url");
 
                 // **When** the scenario exercises multiple endpoints (and leaves one path unused).
                 let health = client
@@ -85,7 +87,7 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
 
                 let handle = context
                     .mock_service("auth-api")
-                    .expect("auth-api bridge handle");
+                    .expect("auth-api mock service handle");
 
                 // **Then** total traffic, a POST body predicate, and absence of an unused route
                 // are all assertable.
@@ -120,39 +122,40 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("bridge 'auth-api' started on")),
+            .any(|message| message.contains("mock service 'auth-api' started on")),
         "start event missing: {messages:?}"
     );
     assert!(
         messages.iter().any(|message| {
-            message.contains("bridge 'auth-api' stopped") && message.contains("calls recorded")
+            message.contains("mock service 'auth-api' stopped")
+                && message.contains("calls recorded")
         }),
         "stop event missing: {messages:?}"
     );
 }
 
 #[tokio::test]
-async fn coded_http_bridge_stateful_calls_matching_order() {
+async fn coded_http_mock_service_stateful_calls_matching_order() {
     // **Given** a coded [`HttpMockServiceTrait`] that returns a different JSON body on each call.
     let mut ctx = Context::new();
-    ctx.register_http_bridge(
+    ctx.register_http_mock_service(
         "counter",
         CountingJsonMockService {
             hits: AtomicU32::new(0),
         },
     )
-    .expect("register_http_bridge");
+    .expect("register_http_mock_service");
 
     let mut event_log = EventLog::new();
     run_scenario(
         &mut ctx,
-        "coded_http_bridge_stateful_calls_matching_order",
+        "coded_http_mock_service_stateful_calls_matching_order",
         |context| {
             Box::pin(async move {
                 let client = reqwest::Client::new();
                 let base = context
                     .mock_service_url("counter")
-                    .expect("counter bridge url");
+                    .expect("counter mock service url");
 
                 // **When** two GETs hit the same path, the handler advances internal state.
                 let first = client
@@ -170,7 +173,7 @@ async fn coded_http_bridge_stateful_calls_matching_order() {
 
                 let handle = context
                     .mock_service("counter")
-                    .expect("counter bridge handle");
+                    .expect("counter mock service handle");
                 let matched = handle.calls_matching("GET", "/");
                 assert_eq!(matched.len(), 2, "both GETs recorded for path /");
 

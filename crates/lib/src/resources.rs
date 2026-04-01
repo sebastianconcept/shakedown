@@ -181,25 +181,19 @@ pub fn sqlite_named_memory_uri(scenario_id: &str) -> String {
     format!("file:shakedown_{safe}?mode=memory&cache=shared")
 }
 
-/// Build a unique DuckDB **named in-memory** path for a scenario id.
+/// Build a unique DuckDB database path for a scenario id.
 ///
-/// Uses `:memory:<name>` so additional [`duckdb::Connection::open`] calls with the same path attach
-/// to one logical database; distinct scenario ids yield distinct names (isolation). The harness
-/// keeps a primary connection while [`crate::lifecycle::Context`] exposes the same string in
-/// [`DuckDbBindings::database_url`] for helpers and service injection.
+/// DuckDB’s `:memory:` database is process-local and not reliably name-scoped across callers, so
+/// Shakedown uses a **temp file path** to guarantee isolation between scenarios and tests.
+///
+/// The harness keeps a primary connection while [`crate::lifecycle::Context`] exposes the same
+/// string in [`DuckDbBindings::database_url`] for helpers and service injection.
 pub fn duckdb_named_memory_database_path(scenario_id: &str) -> String {
-    let mut safe = String::new();
-    for ch in scenario_id.chars().take(120) {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            safe.push(ch.to_ascii_lowercase());
-        } else {
-            safe.push('_');
-        }
-    }
-    if safe.is_empty() {
-        safe.push_str("scenario");
-    }
-    format!(":memory:shakedown_{safe}")
+    let safe = sanitize_resource_namespace(scenario_id, 63);
+    let pid = std::process::id();
+    let mut path = std::env::temp_dir();
+    path.push(format!("{safe}_{pid}.duckdb"));
+    path.to_string_lossy().to_string()
 }
 
 /// Async resource contract — implement this trait to add a new infrastructure type.
@@ -3734,7 +3728,7 @@ mod duckdb_impl {
 
     /// In-process DuckDB for one scenario (no Docker).
     ///
-    /// Opens a **named in-memory** database (see [`super::duckdb_named_memory_database_path`]) so
+    /// Opens a scenario-scoped database file (see [`super::duckdb_named_memory_database_path`]) so
     /// [`DuckDbBindings::database_url`] can be used to open further connections to the same logical
     /// database (helpers use [`tokio::task::spawn_blocking`]).
     ///
@@ -3827,6 +3821,9 @@ mod duckdb_impl {
 
         async fn teardown(&mut self) -> Result<(), InfrastructureError> {
             self.connection.take();
+            if !self.database_url.is_empty() {
+                let _ = std::fs::remove_file(self.database_url.as_str());
+            }
             self.database_url.clear();
             Ok(())
         }
@@ -7079,7 +7076,7 @@ mod tests {
         let a = super::duckdb_named_memory_database_path("test_a");
         let b = super::duckdb_named_memory_database_path("test_b");
         assert_ne!(a, b);
-        assert!(a.starts_with(":memory:shakedown_"));
+        assert!(a.ends_with(".duckdb"));
     }
 
     #[test]

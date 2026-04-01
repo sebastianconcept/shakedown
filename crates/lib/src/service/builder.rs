@@ -1,6 +1,46 @@
 //! [`ServiceUnderTest`] builder → [`ServiceSpec`] (`services` feature).
 //!
-//! Pure configuration validation — no Docker I/O (container start is part of service lifecycle).
+//! This is **pure configuration validation** — no Docker I/O (container start happens in the
+//! service lifecycle).
+//!
+//! Use this to **declare** a service container your scenario depends on, then **register** the
+//! resulting [`ServiceSpec`] on [`crate::lifecycle::Context`] so the lifecycle can start it, wait for
+//! readiness, and expose a [`crate::service::ServiceHandle`] (for example via
+//! [`crate::lifecycle::Context::service_url`]).
+//!
+//! Minimal example (build a spec):
+//!
+//! ```rust
+//! use shakedown::ServiceUnderTest;
+//!
+//! let spec = ServiceUnderTest::docker("traefik/whoami:v1.10")
+//!     .name("orders")
+//!     .port(80)
+//!     .build()
+//!     .unwrap();
+//!
+//! assert_eq!(spec.name(), "orders");
+//! ```
+//!
+//! Registering on a context (containers start later, during lifecycle):
+//!
+//! ```rust,no_run
+//! # #[cfg(feature = "services")]
+//! # {
+//! use shakedown::{Context, ServiceUnderTest};
+//!
+//! let mut ctx = Context::new();
+//!
+//! let spec = ServiceUnderTest::docker("traefik/whoami:v1.10")
+//!     .name("orders")
+//!     .port(80)
+//!     .build()
+//!     .unwrap();
+//!
+//! ctx.register_service(spec).unwrap();
+//! // Later (after lifecycle readiness), `ctx.service_url("orders")` becomes available.
+//! # }
+//! ```
 
 use std::collections::{HashMap, HashSet};
 
@@ -86,7 +126,7 @@ impl ServiceUnderTest {
         self
     }
 
-    /// When `true`, inject Kafka/DB/bridge URLs by convention; when `false`, only explicit `.env` / `.env_mapping` apply.
+    /// When `true`, inject Kafka/DB/mock service URLs by convention; when `false`, only explicit `.env` / `.env_mapping` apply.
     pub fn auto_inject(mut self, enabled: bool) -> Self {
         self.auto_inject = enabled;
         self

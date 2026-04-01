@@ -1,10 +1,11 @@
-//! Single-service end-to-end scenario — Kafka + HTTP bridge env injection + whoami + diagnostics.
+#![cfg(all(feature = "kafka", feature = "services"))]
+//! Single-service end-to-end scenario — Kafka + HTTP mock service env injection + whoami + diagnostics.
 //!
-//! Proves convention injection (`KAFKA_BOOTSTRAP_SERVERS`, `{BRIDGE}_URL`), `host.docker.internal` rewrite
+//! Proves convention injection (`KAFKA_BOOTSTRAP_SERVERS`, `{MOCK_SERVICE}_URL`), `host.docker.internal` rewrite
 //! inside the service container, HTTP health, and bollard-merged diagnostics for the service label.
 //!
 //! ```text
-//! cargo test -p shakedown --features kafka,services --test services_kafka_bridge_whoami -- --ignored
+//! cargo test -p shakedown --features kafka,services --test services_kafka_mock_service_whoami -- --ignored
 //! ```
 
 use std::time::Duration;
@@ -22,8 +23,8 @@ use shakedown::{
 };
 
 #[tokio::test]
-#[ignore = "requires Docker; run: cargo test -p shakedown --features kafka,services --test services_kafka_bridge_whoami -- --ignored"]
-async fn kafka_http_bridge_whoami_env_injection_and_diagnostics() {
+#[ignore = "requires Docker; run: cargo test -p shakedown --features kafka,services --test services_kafka_mock_service_whoami -- --ignored"]
+async fn kafka_http_mock_service_whoami_env_injection_and_diagnostics() {
     std::env::set_var("SHAKEDOWN_STATS_INTERVAL_MS", "150");
 
     let mut context = Context::new();
@@ -36,8 +37,8 @@ async fn kafka_http_bridge_whoami_env_injection_and_diagnostics() {
         .respond(200)
         .default_response(404);
     context
-        .register_http_bridge("order-gateway", order_gateway_stub)
-        .expect("register_http_bridge");
+        .register_http_mock_service("order-gateway", order_gateway_stub)
+        .expect("register_http_mock_service");
 
     let specification = ServiceUnderTest::docker("traefik/whoami:v1.10")
         .name("order")
@@ -54,7 +55,7 @@ async fn kafka_http_bridge_whoami_env_injection_and_diagnostics() {
 
     run_scenario(
         &mut context,
-        "us012_kafka_bridge_whoami",
+        "kafka_http_mock_service_env_injection_whoami",
         |scenario_context| {
             Box::pin(async move {
                 let base_url = scenario_context
@@ -164,7 +165,7 @@ async fn kafka_http_bridge_whoami_env_injection_and_diagnostics() {
 
     let timeline = render_failure_timeline(
         &event_log,
-        &FailureTimelineOptions::new("us012_kafka_bridge_whoami"),
+        &FailureTimelineOptions::new("kafka_http_mock_service_env_injection_whoami"),
     );
     assert!(
         timeline.contains("order"),
