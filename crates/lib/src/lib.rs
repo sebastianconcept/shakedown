@@ -35,8 +35,7 @@
 //! shakedown/
 //! ├── crates/
 //! │   ├── lib/          # this crate: orchestration engine
-//! │   ├── macros/       # procedural macros (shakedown-macros)
-//! │   └── cli/          # CLI binary (shakedown-cli)
+//! │   └── macros/       # procedural macros (shakedown-macros)
 //! ```
 //!
 //! ## Extension points

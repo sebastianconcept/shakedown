@@ -42,7 +42,7 @@ qa-full: fmt-check check clippy
   cargo test --workspace
 
 # ----------------------------
-# Workspace test runs (all crates: lib, macros, CLI)
+# Workspace test runs (all crates: lib, macros)
 # ----------------------------
 
 # Same as `cargo test --workspace` (always plain Cargo). Use `just test` if you want nextest when installed.
@@ -62,10 +62,6 @@ test-lib:
 
 test-macros:
   cargo test -p shakedown-macros
-
-# Thin CLI crate; add `[[test]]` targets here as the binary grows.
-test-cli:
-  cargo test -p shakedown-cli
 
 test-outbox-sqlite:
   cargo test -p shakedown --features outbox,sqlite --test outbox_sqlite
