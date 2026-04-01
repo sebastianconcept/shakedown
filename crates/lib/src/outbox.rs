@@ -410,6 +410,41 @@ impl<'ctx> Outbox<'ctx> {
         PublicationVerifier::assert_observed(&verifier, self.context, &spec, &options).await
     }
 
+    /// Assert a NATS message for `aggregate_id` was observed on the scenario-namespaced subject.
+    ///
+    /// Pass the **logical** subject name (without the per-scenario prefix); it is passed through
+    /// [`crate::resources::NatsBindings::subject_namespace`].
+    ///
+    /// **Subscribe-first:** NATS core pub/sub does not retain messages. The verifier subscribes
+    /// before it waits; your code must publish **after** subscription is active — for example run
+    /// this assertion concurrently with (or await it after spawning) a task that publishes, or call
+    /// publish after a short yield so this future can subscribe first.
+    #[cfg(feature = "nats")]
+    pub async fn assert_nats_published(
+        &self,
+        base_subject: &str,
+        aggregate_id: &str,
+    ) -> Result<(), ShakedownError> {
+        use crate::publication::{
+            NatsPublicationVerifier, NatsPublicationVerifierOptions, PublicationObserveSpec,
+            PublicationVerifier,
+        };
+
+        let verifier = NatsPublicationVerifier;
+        let spec = PublicationObserveSpec {
+            aggregate_id: aggregate_id.to_string(),
+            logical_channel: base_subject.to_string(),
+            timeout: None,
+        };
+        PublicationVerifier::assert_observed(
+            &verifier,
+            self.context,
+            &spec,
+            &NatsPublicationVerifierOptions,
+        )
+        .await
+    }
+
     async fn assert_state(
         &self,
         aggregate_id: &str,

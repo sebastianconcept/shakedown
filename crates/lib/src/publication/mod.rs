@@ -14,6 +14,9 @@ mod kafka_verifier;
 #[cfg(feature = "rabbitmq")]
 mod rabbit_verifier;
 
+#[cfg(feature = "nats")]
+mod nats_verifier;
+
 pub use matching::message_matches_aggregate_id;
 pub use spec::{PublicationObserveSpec, DEFAULT_PUBLICATION_OBSERVE_TIMEOUT};
 pub use verifier::PublicationVerifier;
@@ -23,6 +26,9 @@ pub use kafka_verifier::KafkaPublicationVerifier;
 
 #[cfg(feature = "rabbitmq")]
 pub use rabbit_verifier::{RabbitMqPublicationVerifier, RabbitMqPublicationVerifierOptions};
+
+#[cfg(feature = "nats")]
+pub use nats_verifier::{NatsPublicationVerifier, NatsPublicationVerifierOptions};
 
 #[cfg(test)]
 mod tests {
