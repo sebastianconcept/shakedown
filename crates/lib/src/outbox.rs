@@ -719,8 +719,8 @@ impl<'ctx> Outbox<'ctx> {
         #[cfg(feature = "sqlite")]
         if let Some(sqlite_bindings) = self.context.sqlite_bindings() {
             let sqlite_url = sqlite_bindings.database_url.clone();
-            let aggregate_id_value = aggregate_id.to_string();
-            let event_type_value = event_type.to_string();
+            let aggregate_id_owned = aggregate_id.to_string();
+            let event_type_owned = event_type.to_string();
             let maybe_row: Option<OutboxAssertRow> = tokio::task::spawn_blocking(move || {
                 use rusqlite::OpenFlags;
                 let connection = rusqlite::Connection::open_with_flags(
@@ -731,8 +731,8 @@ impl<'ctx> Outbox<'ctx> {
                 )?;
                 let mut statement = connection.prepare(SQLITE_OUTBOX_FETCH_WITH_STATUS)?;
                 let mut rows = statement.query([
-                    aggregate_id_value,
-                    event_type_value,
+                    aggregate_id_owned,
+                    event_type_owned,
                     expected_status.to_string(),
                 ])?;
                 if let Some(row) = rows.next()? {
@@ -771,8 +771,8 @@ impl<'ctx> Outbox<'ctx> {
                 });
             }
             let sqlite_url2 = sqlite_bindings.database_url.clone();
-            let aggregate_id_latest = aggregate_id.to_string();
-            let event_type_latest = event_type.to_string();
+            let aggregate_id_owned = aggregate_id.to_string();
+            let event_type_owned = event_type.to_string();
             let latest_status: Option<String> = tokio::task::spawn_blocking(move || {
                 use rusqlite::OpenFlags;
                 let connection = rusqlite::Connection::open_with_flags(
@@ -782,7 +782,7 @@ impl<'ctx> Outbox<'ctx> {
                         | OpenFlags::SQLITE_OPEN_CREATE,
                 )?;
                 let mut statement = connection.prepare(SQLITE_OUTBOX_SELECT_LATEST_STATUS)?;
-                let mut rows = statement.query([aggregate_id_latest, event_type_latest])?;
+                let mut rows = statement.query([aggregate_id_owned, event_type_owned])?;
                 if let Some(row) = rows.next()? {
                     Ok::<_, rusqlite::Error>(Some(row.get(0)?))
                 } else {
@@ -817,12 +817,12 @@ impl<'ctx> Outbox<'ctx> {
                 "type": event_type,
                 "status": expected_status,
             };
-            let options = FindOneOptions::builder()
+            let find_options = FindOneOptions::builder()
                 .sort(doc! { "created_at": -1, "_id": -1 })
                 .build();
             let maybe_document = collection
                 .find_one(filter)
-                .with_options(options)
+                .with_options(find_options)
                 .await
                 .map_err(as_backend_error)?;
             if let Some(document) = maybe_document {
@@ -859,70 +859,72 @@ impl<'ctx> Outbox<'ctx> {
         #[cfg(feature = "duckdb")]
         if let Some(duckdb_bindings) = self.context.duckdb_bindings() {
             let database_url = duckdb_bindings.database_url.clone();
-            let aggregate_id_value = aggregate_id.to_string();
-            let event_type_value = event_type.to_string();
+            let aggregate_id_string = aggregate_id.to_string();
+            let event_type_string = event_type.to_string();
             let expected_status_string = expected_status.to_string();
-            let maybe_row: Option<OutboxAssertRow> = tokio::task::spawn_blocking(move || {
-                use std::path::Path;
-                let connection = duckdb::Connection::open(Path::new(database_url.as_str()))?;
-                let mut statement = connection.prepare(DUCKDB_OUTBOX_FETCH_WITH_STATUS)?;
-                let mut rows = statement.query(duckdb::params![
-                    aggregate_id_value.as_str(),
-                    event_type_value.as_str(),
-                    expected_status_string.as_str(),
-                ])?;
-                if let Some(row) = rows.next()? {
-                    Ok::<_, duckdb::Error>(Some(duckdb_read_outbox_assert_row(&row)?))
-                } else {
-                    Ok(None)
-                }
-            })
-            .await
-            .map_err(as_backend_error)?
-            .map_err(as_backend_error)?;
-            if let Some(row) = maybe_row {
-                let payload = parse_payload_json(row.4.as_str())?;
-                let status =
-                    parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?;
-                return Ok(OutboxEntry {
-                    id: row.0,
-                    aggregate_type: row.1,
-                    aggregate_id: row.2,
-                    event_type: row.3,
-                    payload,
-                    status,
-                    attempts: row.6,
-                    created_at: row.7,
-                    sent_at: row.8,
-                });
-            }
-            let database_url_latest = duckdb_bindings.database_url.clone();
-            let aggregate_id_latest = aggregate_id.to_string();
-            let event_type_latest = event_type.to_string();
-            let latest_status: Option<String> = tokio::task::spawn_blocking(move || {
-                use std::path::Path;
-                let connection = duckdb::Connection::open(Path::new(database_url_latest.as_str()))?;
-                let mut statement = connection.prepare(DUCKDB_OUTBOX_SELECT_LATEST_STATUS)?;
-                let mut rows = statement.query(duckdb::params![
-                    aggregate_id_latest.as_str(),
-                    event_type_latest.as_str(),
-                ])?;
-                if let Some(row) = rows.next()? {
-                    let status: String = row.get(0)?;
-                    Ok::<_, duckdb::Error>(Some(status))
-                } else {
-                    Ok(None)
-                }
-            })
-            .await
-            .map_err(as_backend_error)?
-            .map_err(as_backend_error)?;
-            return Err(outbox_expected_status_miss_error(
-                aggregate_id,
-                event_type,
-                expected_status,
-                latest_status,
-            ));
+            let result: Result<Result<OutboxEntry, ShakedownError>, ShakedownError> =
+                tokio::task::spawn_blocking(move || {
+                    use std::path::Path;
+                    // DuckDB does not support SELECT FOR UPDATE SKIP LOCKED; assertion-only path (see module docs).
+                    let connection = duckdb::Connection::open(Path::new(database_url.as_str()))
+                        .map_err(as_backend_error)?;
+                    let mut statement = connection
+                        .prepare(DUCKDB_OUTBOX_FETCH_WITH_STATUS)
+                        .map_err(as_backend_error)?;
+                    let mut rows = statement
+                        .query(duckdb::params![
+                            aggregate_id_string.as_str(),
+                            event_type_string.as_str(),
+                            expected_status_string.as_str(),
+                        ])
+                        .map_err(as_backend_error)?;
+                    if let Some(row) = rows.next().map_err(as_backend_error)? {
+                        let outbox_assert_row =
+                            duckdb_read_outbox_assert_row(&row).map_err(as_backend_error)?;
+                        let payload = parse_payload_json(outbox_assert_row.4.as_str())?;
+                        let status = parse_outbox_row_state(
+                            outbox_assert_row.5.as_str(),
+                            outbox_assert_row.2.as_str(),
+                            outbox_assert_row.3.as_str(),
+                        )?;
+                        return Ok(Ok(OutboxEntry {
+                            id: outbox_assert_row.0,
+                            aggregate_type: outbox_assert_row.1,
+                            aggregate_id: outbox_assert_row.2,
+                            event_type: outbox_assert_row.3,
+                            payload,
+                            status,
+                            attempts: outbox_assert_row.6,
+                            created_at: outbox_assert_row.7,
+                            sent_at: outbox_assert_row.8,
+                        }));
+                    }
+                    let mut latest_statement = connection
+                        .prepare(DUCKDB_OUTBOX_SELECT_LATEST_STATUS)
+                        .map_err(as_backend_error)?;
+                    let mut latest_rows = latest_statement
+                        .query(duckdb::params![
+                            aggregate_id_string.as_str(),
+                            event_type_string.as_str(),
+                        ])
+                        .map_err(as_backend_error)?;
+                    let latest_status =
+                        if let Some(row) = latest_rows.next().map_err(as_backend_error)? {
+                            let status: String = row.get(0).map_err(as_backend_error)?;
+                            Some(status)
+                        } else {
+                            None
+                        };
+                    Ok(Err(outbox_expected_status_miss_error(
+                        &aggregate_id_string,
+                        &event_type_string,
+                        &expected_status_string,
+                        latest_status,
+                    )))
+                })
+                .await
+                .map_err(as_backend_error)?;
+            return result?;
         }
 
         Err(ShakedownError::NoRelationalBindings)
@@ -1046,8 +1048,8 @@ impl<'ctx> Outbox<'ctx> {
         #[cfg(feature = "sqlite")]
         if let Some(sqlite_bindings) = self.context.sqlite_bindings() {
             let sqlite_url = sqlite_bindings.database_url.clone();
-            let aggregate_id_value = aggregate_id.to_string();
-            let event_type_value = event_type.to_string();
+            let aggregate_id_owned = aggregate_id.to_string();
+            let event_type_owned = event_type.to_string();
             let maybe_row: Option<OutboxAssertRow> = tokio::task::spawn_blocking(move || {
                 use rusqlite::OpenFlags;
                 let connection = rusqlite::Connection::open_with_flags(
@@ -1057,7 +1059,7 @@ impl<'ctx> Outbox<'ctx> {
                         | OpenFlags::SQLITE_OPEN_CREATE,
                 )?;
                 let mut statement = connection.prepare(SQLITE_OUTBOX_FETCH_LATEST)?;
-                let mut rows = statement.query([aggregate_id_value, event_type_value])?;
+                let mut rows = statement.query([aggregate_id_owned, event_type_owned])?;
                 if let Some(row) = rows.next()? {
                     Ok::<_, rusqlite::Error>(Some((
                         row.get(0)?,
@@ -1116,12 +1118,12 @@ impl<'ctx> Outbox<'ctx> {
                 "aggregate_id": aggregate_id,
                 "type": event_type,
             };
-            let options = FindOneOptions::builder()
+            let find_options = FindOneOptions::builder()
                 .sort(doc! { "created_at": -1, "_id": -1 })
                 .build();
             let maybe_document = collection
                 .find_one(filter)
-                .with_options(options)
+                .with_options(find_options)
                 .await
                 .map_err(as_backend_error)?;
             if let Some(document) = maybe_document {
@@ -1137,48 +1139,54 @@ impl<'ctx> Outbox<'ctx> {
         #[cfg(feature = "duckdb")]
         if let Some(duckdb_bindings) = self.context.duckdb_bindings() {
             let database_url = duckdb_bindings.database_url.clone();
-            let aggregate_id_value = aggregate_id.to_string();
-            let event_type_value = event_type.to_string();
-            let maybe_row: Option<OutboxAssertRow> = tokio::task::spawn_blocking(move || {
-                use std::path::Path;
-                let connection = duckdb::Connection::open(Path::new(database_url.as_str()))?;
-                let mut statement = connection.prepare(DUCKDB_OUTBOX_FETCH_LATEST)?;
-                let mut rows = statement.query(duckdb::params![
-                    aggregate_id_value.as_str(),
-                    event_type_value.as_str(),
-                ])?;
-                if let Some(row) = rows.next()? {
-                    Ok::<_, duckdb::Error>(Some(duckdb_read_outbox_assert_row(&row)?))
-                } else {
-                    Ok(None)
-                }
-            })
-            .await
-            .map_err(as_backend_error)?
-            .map_err(as_backend_error)?;
-            if let Some(row) = maybe_row {
-                let payload = parse_payload_json(row.4.as_str())?;
-                let status =
-                    parse_outbox_row_state(row.5.as_str(), row.2.as_str(), row.3.as_str())?;
-                return Ok(OutboxEntry {
-                    id: row.0,
-                    aggregate_type: row.1,
-                    aggregate_id: row.2,
-                    event_type: row.3,
-                    payload,
-                    status,
-                    attempts: row.6,
-                    created_at: row.7,
-                    sent_at: row.8,
-                });
-            }
-            return Err(ShakedownError::OutboxRowNotFound {
-                aggregate_id: aggregate_id.to_string(),
-                event_type: event_type.to_string(),
-                expected_status: "any".to_string(),
-            });
+            let aggregate_id_string = aggregate_id.to_string();
+            let event_type_string = event_type.to_string();
+            let result: Result<Result<OutboxEntry, ShakedownError>, ShakedownError> =
+                tokio::task::spawn_blocking(move || {
+                    use std::path::Path;
+                    // DuckDB does not support SELECT FOR UPDATE SKIP LOCKED; assertion-only path (see module docs).
+                    let connection = duckdb::Connection::open(Path::new(database_url.as_str()))
+                        .map_err(as_backend_error)?;
+                    let mut statement = connection
+                        .prepare(DUCKDB_OUTBOX_FETCH_LATEST)
+                        .map_err(as_backend_error)?;
+                    let mut rows = statement
+                        .query(duckdb::params![
+                            aggregate_id_string.as_str(),
+                            event_type_string.as_str(),
+                        ])
+                        .map_err(as_backend_error)?;
+                    if let Some(row) = rows.next().map_err(as_backend_error)? {
+                        let outbox_assert_row =
+                            duckdb_read_outbox_assert_row(&row).map_err(as_backend_error)?;
+                        let payload = parse_payload_json(outbox_assert_row.4.as_str())?;
+                        let status = parse_outbox_row_state(
+                            outbox_assert_row.5.as_str(),
+                            outbox_assert_row.2.as_str(),
+                            outbox_assert_row.3.as_str(),
+                        )?;
+                        return Ok(Ok(OutboxEntry {
+                            id: outbox_assert_row.0,
+                            aggregate_type: outbox_assert_row.1,
+                            aggregate_id: outbox_assert_row.2,
+                            event_type: outbox_assert_row.3,
+                            payload,
+                            status,
+                            attempts: outbox_assert_row.6,
+                            created_at: outbox_assert_row.7,
+                            sent_at: outbox_assert_row.8,
+                        }));
+                    }
+                    Ok(Err(ShakedownError::OutboxRowNotFound {
+                        aggregate_id: aggregate_id_string.clone(),
+                        event_type: event_type_string.clone(),
+                        expected_status: "any".to_string(),
+                    }))
+                })
+                .await
+                .map_err(as_backend_error)?;
+            return result?;
         }
-
         Err(ShakedownError::NoRelationalBindings)
     }
 }
