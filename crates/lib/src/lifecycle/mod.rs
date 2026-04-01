@@ -101,7 +101,8 @@ use crate::mock_service::types::MockServiceResources;
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
-        feature = "sqlite"
+        feature = "sqlite",
+        feature = "mongodb"
     )
 ))]
 use crate::outbox::Outbox;
@@ -977,14 +978,15 @@ impl Context {
         self.mock_service_handles.get(name).map(|arc| arc.as_ref())
     }
 
-    /// Build an outbox helper bound to this context (`outbox` + relational features).
+    /// Build an outbox helper bound to this context (`outbox` + at least one storage engine feature).
     #[cfg(all(
         feature = "outbox",
         any(
             feature = "postgres",
             feature = "mariadb",
             feature = "mysql",
-            feature = "sqlite"
+            feature = "sqlite",
+            feature = "mongodb"
         )
     ))]
     pub fn outbox(&self) -> Outbox<'_> {

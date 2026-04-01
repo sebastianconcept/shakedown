@@ -1,12 +1,12 @@
 //! Outbox setup helpers for scenario databases.
 //!
-//! This module creates the canonical `outbox_event` table in the active relational
-//! binding attached to [`crate::lifecycle::Context`].
+//! This module creates the canonical `outbox_event` table (relational/SQLite/DuckDB) or collection
+//! (MongoDB) in the active storage binding attached to [`crate::lifecycle::Context`].
 
 use crate::error::{InfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
 
-/// Row state for records in the canonical `outbox_event` table.
+/// Row state for records in the canonical `outbox_event` table or collection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutboxRowState {
     /// Event is waiting for publisher processing.
@@ -296,6 +296,12 @@ impl<'ctx> Outbox<'ctx> {
             .await
             .map_err(as_backend_error)?
             .map_err(as_backend_error)?;
+            return Ok(());
+        }
+
+        #[cfg(feature = "mongodb")]
+        if let Some(mongo_bindings) = self.context.mongo_bindings() {
+            mongo_ensure_outbox_collection(mongo_bindings).await?;
             return Ok(());
         }
 
@@ -725,6 +731,62 @@ impl<'ctx> Outbox<'ctx> {
             ));
         }
 
+        #[cfg(feature = "mongodb")]
+        if let Some(mongo_bindings) = self.context.mongo_bindings() {
+            use mongodb::bson::doc;
+            use mongodb::options::FindOneOptions;
+
+            let client = mongodb::Client::with_uri_str(mongo_bindings.connection_url.as_str())
+                .await
+                .map_err(as_backend_error)?;
+            let collection = client
+                .database(mongo_bindings.database.as_str())
+                .collection::<mongodb::bson::Document>("outbox_event");
+
+            let filter = doc! {
+                "aggregate_id": aggregate_id,
+                "type": event_type,
+                "status": expected_status,
+            };
+            let options = FindOneOptions::builder()
+                .sort(doc! { "created_at": -1, "_id": -1 })
+                .build();
+            let maybe_document = collection
+                .find_one(filter)
+                .with_options(options)
+                .await
+                .map_err(as_backend_error)?;
+            if let Some(document) = maybe_document {
+                return outbox_entry_from_mongo_document(&document);
+            }
+
+            let filter_latest = doc! {
+                "aggregate_id": aggregate_id,
+                "type": event_type,
+            };
+            let latest_options = FindOneOptions::builder()
+                .sort(doc! { "created_at": -1, "_id": -1 })
+                .projection(doc! { "status": 1 })
+                .build();
+            let latest_document = collection
+                .find_one(filter_latest)
+                .with_options(latest_options)
+                .await
+                .map_err(as_backend_error)?;
+            let latest_status = latest_document.and_then(|document| {
+                document
+                    .get_str("status")
+                    .ok()
+                    .map(std::string::ToString::to_string)
+            });
+            return Err(outbox_expected_status_miss_error(
+                aggregate_id,
+                event_type,
+                expected_status,
+                latest_status,
+            ));
+        }
+
         Err(ShakedownError::NoRelationalBindings)
     }
 
@@ -900,7 +962,175 @@ impl<'ctx> Outbox<'ctx> {
             });
         }
 
+        #[cfg(feature = "mongodb")]
+        if let Some(mongo_bindings) = self.context.mongo_bindings() {
+            use mongodb::bson::doc;
+            use mongodb::options::FindOneOptions;
+
+            let client = mongodb::Client::with_uri_str(mongo_bindings.connection_url.as_str())
+                .await
+                .map_err(as_backend_error)?;
+            let collection = client
+                .database(mongo_bindings.database.as_str())
+                .collection::<mongodb::bson::Document>("outbox_event");
+
+            let filter = doc! {
+                "aggregate_id": aggregate_id,
+                "type": event_type,
+            };
+            let options = FindOneOptions::builder()
+                .sort(doc! { "created_at": -1, "_id": -1 })
+                .build();
+            let maybe_document = collection
+                .find_one(filter)
+                .with_options(options)
+                .await
+                .map_err(as_backend_error)?;
+            if let Some(document) = maybe_document {
+                return outbox_entry_from_mongo_document(&document);
+            }
+            return Err(ShakedownError::OutboxRowNotFound {
+                aggregate_id: aggregate_id.to_string(),
+                event_type: event_type.to_string(),
+                expected_status: "any".to_string(),
+            });
+        }
+
         Err(ShakedownError::NoRelationalBindings)
+    }
+}
+
+#[cfg(feature = "mongodb")]
+async fn mongo_ensure_outbox_collection(
+    mongo_bindings: &crate::resources::MongoBindings,
+) -> Result<(), ShakedownError> {
+    let client = mongodb::Client::with_uri_str(mongo_bindings.connection_url.as_str())
+        .await
+        .map_err(as_backend_error)?;
+    let database = client.database(mongo_bindings.database.as_str());
+    let names = database
+        .list_collection_names()
+        .await
+        .map_err(as_backend_error)?;
+    if !names.iter().any(|name| name == "outbox_event") {
+        database
+            .create_collection("outbox_event")
+            .await
+            .map_err(as_backend_error)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "mongodb")]
+fn outbox_entry_from_mongo_document(
+    document: &mongodb::bson::Document,
+) -> Result<OutboxEntry, ShakedownError> {
+    use mongodb::bson::Bson;
+
+    let id = mongo_bson_id_to_string(document.get("_id").ok_or_else(|| {
+        ShakedownError::PayloadDeserialisation("outbox_event document missing _id".to_string())
+    })?)?;
+    let aggregate_type = document
+        .get_str("aggregate_type")
+        .map_err(|error| ShakedownError::PayloadDeserialisation(error.to_string()))?
+        .to_string();
+    let aggregate_id = document
+        .get_str("aggregate_id")
+        .map_err(|error| ShakedownError::PayloadDeserialisation(error.to_string()))?
+        .to_string();
+    let event_type = match document.get("type") {
+        Some(Bson::String(value)) => value.clone(),
+        Some(other) => {
+            return Err(ShakedownError::PayloadDeserialisation(format!(
+                "expected string event type, got {other:?}"
+            )));
+        }
+        None => {
+            return Err(ShakedownError::PayloadDeserialisation(
+                "outbox_event document missing type".to_string(),
+            ));
+        }
+    };
+    let status_str = document
+        .get_str("status")
+        .map_err(|error| ShakedownError::PayloadDeserialisation(error.to_string()))?;
+    let payload = match document.get("payload") {
+        Some(value) => mongo_payload_bson_to_json(value)?,
+        None => {
+            return Err(ShakedownError::PayloadDeserialisation(
+                "outbox_event document missing payload".to_string(),
+            ));
+        }
+    };
+    let attempts = mongo_read_i32(document, "attempts")?;
+    let created_at = document
+        .get_str("created_at")
+        .map_err(|error| ShakedownError::PayloadDeserialisation(error.to_string()))?
+        .to_string();
+    let sent_at = match document.get("sent_at") {
+        None | Some(Bson::Null) => None,
+        Some(Bson::String(value)) => Some(value.clone()),
+        Some(other) => {
+            return Err(ShakedownError::PayloadDeserialisation(format!(
+                "sent_at: expected string or null, got {other:?}"
+            )));
+        }
+    };
+    let status = parse_outbox_row_state(status_str, aggregate_id.as_str(), event_type.as_str())?;
+    Ok(OutboxEntry {
+        id,
+        aggregate_type,
+        aggregate_id,
+        event_type,
+        payload,
+        status,
+        attempts,
+        created_at,
+        sent_at,
+    })
+}
+
+#[cfg(feature = "mongodb")]
+fn mongo_bson_id_to_string(value: &mongodb::bson::Bson) -> Result<String, ShakedownError> {
+    use mongodb::bson::Bson;
+    match value {
+        Bson::String(value) => Ok(value.clone()),
+        Bson::ObjectId(identifier) => Ok(identifier.to_hex()),
+        other => Err(ShakedownError::PayloadDeserialisation(format!(
+            "unsupported _id BSON type: {other:?}"
+        ))),
+    }
+}
+
+#[cfg(feature = "mongodb")]
+fn mongo_read_i32(document: &mongodb::bson::Document, key: &str) -> Result<i32, ShakedownError> {
+    use mongodb::bson::Bson;
+    match document.get(key) {
+        Some(Bson::Int32(value)) => Ok(*value),
+        Some(Bson::Int64(value)) => i32::try_from(*value)
+            .map_err(|_| ShakedownError::PayloadDeserialisation(format!("{key} out of i32 range"))),
+        Some(other) => Err(ShakedownError::PayloadDeserialisation(format!(
+            "{key}: expected int, got {other:?}"
+        ))),
+        None => Err(ShakedownError::PayloadDeserialisation(format!(
+            "missing {key}"
+        ))),
+    }
+}
+
+#[cfg(feature = "mongodb")]
+fn mongo_payload_bson_to_json(
+    value: &mongodb::bson::Bson,
+) -> Result<serde_json::Value, ShakedownError> {
+    use mongodb::bson::Bson;
+    match value {
+        Bson::String(text) => parse_payload_json(text),
+        Bson::Document(document) => {
+            mongodb::bson::from_document::<serde_json::Value>(document.clone())
+                .map_err(|error| ShakedownError::PayloadDeserialisation(error.to_string()))
+        }
+        other => mongodb::bson::from_bson::<serde_json::Value>(other.clone())
+            .map_err(|error| ShakedownError::PayloadDeserialisation(error.to_string())),
     }
 }
 

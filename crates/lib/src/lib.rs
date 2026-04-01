@@ -135,14 +135,15 @@ pub mod lifecycle;
 /// Service mock service types and traits (`mock-services` feature, default).
 #[cfg(feature = "mock-services")]
 pub mod mock_service;
-/// Outbox table setup and assertions (`outbox` + at least one relational feature).
+/// Outbox table setup and assertions (`outbox` + at least one storage engine feature).
 #[cfg(all(
     feature = "outbox",
     any(
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
-        feature = "sqlite"
+        feature = "sqlite",
+        feature = "mongodb"
     )
 ))]
 pub mod outbox;
@@ -395,7 +396,8 @@ pub use crate::resources::{NatsBindings, NatsResource};
         feature = "postgres",
         feature = "mariadb",
         feature = "mysql",
-        feature = "sqlite"
+        feature = "sqlite",
+        feature = "mongodb"
     )
 ))]
 pub use crate::outbox::{Outbox, OutboxEntry, OutboxRowState};

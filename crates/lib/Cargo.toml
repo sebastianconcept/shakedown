@@ -458,6 +458,12 @@ name = "helpers_mongo"
 path = "tests/helpers_mongo.rs"
 required-features = ["mongodb"]
 
+# MongoDB outbox collection + assertions (Docker); ignored unless --ignored
+[[test]]
+name = "outbox_mongo"
+path = "tests/outbox_mongo.rs"
+required-features = ["outbox", "mongodb"]
+
 # NATS suite + bindings (Docker); ignored unless --ignored
 [[test]]
 name = "nats_vertical"
