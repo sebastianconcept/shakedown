@@ -43,18 +43,6 @@
 //! }
 //! ```
 
-#[cfg(feature = "mock-services")]
-use crate::mock_service::http::server::{spawn_http_mock_service_server, HttpMockServiceRuntime};
-#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-use crate::mock_service::grpc::server::{spawn_grpc_mock_service_server, GrpcMockServiceRuntime};
-#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-use crate::mock_service::grpc::GrpcMockServiceTrait;
-#[cfg(feature = "mock-services")]
-use crate::mock_service::http::HttpMockServiceTrait;
-#[cfg(feature = "mock-services")]
-use crate::mock_service::handle::MockServiceHandle;
-#[cfg(feature = "mock-services")]
-use crate::mock_service::types::MockServiceResources;
 #[cfg(any(feature = "mock-services", feature = "services"))]
 use crate::error::InternalError;
 use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownError};
@@ -95,6 +83,18 @@ use crate::helpers::SqliteHelpers;
 use crate::helpers::TimescaledbHelpers;
 #[cfg(feature = "weaviate")]
 use crate::helpers::WeaviateHelpers;
+#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+use crate::mock_service::grpc::server::{spawn_grpc_mock_service_server, GrpcMockServiceRuntime};
+#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+use crate::mock_service::grpc::GrpcMockServiceTrait;
+#[cfg(feature = "mock-services")]
+use crate::mock_service::handle::MockServiceHandle;
+#[cfg(feature = "mock-services")]
+use crate::mock_service::http::server::{spawn_http_mock_service_server, HttpMockServiceServer};
+#[cfg(feature = "mock-services")]
+use crate::mock_service::http::HttpMockServiceTrait;
+#[cfg(feature = "mock-services")]
+use crate::mock_service::types::MockServiceResources;
 #[cfg(all(
     feature = "outbox",
     any(
@@ -348,7 +348,7 @@ pub struct Context {
     mock_service_handles: HashMap<String, Arc<MockServiceHandle>>,
     /// Shutdown handles for HTTP bridge accept loops (paired with names for timeline messages).
     #[cfg(feature = "mock-services")]
-    http_mock_service_runtimes: Vec<(String, HttpMockServiceRuntime)>,
+    http_mock_service_runtimes: Vec<(String, HttpMockServiceServer)>,
     /// gRPC bridges registered before [`run_scenario`] starts tonic servers (after seed).
     #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
     pending_grpc_mock_services: Vec<(String, Arc<dyn GrpcMockServiceTrait>)>,
@@ -2527,7 +2527,7 @@ async fn start_and_readiness_bridges(
     let resources = mock_service_resources_from_context(ctx);
     let scenario_id_string = ctx.scenario_id().to_string();
 
-    let mut started_http_runtimes: Vec<(String, HttpMockServiceRuntime)> = Vec::new();
+    let mut started_http_runtimes: Vec<(String, HttpMockServiceServer)> = Vec::new();
     for (mock_service_name, bridge_impl) in pending_http {
         match spawn_http_mock_service_server(
             mock_service_name.clone(),
@@ -2540,7 +2540,8 @@ async fn start_and_readiness_bridges(
         {
             Ok((handle, runtime)) => {
                 let bind_display = handle.bind_address.clone();
-                ctx.mock_service_handles.insert(mock_service_name.clone(), handle);
+                ctx.mock_service_handles
+                    .insert(mock_service_name.clone(), handle);
                 started_http_runtimes.push((mock_service_name.clone(), runtime));
                 event_log.append(Event::info(
                     "bridge",
@@ -2580,7 +2581,8 @@ async fn start_and_readiness_bridges(
             {
                 Ok((handle, runtime)) => {
                     let bind_display = handle.bind_address.clone();
-                    ctx.mock_service_handles.insert(mock_service_name.clone(), handle);
+                    ctx.mock_service_handles
+                        .insert(mock_service_name.clone(), handle);
                     started_grpc_runtimes.push((mock_service_name.clone(), runtime));
                     event_log.append(Event::info(
                         "bridge",

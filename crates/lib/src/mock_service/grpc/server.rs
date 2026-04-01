@@ -23,14 +23,14 @@ use tonic::Code;
 use tonic::Status;
 use tower::Service;
 
+use super::super::handle::{MockServiceHandle, RecordedExchange};
+use super::super::types::{MockServiceContext, MockServiceError, MockServiceResources};
 use super::protocol_error::GrpcMockServiceProtocolError;
 use super::types::{GrpcMockServiceRequest, GrpcMockServiceResponse};
-use super::super::handle::{MockServiceHandle, RecordedExchange};
-use super::r#trait::GrpcMockServiceTrait;
-use super::super::types::{MockServiceContext, MockServiceError, MockServiceResources};
+use super::GrpcMockServiceTrait;
 
 /// Join handle and shutdown signal for one gRPC mock service server task.
-pub(crate) struct GrpcMockServiceRuntime {
+pub(crate) struct GrpcMockServiceServer {
     pub shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
     pub join: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
 }
@@ -42,7 +42,7 @@ pub(crate) async fn spawn_grpc_mock_service_server(
     scenario_id: String,
     resources: Arc<MockServiceResources>,
     max_recorded_body_size: Option<usize>,
-) -> Result<(Arc<MockServiceHandle>, GrpcMockServiceRuntime), MockServiceError> {
+) -> Result<(Arc<MockServiceHandle>, GrpcMockServiceServer), MockServiceError> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(|source| MockServiceError::ServerStart { source })?;
@@ -80,7 +80,7 @@ pub(crate) async fn spawn_grpc_mock_service_server(
 
     Ok((
         handle,
-        GrpcMockServiceRuntime {
+        GrpcMockServiceServer {
             shutdown_tx: Some(shutdown_tx),
             join,
         },
@@ -117,8 +117,8 @@ impl GrpcMockServiceTowerService {
             .map_err(|_| GrpcMockServiceProtocolError::RequestBodyReadFailed)?
             .to_bytes();
 
-        let (service_name, method_name) =
-            parse_grpc_path(grpc_path.as_str()).ok_or(GrpcMockServiceProtocolError::InvalidGrpcPath)?;
+        let (service_name, method_name) = parse_grpc_path(grpc_path.as_str())
+            .ok_or(GrpcMockServiceProtocolError::InvalidGrpcPath)?;
 
         let payload = decode_unary_grpc_payload(body_bytes.as_ref())?;
 
@@ -136,7 +136,10 @@ impl GrpcMockServiceTowerService {
         );
 
         let started = Instant::now();
-        let mock_service_response = self.mock_service.handle(grpc_request, &mock_service_context).await;
+        let mock_service_response = self
+            .mock_service
+            .handle(grpc_request, &mock_service_context)
+            .await;
         let duration = started.elapsed();
 
         let http_response = grpc_mock_service_response_to_http(&mock_service_response)?;

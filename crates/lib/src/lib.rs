@@ -100,9 +100,6 @@ mod docker_labels;
 #[cfg(any(feature = "elasticsearch", feature = "opensearch"))]
 pub(crate) mod search_operations;
 
-/// Service mock service types and traits (`mock-services` feature, default).
-#[cfg(feature = "mock-services")]
-pub mod mock_service;
 /// Docker Engine diagnostics (bollard) when a Docker-backed resource or `services` is enabled.
 #[cfg(any(
     feature = "kafka",
@@ -135,6 +132,9 @@ pub mod fault_injection;
 pub mod helpers;
 /// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
+/// Service mock service types and traits (`mock-services` feature, default).
+#[cfg(feature = "mock-services")]
+pub mod mock_service;
 /// Outbox table setup and assertions (`outbox` + at least one relational feature).
 #[cfg(all(
     feature = "outbox",

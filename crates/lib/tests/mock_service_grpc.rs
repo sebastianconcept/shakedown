@@ -6,7 +6,7 @@
 
 use http::uri::PathAndQuery;
 use prost::Message;
-use shakedown::{run_scenario, MockServiceHandle, Context, EventLog, GrpcMockService};
+use shakedown::{run_scenario, Context, EventLog, GrpcMockService, MockServiceHandle};
 use tonic::client::Grpc;
 use tonic::transport::Endpoint;
 use tonic_prost::ProstCodec;
@@ -74,7 +74,8 @@ async fn grpc_stub_bridge_unary_register_client_assert_recorded_call() {
 
                 assert_eq!(response.into_inner().message, "hello alice");
 
-                let handle: &MockServiceHandle = context.mock_service("echo").expect("echo bridge handle");
+                let handle: &MockServiceHandle =
+                    context.mock_service("echo").expect("echo bridge handle");
 
                 // **Then** one call is recorded; harness stores the full gRPC path on both
                 // `method` and `path`, and the request body round-trips through prost.

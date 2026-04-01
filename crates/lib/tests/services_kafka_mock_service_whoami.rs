@@ -17,7 +17,7 @@ use shakedown::diagnostics::labels::{
 use shakedown::event::{InfraEvent, LogEntry};
 use shakedown::{
     render_failure_timeline, run_scenario, BuiltinResource, Context, EventLog,
-    FailureTimelineOptions, HealthCheck, KafkaResource, ServiceUnderTest, HttpMockService,
+    FailureTimelineOptions, HealthCheck, HttpMockService, KafkaResource, ServiceUnderTest,
     HOST_DOCKER_INTERNAL,
 };
 

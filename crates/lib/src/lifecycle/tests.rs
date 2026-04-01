@@ -374,8 +374,8 @@ async fn test_async_resource_phases() {
 
 #[cfg(feature = "mock-services")]
 mod bridge_registration_tests {
-    use crate::mock_service::HttpMockService;
     use crate::error::{InternalError, ShakedownError};
+    use crate::mock_service::HttpMockService;
 
     use super::Context;
 
@@ -416,8 +416,8 @@ mod bridge_registration_tests {
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
 mod bridge_grpc_registration_tests {
-    use crate::mock_service::{GrpcMockService, HttpMockService};
     use crate::error::{InternalError, ShakedownError};
+    use crate::mock_service::{GrpcMockService, HttpMockService};
     use tonic::Code;
 
     use super::Context;
