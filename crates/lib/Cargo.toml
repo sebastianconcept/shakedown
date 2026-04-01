@@ -268,6 +268,8 @@ timescaledb = [
 ]
 # MCP server support (post-MVP, optional)
 mcp = []
+# Cluster topology — Docker network management and multi-node resources (US-001+)
+cluster = ["dep:bollard"]
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
 # `diagnostics` enables bollard log/stats/events for labeled service containers.
 services = ["dep:testcontainers", "dep:reqwest", "diagnostics"]
