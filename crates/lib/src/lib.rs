@@ -143,7 +143,8 @@ pub mod mock_service;
         feature = "mariadb",
         feature = "mysql",
         feature = "sqlite",
-        feature = "mongodb"
+        feature = "mongodb",
+        feature = "duckdb"
     )
 ))]
 pub mod outbox;
@@ -397,7 +398,8 @@ pub use crate::resources::{NatsBindings, NatsResource};
         feature = "mariadb",
         feature = "mysql",
         feature = "sqlite",
-        feature = "mongodb"
+        feature = "mongodb",
+        feature = "duckdb"
     )
 ))]
 pub use crate::outbox::{Outbox, OutboxEntry, OutboxRowState};

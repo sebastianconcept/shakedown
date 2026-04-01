@@ -102,7 +102,8 @@ use crate::mock_service::types::MockServiceResources;
         feature = "mariadb",
         feature = "mysql",
         feature = "sqlite",
-        feature = "mongodb"
+        feature = "mongodb",
+        feature = "duckdb"
     )
 ))]
 use crate::outbox::Outbox;
@@ -986,7 +987,8 @@ impl Context {
             feature = "mariadb",
             feature = "mysql",
             feature = "sqlite",
-            feature = "mongodb"
+            feature = "mongodb",
+            feature = "duckdb"
         )
     ))]
     pub fn outbox(&self) -> Outbox<'_> {
