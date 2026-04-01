@@ -1,7 +1,5 @@
 //! Unit tests for mock service shared types.
 
-use bytes::Bytes;
-
 use super::MockServiceError;
 
 #[test]

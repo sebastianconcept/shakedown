@@ -4,9 +4,9 @@ use bytes::Bytes;
 use prost::Message;
 use tonic::Code;
 
-use super::super::types::MockServiceError;
+use crate::mock_service::types::MockServiceError;
 
-/// Inbound unary gRPC request presented to a [`super::r#trait::GrpcMockService`].
+/// Inbound unary gRPC request presented to a [`super::GrpcMockService`].
 #[derive(Debug, Clone)]
 pub struct GrpcMockServiceRequest {
     /// gRPC service name (e.g. `inventory.InventoryService`).
@@ -26,7 +26,7 @@ impl GrpcMockServiceRequest {
     }
 }
 
-/// Outbound unary gRPC response from a [`super::r#trait::GrpcMockService`].
+/// Outbound unary gRPC response from a [`super::GrpcMockService`].
 #[derive(Debug, Clone)]
 pub struct GrpcMockServiceResponse {
     /// gRPC status code (`Code::Ok` = success). Use [`Self::status`] for non-OK replies.

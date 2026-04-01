@@ -1,4 +1,4 @@
-//! Hyper HTTP/1 listener for [`super::super::HttpMockServiceTrait`].
+//! Hyper HTTP/1 listener for [`super::HttpMockServiceTrait`].
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -17,13 +17,13 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
 use super::super::handle::{MockServiceHandle, RecordedExchange};
-use super::r#trait::HttpMockServiceTrait;
 use super::super::types::{MockServiceContext, MockServiceError, MockServiceResources};
 use super::request::HttpMockServiceRequest;
 use super::response::{internal_server_error_http_response, HttpMockServiceResponse};
+use super::HttpMockServiceTrait;
 
 /// Join handle and shutdown signal for one HTTP mock service accept loop.
-pub(crate) struct HttpMockServiceRuntime {
+pub(crate) struct HttpMockServiceServer {
     pub shutdown_tx: Option<oneshot::Sender<()>>,
     pub join: tokio::task::JoinHandle<()>,
 }
@@ -35,7 +35,7 @@ pub(crate) async fn spawn_http_mock_service_server(
     scenario_id: String,
     resources: Arc<MockServiceResources>,
     max_recorded_body_size: Option<usize>,
-) -> Result<(Arc<MockServiceHandle>, HttpMockServiceRuntime), MockServiceError> {
+) -> Result<(Arc<MockServiceHandle>, HttpMockServiceServer), MockServiceError> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(|source| MockServiceError::ServerStart { source })?;
@@ -67,7 +67,7 @@ pub(crate) async fn spawn_http_mock_service_server(
 
     Ok((
         handle,
-        HttpMockServiceRuntime {
+        HttpMockServiceServer {
             shutdown_tx: Some(shutdown_tx),
             join,
         },
@@ -134,18 +134,20 @@ async fn serve_one(
     let body_bytes = match body.collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(_) => {
-            return Ok(match HttpMockServiceResponse::status(400).into_http_response() {
-                Ok(response) => response,
-                Err(error) => {
-                    tracing::error!(
-                        target: "shakedown::mock_service",
-                        "mock service '{}' failed to build 400 response: {}",
-                        mock_service_context.mock_service_name,
-                        error
-                    );
-                    internal_server_error_http_response()
-                }
-            });
+            return Ok(
+                match HttpMockServiceResponse::status(400).into_http_response() {
+                    Ok(response) => response,
+                    Err(error) => {
+                        tracing::error!(
+                            target: "shakedown::mock_service",
+                            "mock service '{}' failed to build 400 response: {}",
+                            mock_service_context.mock_service_name,
+                            error
+                        );
+                        internal_server_error_http_response()
+                    }
+                },
+            );
         }
     };
     let mock_service_request = HttpMockServiceRequest::from_http_parts(parts, body_bytes);
@@ -157,7 +159,9 @@ async fn serve_one(
     let request_body = mock_service_request.bytes().clone();
 
     let started = Instant::now();
-    let mock_service_response = mock_service.handle(mock_service_request, &mock_service_context).await;
+    let mock_service_response = mock_service
+        .handle(mock_service_request, &mock_service_context)
+        .await;
     let duration = started.elapsed();
 
     let response_status = mock_service_response.status;

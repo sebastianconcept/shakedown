@@ -10,22 +10,27 @@
 //! Enabled with the **`mock-services`** feature (default). Add **`grpc-mock-services`** for gRPC
 //! support (`tonic` + `prost`).
 
+#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+pub(crate) mod grpc;
 #[cfg(feature = "mock-services")]
 pub(crate) mod handle;
 #[cfg(feature = "mock-services")]
 pub(crate) mod http;
-#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-pub(crate) mod grpc;
 #[cfg(feature = "mock-services")]
 pub(crate) mod types;
 
 #[cfg(feature = "mock-services")]
 pub use handle::{MockServiceHandle, RecordedCall, RecordedExchange};
 
-pub use http::{HttpMockService, HttpMockServiceRequest, HttpMockServiceResponse, HttpMockServiceResponseBuilder, HttpMockServiceRoutePending, RouteMatch};
+pub use http::{
+    HttpMockService, HttpMockServiceRequest, HttpMockServiceResponse,
+    HttpMockServiceResponseBuilder, HttpMockServiceRoutePending, RouteMatch,
+};
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-pub use grpc::{GrpcMockService, GrpcMockServiceMethodPending, GrpcMockServiceRequest, GrpcMockServiceResponse};
+pub use grpc::{
+    GrpcMockService, GrpcMockServiceMethodPending, GrpcMockServiceRequest, GrpcMockServiceResponse,
+};
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
 pub use grpc::GrpcMockServiceTrait;

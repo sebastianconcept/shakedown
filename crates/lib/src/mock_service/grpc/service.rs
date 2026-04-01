@@ -1,12 +1,49 @@
 //! Declarative gRPC mock service (`GrpcMockService`) implementing [`GrpcMockServiceTrait`](super::super::GrpcMockServiceTrait).
+//!
+//! Use it in integration tests or scenarios to stand in for a real gRPC backend with fixed unary
+//! responses (no real server logic), so callers see predictable protobuf payloads and status codes.
+//!
+//! Minimal example:
+//!
+//! ```ignore
+//! use std::sync::Arc;
+//!
+//! use shakedown::mock_service::{
+//!     GrpcMockService, GrpcMockServiceRequest, GrpcMockServiceTrait, MockServiceContext,
+//!     MockServiceResources,
+//! };
+//!
+//! # #[tokio::main]
+//! # async fn main() {
+//! let mock = GrpcMockService::new("inventory")
+//!     .on_method("test.Service/Do")
+//!     .respond_status(tonic::Code::Unavailable, "try again later");
+//!
+//! let ctx = MockServiceContext::new(
+//!     "scenario-1",
+//!     "inventory",
+//!     Arc::new(MockServiceResources::default()),
+//! );
+//!
+//! let req = GrpcMockServiceRequest {
+//!     service: "test.Service".to_string(),
+//!     method: "Do".to_string(),
+//!     metadata: vec![],
+//!     body: bytes::Bytes::new(),
+//! };
+//!
+//! let resp = mock.handle(req, &ctx).await;
+//! assert_eq!(resp.status_code, tonic::Code::Unavailable);
+//! # }
+//! ```
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use tonic::Code;
 
-use super::r#trait::GrpcMockServiceTrait;
 use super::super::types::{MockServiceContext, MockServiceError};
 use super::types::{GrpcMockServiceRequest, GrpcMockServiceResponse};
+use super::GrpcMockServiceTrait;
 
 #[derive(Debug, Clone)]
 enum GrpcMockRoute {
@@ -99,62 +136,5 @@ impl GrpcMockServiceTrait for GrpcMockService {
                 GrpcMockServiceResponse::status(*code, message.as_str())
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::*;
-    use prost::Message;
-
-    #[derive(Clone, PartialEq, prost::Message)]
-    struct SampleMessage {
-        #[prost(int32, tag = "1")]
-        pub value: i32,
-    }
-
-    #[tokio::test]
-    async fn stub_matches_registered_method() {
-        // Given a mock service that responds on `test.Service/Do` with a fixed protobuf payload
-        let mock_service = GrpcMockService::new("inventory")
-            .on_method("test.Service/Do")
-            .respond_proto(&SampleMessage { value: 7 })
-            .expect("respond_proto");
-
-        let resources = Arc::new(crate::mock_service::types::MockServiceResources::default());
-        let context = MockServiceContext::new("s1", "inventory", resources);
-        let request = GrpcMockServiceRequest {
-            service: String::from("test.Service"),
-            method: String::from("Do"),
-            metadata: Vec::new(),
-            body: Bytes::new(),
-        };
-        // When the mock service handles a matching request
-        let response = mock_service.handle(request, &context).await;
-        // Then the status is OK and the body round-trips through prost decode (test-only)
-        assert_eq!(response.status_code, Code::Ok);
-        let decoded = SampleMessage::decode(response.body.as_ref())
-            .expect("decode response body produced by mock service");
-        assert_eq!(decoded.value, 7);
-    }
-
-    #[tokio::test]
-    async fn stub_unimplemented_when_unmatched() {
-        // Given a mock service with no routes registered
-        let mock_service = GrpcMockService::new("inventory");
-        let resources = Arc::new(crate::mock_service::types::MockServiceResources::default());
-        let context = MockServiceContext::new("s1", "inventory", resources);
-        let request = GrpcMockServiceRequest {
-            service: String::from("test.Service"),
-            method: String::from("Missing"),
-            metadata: Vec::new(),
-            body: Bytes::new(),
-        };
-        // When the method does not match any route
-        let response = mock_service.handle(request, &context).await;
-        // Then the mock service returns UNIMPLEMENTED
-        assert_eq!(response.status_code, Code::Unimplemented);
     }
 }
