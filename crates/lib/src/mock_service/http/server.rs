@@ -28,7 +28,8 @@ pub(crate) struct HttpMockServiceServer {
     pub join: tokio::task::JoinHandle<()>,
 }
 
-/// Bind `127.0.0.1:0`, spawn the accept loop, return the public handle (in an [`Arc`]) and runtime.
+/// Bind `127.0.0.1:0`, spawn the accept loop, return the public handle (in an [`Arc`]) and
+/// [`HttpMockServiceServer`] (shutdown signal + background task join handle).
 pub(crate) async fn spawn_http_mock_service_server(
     mock_service_name: String,
     mock_service: Arc<dyn HttpMockServiceTrait>,

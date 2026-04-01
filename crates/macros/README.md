@@ -54,7 +54,7 @@ The generated code calls `ctx.set_scenario_kind(ScenarioKind::Faulty)` before ru
 
 **`fault_profile = "..."`** — Recognized and expanded to `ctx.set_fault_profile("...")` immediately after `set_scenario_kind(Faulty)` (before `run_scenario`). Use it to tag a scenario for future harness presets or for your own assertions via [`Context::fault_profile`](../lib/src/lifecycle/mod.rs).
 
-**Other `key = <expr>` pairs** — Reserved for future macro wiring (same parse shape as today). They are accepted and **ignored** so call sites can stay forward-compatible; toxic specs and runtime fault control remain on [`Context`] / `FaultHandle` APIs.
+**Other `key = <expr>` pairs** — Reserved for future macro wiring (same parse shape as today). They are accepted and **ignored** so call sites can stay forward-compatible; toxic specs and fault control during the test remain on [`Context`] / `FaultHandle` APIs.
 
 **`resources = [...]`** — Same as [`test`](#optional-resources-argument): compile-time builtin registration.
 

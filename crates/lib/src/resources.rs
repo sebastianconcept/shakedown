@@ -3615,7 +3615,7 @@ mod sqlite_impl {
     ///
     /// `rusqlite::Connection` is not [`Sync`]; it is wrapped in [`Arc`] [`Mutex`] so [`BuiltinResource`]
     /// remains [`Sync`] and readiness can use [`tokio::task::spawn_blocking`] (works on the default
-    /// single-threaded `#[tokio::test]` runtime).
+    /// single-threaded Tokio test executor used by `#[tokio::test]`).
     #[derive(Debug, Default)]
     pub struct SqliteResource {
         connection: Option<Arc<Mutex<Connection>>>,

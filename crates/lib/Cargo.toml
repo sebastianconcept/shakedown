@@ -16,7 +16,7 @@ serde_json = "1"
 displaydoc = "0.2"
 time = { version = "0.3", default-features = false, features = ["formatting"] }
 
-# Async runtime (public async lifecycle API)
+# Tokio async executor (public async lifecycle API)
 tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 async-trait = "0.1"
 
@@ -24,7 +24,7 @@ async-trait = "0.1"
 # `tokio` enables `FutureProducer` + `AsyncRuntime` (helpers and mock services use async send).
 rdkafka = { version = "=0.38", optional = true, default-features = false, features = ["ssl-vendored", "tokio"] }
 
-# Testcontainers (base container runtime)
+# Testcontainers (Docker / OCI container engine)
 testcontainers = { version = "0.27", default-features = false, optional = true }
 
 # Community images (enable per parent feature: `kafka`, `postgres`, …)
@@ -272,7 +272,7 @@ mcp = []
 # `diagnostics` enables bollard log/stats/events for labeled service containers.
 services = ["dep:testcontainers", "dep:reqwest", "diagnostics"]
 
-# Optional macro + Kafka runtime test (Docker); avoids compiling `resources = [Kafka]` without rdkafka
+# Optional macro + Kafka Docker integration test; avoids compiling `resources = [Kafka]` without rdkafka
 [[test]]
 name = "macro_kafka"
 path = "tests/macro_kafka.rs"

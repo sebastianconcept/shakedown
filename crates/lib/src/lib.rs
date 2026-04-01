@@ -528,7 +528,7 @@ mod tests {
             }
         }
 
-        // Given a Resource whose async methods yield to the runtime
+        // Given a Resource whose async methods yield to the async executor
         // When we require it to implement Resource
         fn assert_resource<T: Resource>() {}
         // Then the compiler accepts AsyncTestResource

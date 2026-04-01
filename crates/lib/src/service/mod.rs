@@ -11,10 +11,10 @@ mod handle;
 mod health;
 pub(crate) mod injection;
 pub(crate) mod lifecycle;
-mod state;
+mod service_reference;
 mod types;
 
-pub(crate) use state::ServiceState;
+pub(crate) use service_reference::ServiceReference;
 
 pub use address::{
     ensure_host_docker_internal_resolution, linux_host_gateway_mapping_required,
@@ -81,7 +81,7 @@ mod registration_tests {
             .unwrap_or_else(|error| panic!("fixture spec must build: {error:?}"));
         // When we try to register the dependent first
         let error = context.register_service(worker_first).unwrap_err();
-        // Then registration fails and no service is staged
+        // Then registration fails and no service is registered
         match error {
             ShakedownError::Internal(InternalError::InvalidConfiguration(message)) => {
                 assert!(message.contains("api"), "{message}");
@@ -105,7 +105,7 @@ mod registration_tests {
             .build()
             .unwrap_or_else(|error| panic!("fixture spec must build: {error:?}"));
         context.register_service(worker).unwrap();
-        // Then both services are staged
+        // Then both services are registered (configured only; not yet running)
         assert_eq!(context.registered_service_count(), 2);
     }
 

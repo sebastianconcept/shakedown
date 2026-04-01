@@ -1,9 +1,0 @@
-[package]
-name = "shakedown-integration"
-version = "0.1.0"
-edition.workspace = true
-publish = false
-
-[dependencies]
-shakedown = { path = "../crates/lib" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
