@@ -232,7 +232,8 @@ pub use crate::timeline::{
 
 #[cfg(feature = "cluster")]
 pub use crate::cluster::{
-    cluster_network_name, create_cluster_network, remove_cluster_network, ClusterError,
+    cluster_network_name, create_cluster_network, remove_cluster_network, ClusterControl,
+    ClusterError, ClusterHandle, NodeStatus, CLUSTER_EVENT_SOURCE,
 };
 
 #[cfg(any(

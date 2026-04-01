@@ -143,7 +143,7 @@ use crate::resources::{
 #[cfg(feature = "services")]
 use crate::service::ServiceHandle;
 use async_trait::async_trait;
-#[cfg(any(feature = "mock-services", feature = "services"))]
+#[cfg(any(feature = "mock-services", feature = "services", feature = "cluster"))]
 use std::collections::HashMap;
 #[cfg(feature = "mock-services")]
 use std::sync::Arc;
@@ -363,6 +363,9 @@ pub struct Context {
     /// Registered [`crate::service::ServiceSpec`] entries (service configured); [`ServiceHandle`] set when the service is running and healthy.
     #[cfg(feature = "services")]
     pub(crate) services: HashMap<String, crate::service::ServiceReference>,
+    /// Cluster topology handles keyed by resource marker type ([`Context::register_cluster_handle`]).
+    #[cfg(feature = "cluster")]
+    cluster_handles: HashMap<std::any::TypeId, crate::cluster::ClusterHandle>,
 }
 
 impl Context {
@@ -453,6 +456,8 @@ impl Context {
             mock_service_servers_phase_complete: false,
             #[cfg(feature = "services")]
             services: HashMap::new(),
+            #[cfg(feature = "cluster")]
+            cluster_handles: HashMap::new(),
         }
     }
 
@@ -543,6 +548,8 @@ impl Context {
             mock_service_servers_phase_complete: false,
             #[cfg(feature = "services")]
             services: HashMap::new(),
+            #[cfg(feature = "cluster")]
+            cluster_handles: HashMap::new(),
         }
     }
 
@@ -633,6 +640,8 @@ impl Context {
             mock_service_servers_phase_complete: false,
             #[cfg(feature = "services")]
             services: HashMap::new(),
+            #[cfg(feature = "cluster")]
+            cluster_handles: HashMap::new(),
         }
     }
 
@@ -645,6 +654,22 @@ impl Context {
     pub fn register_extension<R: Resource + 'static>(&mut self, resource: R) {
         self.resources
             .push(RegisteredResource::Extension(Box::new(resource)));
+    }
+
+    /// Register a [`crate::cluster::ClusterHandle`] for retrieval via [`Context::cluster_handle`].
+    ///
+    /// `T` is a zero-sized marker (often a private struct) used to disambiguate multiple cluster
+    /// resources in one scenario.
+    #[cfg(feature = "cluster")]
+    pub fn register_cluster_handle<T: 'static>(&mut self, handle: crate::cluster::ClusterHandle) {
+        self.cluster_handles
+            .insert(std::any::TypeId::of::<T>(), handle);
+    }
+
+    /// Look up a cluster handle registered with [`Context::register_cluster_handle`].
+    #[cfg(feature = "cluster")]
+    pub fn cluster_handle<T: 'static>(&self) -> Option<&crate::cluster::ClusterHandle> {
+        self.cluster_handles.get(&std::any::TypeId::of::<T>())
     }
 
     /// Get a reference to all registered resources.
