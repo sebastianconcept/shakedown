@@ -416,6 +416,12 @@ name = "outbox_rabbit"
 path = "tests/outbox_rabbit.rs"
 required-features = ["outbox", "postgres", "rabbitmq"]
 
+# SQLite outbox + NATS publication proof (NATS Docker; SQLite in-process)
+[[test]]
+name = "outbox_nats_publication"
+path = "tests/outbox_nats_publication.rs"
+required-features = ["outbox", "sqlite", "nats"]
+
 # Redis suite + bindings (Docker); ignored unless --ignored
 [[test]]
 name = "redis_vertical"
