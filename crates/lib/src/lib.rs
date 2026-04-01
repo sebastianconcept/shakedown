@@ -100,6 +100,9 @@ mod docker_labels;
 #[cfg(any(feature = "elasticsearch", feature = "opensearch"))]
 pub(crate) mod search_operations;
 
+/// Cluster topology — Docker networks and node control (`cluster` feature; US-001+).
+#[cfg(feature = "cluster")]
+pub mod cluster;
 /// Docker Engine diagnostics (bollard) when a Docker-backed resource or `services` is enabled.
 #[cfg(any(
     feature = "kafka",
@@ -225,6 +228,11 @@ pub use crate::timeline::{
     write_failure_timeline_json_to_path, FailureTimelineDocument, FailureTimelineOptions,
     ResourceSnapshotJson, ResourceSnapshotsJson, RootCauseHint, ScenarioMetadataJson,
     TimelineEventJson,
+};
+
+#[cfg(feature = "cluster")]
+pub use crate::cluster::{
+    cluster_network_name, create_cluster_network, remove_cluster_network, ClusterError,
 };
 
 #[cfg(any(
