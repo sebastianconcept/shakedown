@@ -35,7 +35,7 @@ shakedown/
 | `extra-infra` | ✅ **Complete** (2026-03-31) — twelve additional first-party resources (Redis, Valkey, MongoDB, NATS, Neo4j, DuckDB, Elasticsearch, OpenSearch, Qdrant, Weaviate, InfluxDB, TimescaleDB); see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) |
 | `mvp-examples` | **Next** — living `crates/examples` catalog ( **`MVP.md`** row 9 in adopted docs under `~/docs/shakedown/`) |
 
-- **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka** and **RabbitMQ** publication proof (`assert_kafka_published`, `assert_rabbit_published`) on top of relational bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below).
+- **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka**, **RabbitMQ**, **NATS** (core pub/sub), and **Redis Streams** publication proof (`assert_kafka_published`, `assert_rabbit_published`, `assert_nats_published`, `assert_redis_streams_published`) on top of relational, document, or in-process storage bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below). **Extended outbox** (2026-04): **MongoDB** and **DuckDB** storage paths match the same `Outbox` row APIs as SQL engines.
 - **Also shipped:** `mock-services` — mock upstream HTTP/gRPC servers bound on localhost so scenarios assert outbound calls at the **network** layer; see [Mock services](#mock-services).
 - **Also shipped:** **`services`** (service-under-test) — opt-in Cargo feature to run **application containers** via testcontainers during scenarios: [`ServiceUnderTest`](src/service/builder.rs) → [`ServiceSpec`](src/service/types.rs), convention-based **env injection** (Kafka, relational DBs, RabbitMQ, Redis/Valkey, MongoDB, Neo4j, mock services, `depends_on` peers), **convergence health checks**, [`Context::service_url`](src/lifecycle/mod.rs) / [`service_handle`](src/lifecycle/mod.rs) on the test host (`127.0.0.1`), and **bollard** diagnostics labels — see [Service under test](#service-under-test-services-feature).
 - **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle/mod.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
@@ -425,7 +425,7 @@ Entry points: `ctx.kafka()` ([`KafkaHelpers`](src/helpers/kafka.rs)), `ctx.rabbi
 
 ### Pattern 3: outbox rows + publication verifiers
 
-**When to use this:** You are testing the **transactional outbox** flow — rows in `outbox_event` **and** proof that a message appeared on Kafka or RabbitMQ. [`Outbox`](src/outbox.rs) plus [`PublicationVerifier`](src/publication/verifier.rs) (`assert_kafka_published`, `assert_rabbit_published`) is the contract for that. Helpers **do not** duplicate verifier semantics; use them for direct bus/DB steps, and verifiers when you need publication proof tied to outbox semantics.
+**When to use this:** You are testing the **transactional outbox** flow — rows in `outbox_event` **and** proof that a message appeared on a supported bus. [`Outbox`](src/outbox.rs) plus [`PublicationVerifier`](src/publication/verifier.rs) (`assert_kafka_published`, `assert_rabbit_published`, `assert_nats_published`, `assert_redis_streams_published`) is the contract for that. Helpers **do not** duplicate verifier semantics; use them for direct bus/DB steps, and verifiers when you need publication proof tied to outbox semantics.
 
 ### Feature flags (helpers)
 
@@ -534,22 +534,64 @@ Runnable Docker-backed coverage: [`tests/helpers_postgres.rs`](tests/helpers_pos
 
 ## Outbox helpers
 
-The outbox API has **two layers**. You can use row assertions **without** any message bus; publication proof is **optional** and gated on **`kafka`** and/or **`rabbitmq`**.
+The outbox API has **two layers**. You can use row assertions **without** any message bus; publication proof is **optional** and gated per transport (`kafka`, `rabbitmq`, `nats`, `redis` for Redis Streams, …).
 
-1. **Row assertions** — SQL against the canonical `outbox_event` table (`assert_pending`, `assert_sent`, `assert_failed`, `assert_retry`, payload checks). These require `outbox` plus a **relational** feature (`postgres`, `mariadb`, `mysql`, or `sqlite`). They do **not** require Kafka or RabbitMQ.
-2. **Publication proof** — observe a message for your aggregate on a bus via [`PublicationVerifier`](src/publication/verifier.rs). First-party implementations: **Kafka** ([`KafkaPublicationVerifier`](src/publication/kafka_verifier.rs)) and **RabbitMQ** ([`RabbitMqPublicationVerifier`](src/publication/rabbit_verifier.rs)), exposed as [`Outbox::assert_kafka_published`](src/outbox.rs) and [`Outbox::assert_rabbit_published`](src/outbox.rs). Enable the matching Cargo feature; `outbox` alone does **not** pull in either transport.
+1. **Row assertions** — Canonical `outbox_event` shape: SQL engines use a table; MongoDB uses a collection; same assertion API (`assert_pending`, `assert_sent`, `assert_failed`, `assert_retry`, payload checks). Requires `outbox` plus **one storage feature**: **`postgres`**, **`mariadb`**, **`mysql`**, **`sqlite`**, **`mongodb`**, or **`duckdb`**. They do **not** require any message-bus feature.
+2. **Publication proof** — Observe a message for your aggregate on a bus via [`PublicationVerifier`](src/publication/verifier.rs). First-party implementations and [`Outbox`](src/outbox.rs) convenience methods:
 
-**Publication errors** are transport-neutral and distinct from row errors such as `OutboxRowNotFound`. **First-party Kafka and Rabbit** verifiers return [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) when the observation window expires without a matching message (`transport`: `"kafka"` or `"rabbitmq"`). [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) is available for **custom** [`PublicationVerifier`](#implementing-publicationverifier) implementations that need a separate “time-bounded infrastructure failure” classification (first-party code does not emit it today). Both variants carry `transport`, `channel`, and `aggregate_id`; prefer matching on these variants (or [`ShakedownError`](crate::error::ShakedownError) generally) for publication failures.
+| Publication verifier | Cargo feature | Types / convenience |
+|---------------------|---------------|---------------------|
+| **Kafka** | `kafka` | [`KafkaPublicationVerifier`](src/publication/kafka_verifier.rs), [`Outbox::assert_kafka_published`](src/outbox.rs) |
+| **RabbitMQ** | `rabbitmq` | [`RabbitMqPublicationVerifier`](src/publication/rabbit_verifier.rs), [`Outbox::assert_rabbit_published`](src/outbox.rs) |
+| **NATS** (core pub/sub) | `nats` | [`NatsPublicationVerifier`](src/publication/nats_verifier.rs), [`Outbox::assert_nats_published`](src/outbox.rs) |
+| **Redis Streams** | `redis` (or `valkey` with the same verifier) | [`RedisStreamsPublicationVerifier`](src/publication/redis_streams_verifier.rs), [`Outbox::assert_redis_streams_published`](src/outbox.rs) |
 
-### Supported combinations (matrix)
+Enable the matching Cargo feature; `outbox` alone does **not** pull in transports.
+
+**Publication errors** are transport-neutral and distinct from row errors such as `OutboxRowNotFound`. First-party verifiers return [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) when the observation window expires without a matching message (`transport`: `"kafka"`, `"rabbitmq"`, `"nats"`, or `"redis_streams"`). [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) is available for **custom** [`PublicationVerifier`](#implementing-publicationverifier) implementations that need a separate “time-bounded infrastructure failure” classification (first-party code does not emit it today). Both variants carry `transport`, `channel`, and `aggregate_id`; prefer matching on these variants (or [`ShakedownError`](crate::error::ShakedownError) generally) for publication failures.
+
+### Outbox storage engines (first-party)
+
+| Storage | Cargo feature | Notes |
+|---------|---------------|--------|
+| **PostgreSQL** | `postgres` | Full SQL semantics for row locking in production-style outbox processors. |
+| **MariaDB** | `mariadb` | Same. |
+| **MySQL** | `mysql` | Same. |
+| **SQLite** | `sqlite` | **Assertion-only** — no `SELECT FOR UPDATE SKIP LOCKED`; see [Assertion-only storage](#assertion-only-storage-sqlite-and-duckdb). |
+| **MongoDB** | `mongodb` | Document `outbox_event` collection; same logical schema as SQL backends. |
+| **DuckDB** | `duckdb` | **Assertion-only** — same limitation as SQLite; in-process, no Docker. |
+
+**Postgres-compatible engines** such as **TimescaleDB** use the existing relational outbox path via `postgres` / `timescaledb` bindings (same `Outbox` row APIs).
+
+### Full combination matrix (storage × publication)
+
+Any first-party **storage** row can pair with any first-party **publication** verifier: enable `outbox`, exactly one storage feature, and one or more bus features. All cells below are supported.
+
+| Storage \ Publication | Kafka | RabbitMQ | NATS | Redis Streams |
+|----------------------|:-----:|:--------:|:----:|:-------------:|
+| Postgres | ✓ | ✓ | ✓ | ✓ |
+| MariaDB | ✓ | ✓ | ✓ | ✓ |
+| MySQL | ✓ | ✓ | ✓ | ✓ |
+| SQLite | ✓ | ✓ | ✓ | ✓ |
+| MongoDB | ✓ | ✓ | ✓ | ✓ |
+| DuckDB | ✓ | ✓ | ✓ | ✓ |
+
+### NATS core pub/sub (subscribe-first)
+
+NATS **core** pub/sub does not persist messages. [`NatsPublicationVerifier`](src/publication/nats_verifier.rs) **subscribes first**, then waits for a matching payload. Your scenario must **call** `assert_nats_published` **before** the code under test publishes (or use a concurrent pattern where the verifier is already subscribed — see [`tests/outbox_nats_publication.rs`](tests/outbox_nats_publication.rs)). JetStream is not covered by this verifier.
+
+### Supported combinations (commands)
 
 | What you need | Cargo features | Typical CI / local command (Docker where marked) |
 |---------------|----------------|---------------------------------------------------|
-| Relational outbox **rows only** (fast, no Docker) | `outbox`, `sqlite` | `cargo test -p shakedown --features outbox,sqlite` |
-| Postgres outbox + **Kafka** publication proof | `outbox`, `postgres`, `kafka` | `cargo test -p shakedown --features outbox,postgres,kafka --test outbox_postgres -- --ignored` |
-| Postgres outbox + **RabbitMQ** publication proof (no Kafka) | `outbox`, `postgres`, `rabbitmq` | `cargo test -p shakedown --features outbox,postgres,rabbitmq --test outbox_rabbit -- --ignored` |
+| Outbox **rows only** (fast, no Docker) | `outbox`, `sqlite` or `outbox`, `duckdb` | `cargo test -p shakedown --features outbox,sqlite` / `… duckdb,outbox --test outbox_duckdb` |
+| **MongoDB** outbox rows | `outbox`, `mongodb` | `cargo test -p shakedown --features outbox,mongodb --test outbox_mongo -- --ignored` |
+| Postgres + **Kafka** publication proof | `outbox`, `postgres`, `kafka` | `cargo test -p shakedown --features outbox,postgres,kafka --test outbox_postgres -- --ignored` |
+| Postgres + **RabbitMQ** publication proof | `outbox`, `postgres`, `rabbitmq` | `cargo test -p shakedown --features outbox,postgres,rabbitmq --test outbox_rabbit -- --ignored` |
+| SQLite + **NATS** publication proof | `outbox`, `sqlite`, `nats` | `cargo test -p shakedown --features outbox,sqlite,nats --test outbox_nats_publication -- --ignored` |
+| SQLite + **Redis Streams** publication proof | `outbox`, `sqlite`, `redis` | `cargo test -p shakedown --features outbox,sqlite,redis --test outbox_redis_streams_publication -- --ignored` |
 | Rabbit verifier **unit tests** without Docker DB | `outbox`, `sqlite`, `rabbitmq` | `cargo test -p shakedown --features outbox,rabbitmq,sqlite` |
-| **Custom bus** (SQS, NATS, …) | `outbox` (+ your client crates) | Implement [`PublicationVerifier`](#implementing-publicationverifier) in your crate or test module; no first-party feature required |
+| **Custom bus** (e.g. SQS) | `outbox` (+ your client crates) | Implement [`PublicationVerifier`](#implementing-publicationverifier) in your crate or test module |
 
 Full quality gates for this crate often include: `cargo check --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, `cargo test -p shakedown --features outbox,postgres,kafka`, and `cargo test -p shakedown --features outbox,postgres,rabbitmq -- --ignored`.
 
@@ -567,6 +609,20 @@ shakedown = { version = "...", features = ["outbox", "postgres", "kafka"] }
 ```toml
 [dependencies]
 shakedown = { version = "...", features = ["outbox", "postgres", "rabbitmq"] }
+```
+
+**MongoDB + NATS** — document outbox rows + NATS publication proof:
+
+```toml
+[dependencies]
+shakedown = { version = "...", features = ["outbox", "mongodb", "nats"] }
+```
+
+**DuckDB + Redis Streams** — in-process rows + stream observation (Redis still needs Docker for integration tests that start the resource):
+
+```toml
+[dependencies]
+shakedown = { version = "...", features = ["outbox", "duckdb", "redis"] }
 ```
 
 **SQLite** — row assertions only in-process (no Docker):
@@ -621,18 +677,18 @@ See [`tests/outbox_rabbit.rs`](tests/outbox_rabbit.rs) for a full Docker-backed 
 
 ### Implementing `PublicationVerifier`
 
-Use this when your team’s bus is not Kafka or RabbitMQ (e.g. **AWS SQS** is not implemented first-party, but the trait is shaped so you can add an impl without a breaking API change).
+Use this when your team’s bus is **not** covered by a first-party verifier (first-party today: **Kafka**, **RabbitMQ**, **NATS** core pub/sub, **Redis Streams**). For example, **AWS SQS** is not implemented first-party, but the trait is shaped so you can add an impl without a breaking API change.
 
 1. **Trait** — Implement [`PublicationVerifier`](src/publication/verifier.rs) for your type with an associated `Options` struct (exchange, queue URL, region, etc.).
 2. **`assert_observed`** — Take [`Context`](src/lifecycle/mod.rs), a [`PublicationObserveSpec`](src/publication/spec.rs) (`aggregate_id`, `logical_channel`, optional `timeout`), and `&Self::Options`. Poll or consume until [`message_matches_aggregate_id`](src/publication/matching.rs) succeeds or the resolved deadline is exceeded ([`DEFAULT_PUBLICATION_OBSERVE_TIMEOUT`](src/publication/spec.rs): 20s when `timeout` is `None`).
-3. **Bindings** — Read connection details from [`Context::kafka_bindings()`](src/resources.rs), [`Context::rabbit_bindings()`](src/resources.rs), or fields you attach via your own resources; keep scenario isolation consistent with how your publisher names topics/queues.
-4. **Errors** — When the resolved deadline passes without a matching message, return [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) with `transport` set to a stable label (e.g. `"sqs"`), matching first-party Kafka/Rabbit. Optionally return [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) if your verifier distinguishes an infrastructure/connectivity time limit from “no matching publication observed.”
+3. **Bindings** — Read connection details from [`Context::kafka_bindings()`](src/resources.rs), [`Context::rabbit_bindings()`](src/resources.rs), [`Context::nats_bindings()`](src/resources.rs), [`Context::redis_bindings()`](src/resources.rs), or fields you attach via your own resources; keep scenario isolation consistent with how your publisher names topics, queues, subjects, or streams.
+4. **Errors** — When the resolved deadline passes without a matching message, return [`OutboxPublicationNotFound`](crate::error::ShakedownError::OutboxPublicationNotFound) with `transport` set to a stable label (e.g. `"sqs"`), matching first-party verifiers. Optionally return [`OutboxPublicationTimeout`](crate::error::ShakedownError::OutboxPublicationTimeout) if your verifier distinguishes an infrastructure/connectivity time limit from “no matching publication observed.”
 
 To use your verifier from tests, call `PublicationVerifier::assert_observed(&your_verifier, &ctx, &spec, &options)` (or wrap it in a small helper on `Outbox` in your codebase).
 
-### SQLite limitations
+### Assertion-only storage (SQLite and DuckDB)
 
-`SELECT FOR UPDATE SKIP LOCKED` is unavailable on SQLite, so claim-locking / publisher concurrency semantics are not validated on that path. Use Postgres/MariaDB/MySQL when you need lock semantics coverage.
+`SELECT FOR UPDATE SKIP LOCKED` is unavailable on **SQLite** and **DuckDB**, so claim-locking / publisher concurrency semantics are not validated on those paths. Use Postgres, MariaDB, or MySQL (or exercise your processor logic in tests that do not rely on SKIP LOCKED) when you need lock-semantics coverage.
 
 ## Mock services
 
