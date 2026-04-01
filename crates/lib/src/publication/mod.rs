@@ -1,8 +1,8 @@
 //! Publication observation types and the [`PublicationVerifier`] trait.
 //!
 //! Used by outbox helpers to prove that messages reached a bus after relational outbox state
-//! assertions. Implementations are feature-gated (`kafka`, `rabbitmq`, …); this module defines
-//! the shared contract only.
+//! assertions. Implementations are feature-gated (`kafka`, `rabbitmq`, `nats`, `redis` / `valkey`,
+//! …); this module defines the shared contract only.
 
 mod matching;
 mod spec;
@@ -17,6 +17,9 @@ mod rabbit_verifier;
 #[cfg(feature = "nats")]
 mod nats_verifier;
 
+#[cfg(any(feature = "redis", feature = "valkey"))]
+mod redis_streams_verifier;
+
 pub use matching::message_matches_aggregate_id;
 pub use spec::{PublicationObserveSpec, DEFAULT_PUBLICATION_OBSERVE_TIMEOUT};
 pub use verifier::PublicationVerifier;
@@ -29,6 +32,11 @@ pub use rabbit_verifier::{RabbitMqPublicationVerifier, RabbitMqPublicationVerifi
 
 #[cfg(feature = "nats")]
 pub use nats_verifier::{NatsPublicationVerifier, NatsPublicationVerifierOptions};
+
+#[cfg(any(feature = "redis", feature = "valkey"))]
+pub use redis_streams_verifier::{
+    RedisStreamsPublicationVerifier, RedisStreamsPublicationVerifierOptions,
+};
 
 #[cfg(test)]
 mod tests {
