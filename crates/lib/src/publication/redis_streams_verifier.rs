@@ -142,18 +142,14 @@ impl PublicationVerifier for RedisStreamsPublicationVerifier {
                                 })
                                 .unwrap_or(false);
 
-                            if aggregate_ok {
-                                let _: usize = connection
-                                    .xack(stream_key.as_str(), group_name, &[entry.id.as_str()])
-                                    .await
-                                    .map_err(as_backend_error)?;
-                                return Ok(());
-                            }
-
                             let _: usize = connection
                                 .xack(stream_key.as_str(), group_name, &[entry.id.as_str()])
                                 .await
                                 .map_err(as_backend_error)?;
+
+                            if aggregate_ok {
+                                return Ok(());
+                            }
                         }
                     }
                 }
