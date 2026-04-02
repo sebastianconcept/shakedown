@@ -46,20 +46,15 @@ fn primary_index_from_status(status: &Document) -> Result<usize, ClusterError> {
         if member_doc.get_str("stateStr").unwrap_or("") != "PRIMARY" {
             continue;
         }
-        let name = member_doc
-            .get_str("name")
-            .map_err(|_| ClusterError::EngineOperation {
-                message: "replSetGetStatus: PRIMARY member missing name".into(),
-                source: Box::new(std::io::Error::other("invalid status document")),
-            })?;
-        let index = name
-            .strip_prefix("mongo-")
-            .and_then(|rest| rest.split(':').next())
-            .and_then(|index| index.parse::<usize>().ok())
-            .ok_or_else(|| ClusterError::EngineOperation {
-                message: format!("unrecognized member host in replSetGetStatus: {name}"),
-                source: Box::new(std::io::Error::other("parse member index")),
-            })?;
+        let index =
+            crate::mongo_replica_set_resource::replica_set_member_index_from_doc(member_doc)
+                .ok_or_else(|| {
+                    let name = member_doc.get_str("name").unwrap_or("?");
+                    ClusterError::EngineOperation {
+                        message: format!("unrecognized member host in replSetGetStatus: {name}"),
+                        source: Box::new(std::io::Error::other("parse member index")),
+                    }
+                })?;
         return Ok(index);
     }
     Err(ClusterError::EngineOperation {
@@ -340,6 +335,28 @@ impl ClusterControl for Arc<MongoReplicaSetClusterControl> {
     }
 
     async fn disconnect_node(&self, index: usize) -> Result<(), ClusterError> {
+        let snapshot = self.snapshot_or_err().await?;
+        MongoReplicaSetClusterControl::check_index(&snapshot, index)?;
+        #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+        if snapshot.inter_node_mesh_active {
+            if let Some(mesh) =
+                crate::mongo_replica_set_inter_node::mongo_inter_node_mesh_snapshot().await
+            {
+                crate::mongo_replica_set_inter_node::mesh_set_edges_enabled_for_node(
+                    &mesh, index, false,
+                )
+                .await?;
+                if let Ok(mut guard) = self.disconnect_pause.lock() {
+                    guard.insert(index);
+                }
+                self.emit_cluster_row(
+                    "disconnect_node",
+                    Some(index),
+                    Some("toxiproxy_mesh".to_string()),
+                );
+                return Ok(());
+            }
+        }
         self.pause_node(index).await?;
         if let Ok(mut guard) = self.disconnect_pause.lock() {
             guard.insert(index);
@@ -348,6 +365,28 @@ impl ClusterControl for Arc<MongoReplicaSetClusterControl> {
     }
 
     async fn reconnect_node(&self, index: usize) -> Result<(), ClusterError> {
+        let snapshot = self.snapshot_or_err().await?;
+        MongoReplicaSetClusterControl::check_index(&snapshot, index)?;
+        #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+        if snapshot.inter_node_mesh_active {
+            if let Some(mesh) =
+                crate::mongo_replica_set_inter_node::mongo_inter_node_mesh_snapshot().await
+            {
+                crate::mongo_replica_set_inter_node::mesh_set_edges_enabled_for_node(
+                    &mesh, index, true,
+                )
+                .await?;
+                if let Ok(mut guard) = self.disconnect_pause.lock() {
+                    guard.remove(&index);
+                }
+                self.emit_cluster_row(
+                    "reconnect_node",
+                    Some(index),
+                    Some("toxiproxy_mesh".to_string()),
+                );
+                return Ok(());
+            }
+        }
         self.unpause_node(index).await
     }
 
@@ -376,6 +415,11 @@ impl ClusterControl for Arc<MongoReplicaSetClusterControl> {
         let mut count = 0usize;
         let docker = docker_connect()?;
         for index in 0..snapshot.node_count {
+            if let Ok(guard) = self.disconnect_pause.lock() {
+                if guard.contains(&index) {
+                    continue;
+                }
+            }
             let container_id = snapshot.container_ids[index].as_str();
             let (running, paused) = inspect_running_paused(&docker, container_id).await?;
             if running && !paused {
@@ -387,6 +431,14 @@ impl ClusterControl for Arc<MongoReplicaSetClusterControl> {
 
     async fn reset_topology(&self) -> Result<(), ClusterError> {
         let snapshot = self.snapshot_or_err().await?;
+        #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+        if snapshot.inter_node_mesh_active {
+            if let Some(mesh) =
+                crate::mongo_replica_set_inter_node::mongo_inter_node_mesh_snapshot().await
+            {
+                crate::mongo_replica_set_inter_node::mesh_enable_all(&mesh).await?;
+            }
+        }
         let docker = docker_connect()?;
         for index in 0..snapshot.node_count {
             let container_id = snapshot.container_ids[index].as_str();
@@ -444,6 +496,30 @@ impl ClusterControl for Arc<MongoReplicaSetClusterControl> {
 
     fn node_count(&self) -> usize {
         self.rs_node_count
+    }
+
+    async fn partition_nodes(&self, node_a: usize, node_b: usize) -> Result<(), ClusterError> {
+        let snapshot = self.snapshot_or_err().await?;
+        MongoReplicaSetClusterControl::check_index(&snapshot, node_a)?;
+        MongoReplicaSetClusterControl::check_index(&snapshot, node_b)?;
+        #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+        if snapshot.inter_node_mesh_active {
+            if let Some(mesh) =
+                crate::mongo_replica_set_inter_node::mongo_inter_node_mesh_snapshot().await
+            {
+                crate::mongo_replica_set_inter_node::mesh_set_partition(
+                    &mesh, node_a, node_b, false,
+                )
+                .await?;
+                self.emit_cluster_row(
+                    "partition_nodes",
+                    None,
+                    Some(format!("node_a={node_a} node_b={node_b} toxiproxy_mesh")),
+                );
+                return Ok(());
+            }
+        }
+        Err(ClusterError::FaultInjectionNotAvailable)
     }
 }
 

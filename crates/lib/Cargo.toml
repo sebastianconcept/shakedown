@@ -521,6 +521,12 @@ name = "mongo_replica_set_vertical"
 path = "tests/mongo_replica_set_vertical.rs"
 required-features = ["mongodb-cluster"]
 
+# MongoDB replica set + inter-node Toxiproxy mesh (US-018); Docker + ignored
+[[test]]
+name = "mongo_replica_set_inter_node_toxiproxy"
+path = "tests/mongo_replica_set_inter_node_toxiproxy.rs"
+required-features = ["mongodb-cluster", "fault-injection"]
+
 # Kafka 3-broker KRaft cluster (Docker); ignored unless --ignored
 [[test]]
 name = "kafka_cluster_vertical"

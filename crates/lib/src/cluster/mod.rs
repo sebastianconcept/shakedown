@@ -105,6 +105,11 @@ pub trait ClusterControl: Send + Sync {
     async fn healthy_node_count(&self) -> Result<usize, ClusterError>;
     async fn reset_topology(&self) -> Result<(), ClusterError>;
     fn node_count(&self) -> usize;
+
+    /// Disable the bidirectional proxy pair between two nodes (inter-node Toxiproxy mesh when enabled).
+    async fn partition_nodes(&self, _node_a: usize, _node_b: usize) -> Result<(), ClusterError> {
+        Err(ClusterError::FaultInjectionNotAvailable)
+    }
 }
 
 /// Ergonomic wrapper around a [`ClusterControl`] implementation with optional [`Event`] emission.
@@ -236,6 +241,19 @@ impl ClusterHandle {
         let result = self.control.reset_topology().await;
         if result.is_ok() {
             self.emit_cluster_event("reset_topology", None, None);
+        }
+        result
+    }
+
+    /// See [`ClusterControl::partition_nodes`].
+    pub async fn partition_nodes(&self, node_a: usize, node_b: usize) -> Result<(), ClusterError> {
+        let result = self.control.partition_nodes(node_a, node_b).await;
+        if result.is_ok() {
+            self.emit_cluster_event(
+                "partition_nodes",
+                None,
+                Some(&format!("node_a={node_a} node_b={node_b}")),
+            );
         }
         result
     }

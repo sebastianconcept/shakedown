@@ -3921,6 +3921,8 @@ mod toxiproxy_impl {
         Idle,
         Running {
             api_base_url: String,
+            /// Docker container id (hex) for [`bollard::Docker::connect_network`] (US-018).
+            container_id: String,
             container: testcontainers::ContainerAsync<GenericImage>,
             refs: usize,
             image_key: String,
@@ -4069,8 +4071,10 @@ mod toxiproxy_impl {
                         .await
                         .map_err(Self::map_tc_err)?;
                     let api_base_url = format!("http://127.0.0.1:{port}");
+                    let container_id = node.id().to_string();
                     *guard = SuiteToxiproxyState::Running {
                         api_base_url: api_base_url.clone(),
+                        container_id,
                         container: node,
                         refs: 1,
                         image_key: want_key.clone(),
@@ -4183,6 +4187,19 @@ mod toxiproxy_impl {
             Ok(())
         }
     }
+
+    pub(crate) async fn toxiproxy_suite_container_id() -> Option<String> {
+        let guard = suite_toxiproxy_mutex().lock().await;
+        match &*guard {
+            SuiteToxiproxyState::Idle => None,
+            SuiteToxiproxyState::Running { container_id, .. } => Some(container_id.clone()),
+        }
+    }
+}
+
+#[cfg(feature = "fault-injection")]
+pub(crate) async fn toxiproxy_suite_container_id() -> Option<String> {
+    toxiproxy_impl::toxiproxy_suite_container_id().await
 }
 
 #[cfg(feature = "elasticsearch")]
