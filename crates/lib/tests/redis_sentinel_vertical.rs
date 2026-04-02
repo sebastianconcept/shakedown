@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use redis::AsyncCommands;
 use shakedown::{
-    run_scenario, BuiltinResource, Context, EventLog, RedisSentinelResource, RegisteredResource,
+    run_scenario, BuiltinResource, Context, EventLog, LogEntry, RedisSentinelResource,
+    RegisteredResource, CLUSTER_EVENT_SOURCE,
 };
 
 #[tokio::test]
@@ -121,4 +122,71 @@ async fn redis_sentinel_quorum_helpers_and_replicas() {
     )
     .await
     .expect("run_scenario should succeed");
+}
+
+#[tokio::test]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features redis-sentinel --test redis_sentinel_vertical -- --ignored"]
+async fn redis_sentinel_trigger_failover_changes_primary() {
+    let mut ctx = Context::new();
+    ctx.register_builtin(BuiltinResource::RedisSentinel(
+        RedisSentinelResource::new().with_image_tag_from_env(),
+    ));
+    let mut event_log = EventLog::new();
+
+    run_scenario(
+        &mut ctx,
+        "redis_sentinel_failover_ops",
+        |ctx: &mut Context| {
+            Box::pin(async move {
+                let cluster = ctx
+                    .redis_sentinel_cluster()
+                    .expect("redis sentinel cluster control after provision");
+                let before = cluster.current_master().await.expect("current_master");
+                cluster
+                    .trigger_failover()
+                    .await
+                    .expect("trigger_failover");
+                let after = cluster
+                    .await_failover_complete(std::time::Duration::from_secs(90))
+                    .await
+                    .expect("await_failover_complete");
+                assert_ne!(
+                    before, after,
+                    "failover should elect a different node as primary (before={before} after={after})"
+                );
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario should succeed");
+
+    let cluster_events: Vec<_> = event_log
+        .entries()
+        .iter()
+        .filter_map(|entry| match entry {
+            LogEntry::Application(ev) if ev.source == CLUSTER_EVENT_SOURCE => {
+                Some(ev.message.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        cluster_events
+            .iter()
+            .any(|message| message.contains("trigger_failover")),
+        "expected trigger_failover in event log: {cluster_events:?}"
+    );
+    assert!(
+        cluster_events
+            .iter()
+            .any(|message| message.contains("await_failover_complete")),
+        "expected await_failover_complete in event log: {cluster_events:?}"
+    );
+    assert!(
+        cluster_events
+            .iter()
+            .any(|message| message.contains("current_master")),
+        "expected current_master in event log: {cluster_events:?}"
+    );
 }

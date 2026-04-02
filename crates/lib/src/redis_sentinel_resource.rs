@@ -43,7 +43,9 @@ enum SuiteRedisSentinelState {
         redis_nodes: Vec<testcontainers::ContainerAsync<GenericImage>>,
         sentinel_nodes: Vec<testcontainers::ContainerAsync<GenericImage>>,
         redis_host_ports: Vec<u16>,
+        redis_bridge_ips: Vec<String>,
         sentinel_host_ports: Vec<u16>,
+        master_name: String,
         refs: usize,
         image_key: String,
     },
@@ -53,6 +55,51 @@ static SUITE_REDIS_SENTINEL: OnceLock<Mutex<SuiteRedisSentinelState>> = OnceLock
 
 fn suite_redis_sentinel_mutex() -> &'static Mutex<SuiteRedisSentinelState> {
     SUITE_REDIS_SENTINEL.get_or_init(|| Mutex::new(SuiteRedisSentinelState::Idle))
+}
+
+/// Snapshot of suite-shared Redis + Sentinel layout for cluster control (host ports, bridge IPs, container IDs).
+#[cfg(feature = "redis-sentinel")]
+pub(crate) struct RedisSentinelSuiteSnapshot {
+    pub(crate) client_host: String,
+    /// Parallel to [`Self::redis_bridge_ips`]; used by bindings and for future cluster helpers.
+    #[allow(dead_code)]
+    pub(crate) redis_host_ports: Vec<u16>,
+    pub(crate) redis_bridge_ips: Vec<String>,
+    pub(crate) redis_container_ids: Vec<String>,
+    pub(crate) sentinel_host_ports: Vec<u16>,
+    pub(crate) node_count: usize,
+    pub(crate) master_name: String,
+}
+
+/// Latest suite Redis Sentinel layout, if the suite has provisioned members.
+#[cfg(feature = "redis-sentinel")]
+pub(crate) async fn redis_sentinel_suite_snapshot() -> Option<RedisSentinelSuiteSnapshot> {
+    let guard = suite_redis_sentinel_mutex().lock().await;
+    match &*guard {
+        SuiteRedisSentinelState::Idle => None,
+        SuiteRedisSentinelState::Running {
+            redis_host_ports,
+            redis_bridge_ips,
+            sentinel_host_ports,
+            redis_nodes,
+            master_name,
+            ..
+        } => {
+            let container_ids = redis_nodes
+                .iter()
+                .map(|node| node.id().to_string())
+                .collect();
+            Some(RedisSentinelSuiteSnapshot {
+                client_host: harness_host().to_string(),
+                redis_host_ports: redis_host_ports.clone(),
+                redis_bridge_ips: redis_bridge_ips.clone(),
+                redis_container_ids: container_ids,
+                sentinel_host_ports: sentinel_host_ports.clone(),
+                node_count: REDIS_NODE_COUNT,
+                master_name: master_name.clone(),
+            })
+        }
+    }
 }
 
 fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
@@ -424,6 +471,13 @@ async fn provision_suite_inner(
 
             wait_master_replication(master_url.as_str(), REDIS_NODE_COUNT - 1).await?;
 
+            let mut redis_bridge_ips = Vec::with_capacity(redis_nodes.len());
+            for node in &redis_nodes {
+                let ip = container_ipv4_on_user_network(&docker, node.id(), network_name.as_str())
+                    .await?;
+                redis_bridge_ips.push(ip);
+            }
+
             let sentinel_shell = sentinel_config_shell_command(master_name, master_ip.as_str());
             let sentinel_wait = WaitFor::message_on_stdout("+monitor master");
 
@@ -474,7 +528,9 @@ async fn provision_suite_inner(
                 redis_nodes,
                 sentinel_nodes,
                 redis_host_ports: redis_host_ports_vec.clone(),
+                redis_bridge_ips,
                 sentinel_host_ports: sentinel_host_ports_vec.clone(),
+                master_name: master_name.to_string(),
                 refs: 1,
                 image_key: want_key.to_string(),
             };
@@ -581,6 +637,7 @@ impl Resource for RedisSentinelResource {
                 "sentinel_hosts": sentinel_hosts,
                 "master_name": master_name,
                 "replica_connection_urls": replica_connection_urls,
+                "redis_sentinel_cluster": "suite",
             })),
         }])
     }

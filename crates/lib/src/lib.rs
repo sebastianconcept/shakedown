@@ -172,6 +172,8 @@ pub mod phase;
 /// Does not require `kafka` or `rabbitmq`; transport implementations are added by those features.
 #[cfg(feature = "outbox")]
 pub mod publication;
+#[cfg(feature = "redis-sentinel")]
+mod redis_sentinel_cluster_control;
 /// Redis replication + Sentinel (`redis` + `cluster`; US-012+).
 #[cfg(feature = "redis-sentinel")]
 mod redis_sentinel_resource;
@@ -261,6 +263,11 @@ pub use crate::cluster::mongo_replica_set::{
 #[cfg(feature = "kafka-cluster")]
 pub use crate::cluster::kafka_cluster::{
     KafkaClusterClusterControl, KafkaClusterHandle, KafkaClusterMarker, KafkaClusterOps,
+};
+
+#[cfg(feature = "redis-sentinel")]
+pub use crate::cluster::redis_sentinel::{
+    RedisSentinelClusterControl, RedisSentinelHandle, RedisSentinelMarker, RedisSentinelOps,
 };
 
 #[cfg(any(
