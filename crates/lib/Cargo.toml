@@ -60,6 +60,7 @@ lapin = { version = "4.3", optional = true }
 noxious-client = { version = "1.0", optional = true }
 # GET /version readiness for Toxiproxy (same major as noxious-client’s reqwest)
 reqwest = { version = "0.11", optional = true, default-features = false, features = ["json", "rustls-tls"] }
+percent-encoding = { version = "2", optional = true }
 
 # Docker Engine API (read-only observability; feature `diagnostics`)
 # Align with testcontainers' bollard to avoid duplicate bollard-stubs versions in the lockfile.
@@ -193,11 +194,13 @@ rabbitmq = [
     "testcontainers-modules/rabbitmq",
     "diagnostics",
 ]
-# RabbitMQ Erlang cluster + quorum default queue type (US-016)
+# RabbitMQ Erlang cluster + quorum default queue type (US-016+)
 rabbitmq-cluster = [
     "rabbitmq",
     "cluster",
     "dep:uuid",
+    "dep:reqwest",
+    "dep:percent-encoding",
     "shakedown-macros/rabbitmq-cluster",
 ]
 # Fault injection (Toxiproxy via testcontainers + noxious-client); composable with `kafka` etc.
