@@ -11,8 +11,8 @@ use std::time::Duration;
 use mongodb::bson::doc;
 
 use shakedown::{
-    run_scenario, BuiltinResource, Context, EventLog, MongoReplicaSetResource, RegisteredResource,
-    CLUSTER_EVENT_SOURCE,
+    run_scenario, BuiltinResource, Context, EventLog, MongoReplicaSetMarker,
+    MongoReplicaSetResource, RegisteredResource, CLUSTER_EVENT_SOURCE,
 };
 
 #[tokio::test]
@@ -135,5 +135,70 @@ async fn mongo_replica_set_step_down_elects_different_primary() {
             .any(|event_record| event_record.message.contains("step_down_primary")),
         "expected cluster event for step_down_primary in {:?}",
         cluster_events
+    );
+}
+
+/// Models suite-shared behavior: one scenario stops a member, the next “scenario” restores the
+/// cluster via [`shakedown::ClusterHandle::reset_topology`] (single `run_scenario` so the harness
+/// does not tear down the suite between steps).
+#[tokio::test]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features mongodb-cluster --test mongo_replica_set_vertical -- --ignored"]
+async fn mongo_replica_set_reset_topology_restores_quorum_after_stop() {
+    let mut ctx = Context::new();
+    ctx.register_builtin(BuiltinResource::MongoReplicaSet(
+        MongoReplicaSetResource::new().with_image_tag_from_env(),
+    ));
+    let mut event_log = EventLog::new();
+
+    run_scenario(
+        &mut ctx,
+        "mongo_rs_reset_topology_suite",
+        |ctx: &mut Context| {
+            Box::pin(async move {
+                let cluster = ctx
+                    .cluster_handle::<MongoReplicaSetMarker>()
+                    .expect("cluster handle after provision");
+
+                cluster.stop_node(1).await.expect("stop node 1");
+                assert!(
+                    cluster.healthy_node_count().await.expect("count") < 3,
+                    "expected a stopped node to reduce healthy count"
+                );
+
+                cluster
+                    .reset_topology()
+                    .await
+                    .expect("reset_topology after stop");
+
+                assert_eq!(
+                    cluster
+                        .healthy_node_count()
+                        .await
+                        .expect("count after reset"),
+                    3,
+                    "expected 3/3 containers running after reset_topology"
+                );
+
+                let mongo = ctx.mongo_cluster().expect("mongo cluster ops");
+                let primary = mongo.current_primary().await.expect("primary after reset");
+                assert!(primary < 3, "expected primary index in 0..3, got {primary}");
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("scenario");
+
+    let reset_events: Vec<_> = event_log
+        .events()
+        .filter(|event_record| {
+            event_record.source == CLUSTER_EVENT_SOURCE
+                && event_record.message.contains("reset_topology")
+        })
+        .collect();
+    assert!(
+        !reset_events.is_empty(),
+        "expected cluster event log lines for reset_topology, got {:?}",
+        event_log.events().collect::<Vec<_>>()
     );
 }

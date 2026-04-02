@@ -72,22 +72,35 @@ async fn repl_set_status_from_any_node(
     snapshot: &crate::mongo_replica_set_resource::MongoReplicaSetSuiteSnapshot,
 ) -> Result<Document, ClusterError> {
     let host = snapshot.client_host.as_str();
-    let first_port =
-        snapshot
-            .host_ports
-            .first()
-            .copied()
-            .ok_or_else(|| ClusterError::EngineOperation {
-                message: "replica set suite has no host ports".into(),
-                source: Box::new(std::io::Error::other("empty host_ports")),
-            })?;
-    let uri = admin_uri_for_host_and_port(host, first_port);
-    let client = mongo_client(uri.as_str()).await.map_err(map_mongo_err)?;
-    let admin = client.database("admin");
-    admin
-        .run_command(doc! { "replSetGetStatus": 1 })
-        .await
-        .map_err(map_mongo_err)
+    if snapshot.host_ports.is_empty() {
+        return Err(ClusterError::EngineOperation {
+            message: "replica set suite has no host ports".into(),
+            source: Box::new(std::io::Error::other("empty host_ports")),
+        });
+    }
+    let mut last_error: Option<mongodb::error::Error> = None;
+    for port in &snapshot.host_ports {
+        let uri = admin_uri_for_host_and_port(host, *port);
+        let client = match mongo_client(uri.as_str()).await {
+            Ok(client) => client,
+            Err(error) => {
+                last_error = Some(error);
+                continue;
+            }
+        };
+        let admin = client.database("admin");
+        match admin.run_command(doc! { "replSetGetStatus": 1 }).await {
+            Ok(document) => return Ok(document),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    match last_error {
+        Some(error) => Err(map_mongo_err(error)),
+        None => Err(ClusterError::EngineOperation {
+            message: "replSetGetStatus: no replica set member responded".into(),
+            source: Box::new(std::io::Error::other("no host responded")),
+        }),
+    }
 }
 
 fn docker_connect() -> Result<Docker, ClusterError> {
@@ -396,18 +409,36 @@ impl ClusterControl for Arc<MongoReplicaSetClusterControl> {
         if let Ok(mut guard) = self.disconnect_pause.lock() {
             guard.clear();
         }
-        let deadline = Instant::now() + Duration::from_secs(90);
+        self.emit_cluster_row(
+            "reset_topology",
+            None,
+            Some(
+                "restarted_or_unpaused_all_nodes; awaiting PRIMARY+SECONDARY convergence"
+                    .to_string(),
+            ),
+        );
+        let convergence_timeout = Duration::from_secs(90);
+        let deadline = Instant::now() + convergence_timeout;
         loop {
-            let status = repl_set_status_from_any_node(&snapshot).await?;
-            if members_healthy(&status, snapshot.node_count) {
-                return Ok(());
-            }
             if Instant::now() > deadline {
                 return Err(ClusterError::QuorumTimeout {
-                    timeout: Duration::from_secs(90),
+                    timeout: convergence_timeout,
                 });
             }
-            tokio::time::sleep(Duration::from_millis(400)).await;
+            match repl_set_status_from_any_node(&snapshot).await {
+                Ok(status) if members_healthy(&status, snapshot.node_count) => {
+                    let primary_index = primary_index_from_status(&status)?;
+                    self.emit_cluster_row(
+                        "reset_topology",
+                        None,
+                        Some(format!("converged primary_index={primary_index}")),
+                    );
+                    return Ok(());
+                }
+                Ok(_) | Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                }
+            }
         }
     }
 
