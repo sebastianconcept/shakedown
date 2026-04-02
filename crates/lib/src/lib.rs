@@ -150,6 +150,8 @@ pub mod mock_service;
 /// MongoDB replica set resource (`mongodb` + `cluster`; US-003+).
 #[cfg(feature = "mongodb-cluster")]
 mod mongo_replica_set_cluster_control;
+#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+mod mongo_replica_set_inter_node;
 #[cfg(feature = "mongodb-cluster")]
 mod mongo_replica_set_resource;
 /// Outbox table setup and assertions (`outbox` + at least one storage engine feature).

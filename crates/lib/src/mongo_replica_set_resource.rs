@@ -58,6 +58,39 @@ fn suite_mongo_rs_mutex() -> &'static Mutex<SuiteMongoRsState> {
     SUITE_MONGO_RS.get_or_init(|| Mutex::new(SuiteMongoRsState::Idle))
 }
 
+#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+static INTER_NODE_FINALIZE_PENDING: OnceLock<Mutex<Option<InterNodeFinalizePending>>> =
+    OnceLock::new();
+
+#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+fn inter_node_finalize_mutex() -> &'static Mutex<Option<InterNodeFinalizePending>> {
+    INTER_NODE_FINALIZE_PENDING.get_or_init(|| Mutex::new(None))
+}
+
+/// Payload for [`crate::mongo_replica_set_inter_node::finalize_mongo_replica_set_inter_node_mesh`].
+#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+#[derive(Debug)]
+pub(crate) struct InterNodeFinalizePending {
+    pub(crate) network_name: String,
+    pub(crate) suite_key: String,
+    pub(crate) node_count: usize,
+    pub(crate) host_ports: Vec<u16>,
+    pub(crate) database_name: String,
+    pub(crate) replica_set_id: String,
+}
+
+#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+pub(crate) async fn set_inter_node_finalize_pending(pending: InterNodeFinalizePending) {
+    let mut guard = inter_node_finalize_mutex().lock().await;
+    *guard = Some(pending);
+}
+
+#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+pub(crate) async fn take_inter_node_finalize_pending() -> Option<InterNodeFinalizePending> {
+    let mut guard = inter_node_finalize_mutex().lock().await;
+    guard.take()
+}
+
 /// Snapshot of suite-shared replica set endpoints for cluster control (host-mapped ports + container IDs).
 #[cfg(feature = "mongodb-cluster")]
 pub(crate) struct MongoReplicaSetSuiteSnapshot {
@@ -65,6 +98,12 @@ pub(crate) struct MongoReplicaSetSuiteSnapshot {
     pub(crate) host_ports: Vec<u16>,
     pub(crate) container_ids: Vec<String>,
     pub(crate) node_count: usize,
+    /// `true` when inter-node Toxiproxy mesh is active (US-018).
+    #[cfg_attr(
+        not(all(feature = "fault-injection", feature = "mongodb-cluster")),
+        allow(dead_code)
+    )]
+    pub(crate) inter_node_mesh_active: bool,
 }
 
 /// Latest suite replica set layout, if the suite has provisioned members.
@@ -85,6 +124,18 @@ pub(crate) async fn mongo_replica_set_suite_snapshot() -> Option<MongoReplicaSet
                 host_ports: host_ports.clone(),
                 container_ids,
                 node_count: *node_count,
+                inter_node_mesh_active: {
+                    #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+                    {
+                        crate::mongo_replica_set_inter_node::mongo_inter_node_mesh_snapshot()
+                            .await
+                            .is_some()
+                    }
+                    #[cfg(not(all(feature = "fault-injection", feature = "mongodb-cluster")))]
+                    {
+                        false
+                    }
+                },
             })
         }
     }
@@ -108,8 +159,17 @@ fn admin_uri_for_host_and_port(host: &str, port: u16) -> String {
 /// Rust driver to stay in replica-set discovery mode and surface `RsGhost` while nodes were still
 /// converging, even with `directConnection`. Replica set id remains in [`ResourceHandle`] metadata as
 /// `replica_set`.
-fn harness_connection_url(host: &str, primary_mapped_port: u16, database_name: &str) -> String {
+pub(crate) fn harness_connection_url(
+    host: &str,
+    primary_mapped_port: u16,
+    database_name: &str,
+) -> String {
     format!("mongodb://{host}:{primary_mapped_port}/{database_name}?directConnection=true&w=1")
+}
+
+#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+pub(crate) fn harness_client_host() -> &'static str {
+    client_host_for_harness()
 }
 
 fn client_host_for_harness() -> &'static str {
@@ -118,6 +178,19 @@ fn client_host_for_harness() -> &'static str {
 
 async fn mongo_client(uri: &str) -> Result<mongodb::Client, mongodb::error::Error> {
     mongodb::Client::with_uri_str(uri).await
+}
+
+/// Replica set member index from `members[]` document (`_id` preferred; falls back to `mongo-N` hostnames).
+pub(crate) fn replica_set_member_index_from_doc(member_doc: &Document) -> Option<usize> {
+    if let Ok(id) = member_doc.get_i32("_id") {
+        if id >= 0 {
+            return Some(id as usize);
+        }
+    }
+    let name = member_doc.get_str("name").ok()?;
+    name.strip_prefix("mongo-")
+        .and_then(|rest| rest.split(':').next())
+        .and_then(|index| index.parse::<usize>().ok())
 }
 
 fn primary_mapped_port_from_status(
@@ -139,24 +212,15 @@ fn primary_mapped_port_from_status(
         if member_doc.get_str("stateStr").unwrap_or("") != "PRIMARY" {
             continue;
         }
-        let name = member_doc
-            .get_str("name")
-            .map_err(|_| InfrastructureError::Provision {
-                resource: "mongodb-cluster".into(),
-                source: Box::new(std::io::Error::other(
-                    "replSetGetStatus: PRIMARY member missing name",
-                )),
-            })?;
-        let index = name
-            .strip_prefix("mongo-")
-            .and_then(|rest| rest.split(':').next())
-            .and_then(|index| index.parse::<usize>().ok())
-            .ok_or_else(|| InfrastructureError::Provision {
+        let index = replica_set_member_index_from_doc(member_doc).ok_or_else(|| {
+            let name = member_doc.get_str("name").unwrap_or("?");
+            InfrastructureError::Provision {
                 resource: "mongodb-cluster".into(),
                 source: Box::new(std::io::Error::other(format!(
                     "unrecognized member host in replSetGetStatus: {name}"
                 ))),
-            })?;
+            }
+        })?;
         let port =
             host_ports
                 .get(index)
@@ -255,6 +319,9 @@ pub struct MongoReplicaSetResource {
     client_host: Option<String>,
     host_ports: Vec<u16>,
     database_name: String,
+    /// When true and Toxiproxy is registered, `replSetInitiate` runs after the mesh is created (US-018).
+    #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+    defer_repl_set_init: bool,
 }
 
 impl Default for MongoReplicaSetResource {
@@ -274,7 +341,14 @@ impl MongoReplicaSetResource {
             client_host: None,
             host_ports: Vec::new(),
             database_name: String::new(),
+            #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+            defer_repl_set_init: false,
         }
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+    pub(crate) fn set_defer_repl_set_init(&mut self, defer: bool) {
+        self.defer_repl_set_init = defer;
     }
 
     /// Override member count (minimum **3** for a majority replica set).
@@ -319,6 +393,11 @@ impl Resource for MongoReplicaSetResource {
         let node_count = self.node_count;
         let replica_set_id = self.replica_set_id.clone();
 
+        #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+        let defer_inter_node = self.defer_repl_set_init;
+        #[cfg(not(all(feature = "fault-injection", feature = "mongodb-cluster")))]
+        let defer_inter_node = false;
+
         timeout(
             PROVISION_TIMEOUT,
             provision_suite_inner(
@@ -327,6 +406,7 @@ impl Resource for MongoReplicaSetResource {
                 want_key.as_str(),
                 node_count,
                 replica_set_id.as_str(),
+                defer_inter_node,
             ),
         )
         .await
@@ -337,6 +417,21 @@ impl Resource for MongoReplicaSetResource {
                 PROVISION_TIMEOUT
             ))),
         })?
+        .map(|stage| match stage {
+            #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+            ProvisionStage::InterNodeDeferred {
+                client_host,
+                host_ports,
+            } => {
+                let primary_mapped_port = host_ports[0];
+                (client_host, host_ports, primary_mapped_port)
+            }
+            ProvisionStage::Ready {
+                client_host,
+                host_ports,
+                primary_mapped_port,
+            } => (client_host, host_ports, primary_mapped_port),
+        })
         .map(|(client_host, host_ports, primary_mapped_port)| {
             self.holds_suite_ref = true;
             self.client_host = Some(client_host.clone());
@@ -446,6 +541,9 @@ impl Resource for MongoReplicaSetResource {
         drop(guard);
 
         if let Some((network_name, nodes)) = teardown {
+            #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+            crate::mongo_replica_set_inter_node::clear_mongo_inter_node_mesh_state().await;
+
             let docker =
                 Docker::connect_with_defaults().map_err(|error| InfrastructureError::Teardown {
                     resource: "mongodb-cluster".into(),
@@ -471,13 +569,32 @@ impl Resource for MongoReplicaSetResource {
     }
 }
 
+enum ProvisionStage {
+    /// `replSetInitiate` runs in [`crate::mongo_replica_set_inter_node::finalize_mongo_replica_set_inter_node_mesh`].
+    #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+    InterNodeDeferred {
+        client_host: String,
+        host_ports: Vec<u16>,
+    },
+    Ready {
+        client_host: String,
+        host_ports: Vec<u16>,
+        primary_mapped_port: u16,
+    },
+}
+
+#[cfg_attr(
+    not(all(feature = "fault-injection", feature = "mongodb-cluster")),
+    allow(unused_variables)
+)]
 async fn provision_suite_inner(
-    _database_name: &str,
+    database_name: &str,
     tag: &str,
     want_key: &str,
     node_count: usize,
     replica_set_id: &str,
-) -> Result<(String, Vec<u16>, u16), InfrastructureError> {
+    defer_inter_node: bool,
+) -> Result<ProvisionStage, InfrastructureError> {
     use testcontainers::core::{IntoContainerPort, WaitFor};
     use testcontainers::runners::AsyncRunner;
     use testcontainers::{GenericImage, ImageExt};
@@ -527,6 +644,34 @@ async fn provision_suite_inner(
                     .map_err(map_tc_err)?;
                 host_ports.push(mapped);
                 nodes.push(container);
+            }
+
+            #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+            if defer_inter_node {
+                #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+                set_inter_node_finalize_pending(InterNodeFinalizePending {
+                    network_name: network_name.clone(),
+                    suite_key: suite_id.clone(),
+                    node_count,
+                    host_ports: host_ports.clone(),
+                    database_name: database_name.to_string(),
+                    replica_set_id: replica_set_id.to_string(),
+                })
+                .await;
+
+                *guard = SuiteMongoRsState::Running {
+                    network_name,
+                    nodes,
+                    host_ports: host_ports.clone(),
+                    refs: 1,
+                    image_key: want_key.to_string(),
+                    node_count,
+                };
+                drop(guard);
+                return Ok(ProvisionStage::InterNodeDeferred {
+                    client_host: harness_host.clone(),
+                    host_ports,
+                });
             }
 
             let init_uri = admin_uri_for_host_and_port(client_host_for_harness(), host_ports[0]);
@@ -610,5 +755,24 @@ async fn provision_suite_inner(
     )
     .await?;
 
-    Ok((client_host, host_ports, primary_mapped_port))
+    Ok(ProvisionStage::Ready {
+        client_host,
+        host_ports,
+        primary_mapped_port,
+    })
+}
+
+/// Used after inter-node mesh + `replSetInitiate` in [`crate::mongo_replica_set_inter_node`].
+#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+pub(crate) async fn wait_for_primary_election_after_init(
+    host_ports: &[u16],
+    node_count: usize,
+) -> Result<u16, InfrastructureError> {
+    wait_for_primary_election(
+        client_host_for_harness(),
+        host_ports[0],
+        host_ports,
+        node_count,
+    )
+    .await
 }

@@ -181,6 +181,33 @@ impl FaultHandle {
         Ok(())
     }
 
+    /// Enable or disable a proxy by name (inter-node mesh / partition simulation).
+    ///
+    /// Disabling drops active connections through the proxy; enabling restores pass-through.
+    pub async fn set_proxy_enabled(&self, proxy_name: &str, enabled: bool) -> Result<(), Error> {
+        let mut proxy = self
+            .client
+            .proxy(proxy_name)
+            .await
+            .map_err(Error::ToxicOperationFailed)?;
+        if enabled {
+            proxy.enable().await.map_err(Error::ToxicOperationFailed)?;
+        } else {
+            proxy.disable().await.map_err(Error::ToxicOperationFailed)?;
+        }
+        let upstream = self
+            .proxy_upstreams
+            .get(proxy_name)
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
+        let message = format!(
+            "action={} proxy='{proxy_name}' upstream={upstream}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        self.push_fault_event(message);
+        Ok(())
+    }
+
     /// Listen address for a proxy name after successful [`FaultHandle::create_proxy`], if known.
     pub fn proxy_listen_address(&self, proxy_name: &str) -> Option<&str> {
         self.proxy_listen_addresses

@@ -2520,6 +2520,27 @@ async fn teardown_all_resources(ctx: &mut Context) {
     ctx.clear_fault_handle();
 }
 
+#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+fn prepare_mongo_replica_set_inter_node_defer(ctx: &mut Context) {
+    use crate::resources::{BuiltinResource, RegisteredResource};
+    let defer = ctx.resources().iter().any(|registered| {
+        matches!(
+            registered,
+            RegisteredResource::Builtin(BuiltinResource::Toxiproxy(_))
+        )
+    }) && ctx.resources().iter().any(|registered| {
+        matches!(
+            registered,
+            RegisteredResource::Builtin(BuiltinResource::MongoReplicaSet(_))
+        )
+    });
+    for registered in ctx.resources_mut() {
+        if let RegisteredResource::Builtin(BuiltinResource::MongoReplicaSet(mongo)) = registered {
+            mongo.set_defer_repl_set_init(defer);
+        }
+    }
+}
+
 #[cfg(feature = "mongodb-cluster")]
 async fn register_mongo_replica_set_cluster_control(ctx: &mut Context, handles: &[ResourceHandle]) {
     use std::sync::Arc;
@@ -3195,6 +3216,9 @@ where
     // Provision phase (async)
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting provision phase");
 
+    #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+    prepare_mongo_replica_set_inter_node_defer(ctx);
+
     let scenario_id = ctx.scenario_id().clone();
     let n = ctx.resources().len();
     for i in 0..n {
@@ -3333,6 +3357,51 @@ where
                 emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
                 return Err(e.into());
             }
+        }
+    }
+
+    #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
+    {
+        if let Err(error) =
+            crate::mongo_replica_set_inter_node::finalize_mongo_replica_set_inter_node_mesh(ctx)
+                .await
+        {
+            event_log.append_raw(
+                EventLevel::Error,
+                "lifecycle",
+                format!("Provision failed (MongoDB inter-node mesh): {error}"),
+            );
+            teardown_all_resources(ctx).await;
+            #[cfg(all(
+                any(
+                    feature = "kafka",
+                    feature = "rabbitmq",
+                    feature = "postgres",
+                    feature = "mariadb",
+                    feature = "mysql",
+                    feature = "redis",
+                    feature = "valkey",
+                    feature = "mongodb",
+                    feature = "nats",
+                    feature = "neo4j",
+                    feature = "elasticsearch",
+                    feature = "opensearch",
+                    feature = "qdrant",
+                    feature = "weaviate",
+                    feature = "influxdb",
+                    feature = "timescaledb",
+                    feature = "services",
+                ),
+                not(feature = "no-diagnostics"),
+            ))]
+            shakedown_merge_diagnostics!(
+                docker_events_monitor,
+                resource_stats_monitor,
+                container_logs_monitor,
+                event_log
+            );
+            emit_failure_timeline_on_infra_err(event_log, &scenario_id, &error);
+            return Err(error.into());
         }
     }
 
