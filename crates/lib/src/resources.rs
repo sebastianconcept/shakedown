@@ -274,6 +274,10 @@ pub enum BuiltinResource {
     /// Docker-backed MongoDB (official image via testcontainers-modules; suite-shared `mongod`).
     Mongo(MongoResource),
 
+    #[cfg(feature = "mongodb-cluster")]
+    /// Docker-backed MongoDB replica set (multiple `mongod` containers on a suite bridge network).
+    MongoReplicaSet(crate::MongoReplicaSetResource),
+
     #[cfg(feature = "nats")]
     /// Docker-backed NATS (official image via testcontainers-modules; suite-shared server; core pub/sub only).
     Nats(NatsResource),
@@ -337,6 +341,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Valkey(r) => r.provision(scenario_id).await,
             #[cfg(feature = "mongodb")]
             BuiltinResource::Mongo(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "mongodb-cluster")]
+            BuiltinResource::MongoReplicaSet(r) => r.provision(scenario_id).await,
             #[cfg(feature = "nats")]
             BuiltinResource::Nats(r) => r.provision(scenario_id).await,
             #[cfg(feature = "neo4j")]
@@ -381,6 +387,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Valkey(r) => r.check_ready().await,
             #[cfg(feature = "mongodb")]
             BuiltinResource::Mongo(r) => r.check_ready().await,
+            #[cfg(feature = "mongodb-cluster")]
+            BuiltinResource::MongoReplicaSet(r) => r.check_ready().await,
             #[cfg(feature = "nats")]
             BuiltinResource::Nats(r) => r.check_ready().await,
             #[cfg(feature = "neo4j")]
@@ -425,6 +433,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Valkey(r) => r.apply_default_seed().await,
             #[cfg(feature = "mongodb")]
             BuiltinResource::Mongo(r) => r.apply_default_seed().await,
+            #[cfg(feature = "mongodb-cluster")]
+            BuiltinResource::MongoReplicaSet(r) => r.apply_default_seed().await,
             #[cfg(feature = "nats")]
             BuiltinResource::Nats(r) => r.apply_default_seed().await,
             #[cfg(feature = "neo4j")]
@@ -469,6 +479,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Valkey(r) => r.teardown().await,
             #[cfg(feature = "mongodb")]
             BuiltinResource::Mongo(r) => r.teardown().await,
+            #[cfg(feature = "mongodb-cluster")]
+            BuiltinResource::MongoReplicaSet(r) => r.teardown().await,
             #[cfg(feature = "nats")]
             BuiltinResource::Nats(r) => r.teardown().await,
             #[cfg(feature = "neo4j")]

@@ -138,6 +138,9 @@ pub mod lifecycle;
 /// Service mock service types and traits (`mock-services` feature, default).
 #[cfg(feature = "mock-services")]
 pub mod mock_service;
+/// MongoDB replica set resource (`mongodb` + `cluster`; US-003+).
+#[cfg(feature = "mongodb-cluster")]
+mod mongo_replica_set_resource;
 /// Outbox table setup and assertions (`outbox` + at least one storage engine feature).
 #[cfg(all(
     feature = "outbox",
@@ -370,6 +373,8 @@ pub use crate::resources::RedisResource;
 #[cfg(feature = "valkey")]
 pub use crate::resources::ValkeyResource;
 
+#[cfg(feature = "mongodb-cluster")]
+pub use crate::mongo_replica_set_resource::MongoReplicaSetResource;
 #[cfg(feature = "mongodb")]
 pub use crate::resources::{MongoBindings, MongoResource};
 
