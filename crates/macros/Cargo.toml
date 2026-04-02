@@ -43,3 +43,5 @@ rabbitmq = []
 sqlite = []
 # MongoDB replica set cluster (propagates to `resources = [MongoReplicaSet]`)
 mongodb-cluster = []
+# Kafka KRaft multi-broker cluster (propagates to `resources = [KafkaCluster]`)
+kafka-cluster = []
