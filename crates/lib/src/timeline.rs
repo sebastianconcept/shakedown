@@ -375,6 +375,86 @@ fn generate_root_cause_hints(
     out
 }
 
+/// Mode 3 hints: classify load saturation (accidental) vs service errors during cluster work (essential).
+fn generate_mode_three_load_cluster_hints(
+    entries: &[(usize, &LogEntry)],
+    baseline_secs: u64,
+    failure_secs: u64,
+) -> Vec<RootCauseHint> {
+    let mut out = Vec::new();
+    let assertion_offset_ms = failure_secs
+        .saturating_sub(baseline_secs)
+        .saturating_mul(1000);
+
+    let cluster_before_failure = entries.iter().any(|(_, entry)| {
+        matches!(
+            entry,
+            LogEntry::Application(event)
+                if event.source == "cluster"
+                    && event.timestamp < failure_secs
+                    && (event.message.contains("step_down_primary")
+                        || event.message.contains("await_new_primary"))
+        )
+    });
+
+    let load_failures_while_cluster = entries.iter().any(|(_, entry)| {
+        matches!(
+            entry,
+            LogEntry::Application(event)
+                if event.source == "load"
+                    && event.timestamp < failure_secs
+                    && event.message.contains("iteration failed")
+        )
+    }) && cluster_before_failure;
+
+    if load_failures_while_cluster {
+        out.push(RootCauseHint {
+            hint_type: "service_errors_during_cluster_topology".into(),
+            container: "cluster+load".into(),
+            event_offset_ms: 0,
+            assertion_offset_ms,
+            gap_ms: assertion_offset_ms,
+            message: "Load iterations failed while cluster topology operations (e.g. step_down / election) were in flight — review service retry/driver behavior (essential complexity vs cluster stabilization)."
+                .into(),
+            mem_bytes: None,
+            mem_limit: None,
+        });
+    }
+
+    let dropped_during_baseline = entries.iter().find_map(|(_, entry)| {
+        if let LogEntry::Application(event) = entry {
+            if event.source == "load"
+                && event.timestamp < failure_secs
+                && event.message.contains("iteration dropped")
+                && event.message.contains("baseline")
+            {
+                let event_offset_ms = event
+                    .timestamp
+                    .saturating_sub(baseline_secs)
+                    .saturating_mul(1000);
+                return Some(event_offset_ms);
+            }
+        }
+        None
+    });
+
+    if let Some(event_offset_ms) = dropped_during_baseline {
+        out.push(RootCauseHint {
+            hint_type: "load_saturation_baseline_accidental".into(),
+            container: "load".into(),
+            event_offset_ms,
+            assertion_offset_ms,
+            gap_ms: assertion_offset_ms.saturating_sub(event_offset_ms),
+            message: "Load generator dropped iterations during a phase named baseline — workers saturated; raise max_workers or lower rate (test infrastructure / accidental complexity)."
+                .into(),
+            mem_bytes: None,
+            mem_limit: None,
+        });
+    }
+
+    out
+}
+
 fn root_cause_hints_to_json_values(hints: &[RootCauseHint]) -> Vec<serde_json::Value> {
     hints
         .iter()
@@ -514,8 +594,13 @@ pub fn build_failure_timeline_document(
     }
 
     let (_, failure_secs) = log_timestamp_bounds(&entries);
-    let root_cause_hints =
+    let mut root_cause_hints =
         generate_root_cause_hints(&entries, baseline_secs, failure_secs, options, &at_failure);
+    root_cause_hints.extend(generate_mode_three_load_cluster_hints(
+        &entries,
+        baseline_secs,
+        failure_secs,
+    ));
     let hints = root_cause_hints_to_json_values(&root_cause_hints);
 
     FailureTimelineDocument {

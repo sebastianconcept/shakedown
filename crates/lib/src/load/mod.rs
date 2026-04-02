@@ -358,6 +358,63 @@ pub enum LoadError {
         /// Error message.
         message: String,
     },
+    /// load did not recover within {timeout:?} (rolling error rate stayed above threshold)
+    RecoveryTimeout {
+        /// Configured await timeout.
+        timeout: Duration,
+    },
+}
+
+/// Tunables for [`LoadHandle::await_recovery`](handle::LoadHandle::await_recovery) (US-009).
+#[derive(Debug, Clone)]
+pub struct RecoveryConfig {
+    /// Wall-clock budget for waiting until the rolling error rate is at or below [`Self::error_rate_threshold`].
+    pub timeout: Duration,
+    /// Target maximum error rate (failed / completed) over [`Self::rolling_window`], e.g. `0.0` for zero failures in-window.
+    pub error_rate_threshold: f64,
+    /// Rolling window for error-rate checks (and threshold-crossing alarms).
+    pub rolling_window: Duration,
+    /// Poll interval while waiting for recovery.
+    pub poll_interval: Duration,
+    /// Emit [`Event`] when rolling error rate crosses above this fraction (e.g. `0.10` for 10%).
+    pub alert_threshold: f64,
+}
+
+impl RecoveryConfig {
+    /// Default recovery wait: 1s rolling window, 50ms poll, 10% alert threshold crossings.
+    pub fn new(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            error_rate_threshold: 0.0,
+            rolling_window: Duration::from_secs(1),
+            poll_interval: Duration::from_millis(50),
+            alert_threshold: 0.10,
+        }
+    }
+
+    /// Set the recovery target error rate (default `0.0`).
+    pub fn with_error_rate_threshold(mut self, error_rate_threshold: f64) -> Self {
+        self.error_rate_threshold = error_rate_threshold;
+        self
+    }
+
+    /// Set the rolling window used for error-rate checks (default 1s).
+    pub fn with_rolling_window(mut self, rolling_window: Duration) -> Self {
+        self.rolling_window = rolling_window;
+        self
+    }
+
+    /// Set poll interval (default 50ms).
+    pub fn with_poll_interval(mut self, poll_interval: Duration) -> Self {
+        self.poll_interval = poll_interval;
+        self
+    }
+
+    /// Set alarm threshold for “error rate crossed above X%” events (default 10%).
+    pub fn with_alert_threshold(mut self, alert_threshold: f64) -> Self {
+        self.alert_threshold = alert_threshold;
+        self
+    }
 }
 
 #[cfg(test)]
