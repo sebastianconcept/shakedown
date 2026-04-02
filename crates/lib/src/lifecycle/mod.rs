@@ -380,6 +380,10 @@ pub struct Context {
     #[cfg(feature = "kafka-cluster")]
     kafka_cluster_control:
         Option<std::sync::Arc<crate::kafka_cluster_cluster_control::KafkaClusterClusterControl>>,
+    /// Shared Redis Sentinel cluster control ([`crate::cluster::redis_sentinel::RedisSentinelOps`]).
+    #[cfg(feature = "redis-sentinel")]
+    redis_sentinel_cluster:
+        Option<std::sync::Arc<crate::redis_sentinel_cluster_control::RedisSentinelClusterControl>>,
     /// Merge point for [`crate::load::LoadHandle`] timeline rows (US-007+); set for the run phase only.
     #[cfg(feature = "load")]
     load_event_sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
@@ -482,6 +486,8 @@ impl Context {
             mongo_replica_set_cluster: None,
             #[cfg(feature = "kafka-cluster")]
             kafka_cluster_control: None,
+            #[cfg(feature = "redis-sentinel")]
+            redis_sentinel_cluster: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -583,6 +589,8 @@ impl Context {
             mongo_replica_set_cluster: None,
             #[cfg(feature = "kafka-cluster")]
             kafka_cluster_control: None,
+            #[cfg(feature = "redis-sentinel")]
+            redis_sentinel_cluster: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -684,6 +692,8 @@ impl Context {
             mongo_replica_set_cluster: None,
             #[cfg(feature = "kafka-cluster")]
             kafka_cluster_control: None,
+            #[cfg(feature = "redis-sentinel")]
+            redis_sentinel_cluster: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -791,6 +801,26 @@ impl Context {
         self.kafka_cluster_control
             .as_ref()
             .map(crate::cluster::kafka_cluster::KafkaClusterHandle::new)
+    }
+
+    #[cfg(feature = "redis-sentinel")]
+    pub(crate) fn set_redis_sentinel_cluster(
+        &mut self,
+        cluster: Option<
+            std::sync::Arc<crate::redis_sentinel_cluster_control::RedisSentinelClusterControl>,
+        >,
+    ) {
+        self.redis_sentinel_cluster = cluster;
+    }
+
+    /// Redis Sentinel failover and primary discovery ([`crate::cluster::redis_sentinel::RedisSentinelOps`]).
+    #[cfg(feature = "redis-sentinel")]
+    pub fn redis_sentinel_cluster(
+        &self,
+    ) -> Option<crate::cluster::redis_sentinel::RedisSentinelHandle<'_>> {
+        self.redis_sentinel_cluster
+            .as_ref()
+            .map(crate::cluster::redis_sentinel::RedisSentinelHandle::new)
     }
 
     /// Get a reference to all registered resources.
@@ -2479,6 +2509,40 @@ async fn register_kafka_cluster_control(ctx: &mut Context, handles: &[ResourceHa
     }
 }
 
+#[cfg(feature = "redis-sentinel")]
+async fn register_redis_sentinel_cluster_control(ctx: &mut Context, handles: &[ResourceHandle]) {
+    use std::sync::Arc;
+
+    use crate::cluster::redis_sentinel::RedisSentinelMarker;
+    use crate::cluster::ClusterHandle;
+    use crate::redis_sentinel_cluster_control::RedisSentinelClusterControl;
+    use crate::redis_sentinel_resource::redis_sentinel_suite_snapshot;
+
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        if meta
+            .get("redis_sentinel_cluster")
+            .and_then(|value| value.as_str())
+            != Some("suite")
+        {
+            continue;
+        }
+        let Some(snapshot) = redis_sentinel_suite_snapshot().await else {
+            continue;
+        };
+        let arc = Arc::new(RedisSentinelClusterControl::new(snapshot.node_count));
+        ctx.set_redis_sentinel_cluster(Some(Arc::clone(&arc)));
+        ctx.register_cluster_handle::<RedisSentinelMarker>(ClusterHandle::new(
+            "redis-sentinel",
+            Box::new(arc),
+            None,
+        ));
+        return;
+    }
+}
+
 /// Runs a scenario through all lifecycle phases.
 ///
 /// This function executes the scenario in order:
@@ -3068,6 +3132,8 @@ where
                 register_mongo_replica_set_cluster_control(ctx, &handles).await;
                 #[cfg(feature = "kafka-cluster")]
                 register_kafka_cluster_control(ctx, &handles).await;
+                #[cfg(feature = "redis-sentinel")]
+                register_redis_sentinel_cluster_control(ctx, &handles).await;
                 #[cfg(feature = "nats")]
                 apply_resource_handles_to_nats_bindings(ctx, &handles);
                 #[cfg(feature = "neo4j")]
@@ -3474,6 +3540,25 @@ where
             None
         }
     };
+    #[cfg(feature = "redis-sentinel")]
+    let redis_sentinel_cluster_event_receiver = {
+        use crate::cluster::redis_sentinel::RedisSentinelMarker;
+        use crate::cluster::CLUSTER_EVENT_CHANNEL_CAPACITY;
+        use crate::event::Event;
+        if ctx.cluster_handle::<RedisSentinelMarker>().is_some() {
+            let (sender, receiver) =
+                std::sync::mpsc::sync_channel::<Event>(CLUSTER_EVENT_CHANNEL_CAPACITY);
+            if let Some(handle) = ctx.cluster_handle_mut::<RedisSentinelMarker>() {
+                handle.set_event_sender(sender.clone());
+            }
+            if let Some(control) = ctx.redis_sentinel_cluster.as_ref() {
+                control.set_event_sender(sender);
+            }
+            Some(receiver)
+        } else {
+            None
+        }
+    };
     #[cfg(feature = "load")]
     let load_event_receiver = {
         use crate::event::Event;
@@ -3488,6 +3573,7 @@ where
         feature = "load",
         feature = "mongodb-cluster",
         feature = "kafka-cluster",
+        feature = "redis-sentinel",
         feature = "fault-injection"
     ))]
     let scenario_result = {
@@ -3500,6 +3586,7 @@ where
         feature = "load",
         feature = "mongodb-cluster",
         feature = "kafka-cluster",
+        feature = "redis-sentinel",
         feature = "fault-injection"
     )))]
     {
@@ -3528,6 +3615,13 @@ where
         }
     }
 
+    #[cfg(feature = "redis-sentinel")]
+    if let Some(receiver) = redis_sentinel_cluster_event_receiver {
+        for event in receiver.try_iter() {
+            event_log.append(event);
+        }
+    }
+
     // Drain fault events into the caller-owned log after the scenario body and before assert/teardown,
     // so timelines and tests that read `event_log` after `run_scenario` see a complete run-phase slice.
     #[cfg(feature = "fault-injection")]
@@ -3539,6 +3633,7 @@ where
         feature = "load",
         feature = "mongodb-cluster",
         feature = "kafka-cluster",
+        feature = "redis-sentinel",
         feature = "fault-injection"
     ))]
     if let Err(panic_payload) = scenario_result {
