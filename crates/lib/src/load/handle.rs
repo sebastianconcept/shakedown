@@ -143,7 +143,7 @@ impl LoadHandle {
             Some(handle) => handle.await,
             None => {
                 return Err(LoadError::DriverFailed {
-                    message: "load driver join handle missing".into(),
+                    source: Box::new(std::io::Error::other("load driver join handle missing")),
                 });
             }
         };
@@ -152,7 +152,7 @@ impl LoadHandle {
             Ok(Ok(())) => Ok(metrics_snapshot),
             Ok(Err(load_error)) => Err(load_error),
             Err(join_error) => Err(LoadError::DriverFailed {
-                message: join_error.to_string(),
+                source: Box::new(join_error),
             }),
         }
     }
@@ -162,7 +162,11 @@ impl Drop for LoadHandle {
     fn drop(&mut self) {
         let _ = self.shutdown_tx.send(true);
         if let Some(handle) = self.join_handle.take() {
-            handle.abort();
+            tokio::spawn(async move {
+                if let Err(e) = handle.await {
+                    eprintln!("load driver task panicked during drop: {e}");
+                }
+            });
         }
     }
 }
@@ -573,7 +577,7 @@ where
                     .acquire_owned()
                     .await
                     .map_err(|_| LoadError::DriverFailed {
-                        message: "semaphore closed".into(),
+                        source: Box::new(std::io::Error::other("semaphore closed")),
                     })?;
             spawn_work_unit(
                 work,

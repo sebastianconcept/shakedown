@@ -353,10 +353,10 @@ pub enum LoadError {
     DriverStopped,
     /// open-model saturation policy was Error and all workers were busy
     SaturationExceeded,
-    /// load driver failed: {message}
+    /// load driver failed
     DriverFailed {
-        /// Error message.
-        message: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
     /// load did not recover within {timeout:?} (rolling error rate stayed above threshold)
     RecoveryTimeout {
