@@ -1,8 +1,10 @@
-//! Integration tests for open-model [`shakedown::LoadHandle`] (US-007).
+//! Integration tests for open-model [`shakedown::LoadHandle`] (US-007, US-009).
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
-use shakedown::{run_scenario, Context, EventLog, LoadPhase, LoadProfile, Rate};
+use shakedown::{run_scenario, Context, EventLog, LoadPhase, LoadProfile, Rate, RecoveryConfig};
 
 #[tokio::test]
 async fn open_model_ten_per_second_for_five_seconds_within_tolerance() {
@@ -84,4 +86,68 @@ async fn load_phase_events_merge_into_event_log_via_run_scenario() {
         event_log.events().any(|entry| entry.source == "load"),
         "expected at least one load-sourced event in the merged log"
     );
+}
+
+#[tokio::test]
+async fn await_recovery_resolves_after_error_burst_stops() {
+    let mut context = Context::new();
+    let mut event_log = EventLog::new();
+
+    run_scenario(
+        &mut context,
+        "load-await-recovery",
+        |scenario_context| {
+            Box::pin(async move {
+                let profile = LoadProfile::open_model()
+                    .phase(LoadPhase::constant(
+                        Duration::from_secs(3),
+                        Rate::per_second(200.0),
+                    ))
+                    .workers(4)
+                    .max_workers(4)
+                    .build()
+                    .expect("profile");
+
+                let fail_until = Arc::new(AtomicU64::new(8));
+                let handle = scenario_context
+                    .start_load("burst", profile, move || {
+                        let fail_until = fail_until.clone();
+                        async move {
+                            let n = fail_until.fetch_sub(1, Ordering::SeqCst);
+                            if n > 0 {
+                                Err("injected failure")
+                            } else {
+                                Ok::<(), &str>(())
+                            }
+                        }
+                    })
+                    .await
+                    .expect("start_load");
+
+                let recovered = handle
+                    .await_recovery_with_config(
+                        RecoveryConfig::new(Duration::from_secs(5))
+                            .with_rolling_window(Duration::from_millis(400))
+                            .with_poll_interval(Duration::from_millis(20)),
+                    )
+                    .await
+                    .expect("await_recovery");
+                assert!(
+                    !recovered.is_zero(),
+                    "expected non-zero disruption span, got {recovered:?}"
+                );
+
+                handle.stop().await.expect("stop");
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+
+    assert!(event_log.events().any(|entry| {
+        entry.source == "load"
+            && entry.message.contains("error rate returned to")
+            && entry.message.contains("disruption")
+    }));
 }

@@ -1,9 +1,9 @@
-//! [`LoadHandle`] and [`Context::start_load`](crate::lifecycle::Context::start_load) driver (US-007).
+//! [`LoadHandle`] and [`Context::start_load`](crate::lifecycle::Context::start_load) driver (US-007, US-009).
 
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant as StdInstant};
 
 use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
@@ -12,7 +12,9 @@ use crate::event::Event;
 use crate::lifecycle::Context;
 
 use super::metrics::{LoadMetrics, LoadMetricsAccumulator};
-use super::{LoadError, LoadProfile, LoadRuntime, NamedPhase, Phase, Rate, SaturationPolicy};
+use super::{
+    LoadError, LoadProfile, LoadRuntime, NamedPhase, Phase, Rate, RecoveryConfig, SaturationPolicy,
+};
 
 const LOAD_EVENT_SOURCE: &str = "load";
 
@@ -26,6 +28,8 @@ pub struct LoadHandle {
     metrics: Arc<LoadMetricsAccumulator>,
     paused: Arc<AtomicBool>,
     phase_watch: watch::Receiver<Option<usize>>,
+    /// Same channel as [`Context::start_load`] used for phase and recovery rows (US-009).
+    event_sender: Option<std::sync::mpsc::Sender<Event>>,
 }
 
 impl LoadHandle {
@@ -52,6 +56,59 @@ impl LoadHandle {
     /// Block until phase `index` **or** a matching `name` has started (`"0"` is phase index 0).
     ///
     /// Accepts decimal phase index or the name set with [`Phase::named`](super::Phase::named).
+    /// Wait until the rolling error rate is at or below the configured threshold **after** at least
+    /// one failed iteration has been recorded, or return [`LoadError::RecoveryTimeout`].
+    ///
+    /// Emits a structured [`Event`] with source `"load"` on success. Uses [`RecoveryConfig::new`]
+    /// defaults; call [`Self::await_recovery_with_config`] for custom thresholds and windows.
+    pub async fn await_recovery(&self, timeout: Duration) -> Result<Duration, LoadError> {
+        self.await_recovery_with_config(RecoveryConfig::new(timeout))
+            .await
+    }
+
+    /// Same as [`Self::await_recovery`] with explicit [`RecoveryConfig`].
+    pub async fn await_recovery_with_config(
+        &self,
+        recovery_config: RecoveryConfig,
+    ) -> Result<Duration, LoadError> {
+        let deadline = tokio::time::Instant::now() + recovery_config.timeout;
+        loop {
+            if tokio::time::Instant::now() >= deadline {
+                return Err(LoadError::RecoveryTimeout {
+                    timeout: recovery_config.timeout,
+                });
+            }
+
+            if *self.shutdown_rx.borrow() {
+                return Err(LoadError::DriverStopped);
+            }
+
+            let snapshot = LoadMetrics::new(self.metrics.clone());
+            let had_failure = snapshot.failed_operations() > 0;
+            if !had_failure {
+                tokio::time::sleep(recovery_config.poll_interval).await;
+                continue;
+            }
+
+            let rate = snapshot.error_rate_in_window(recovery_config.rolling_window);
+            if rate <= recovery_config.error_rate_threshold {
+                let disruption = snapshot
+                    .first_failure_instant()
+                    .map(|start| StdInstant::now().saturating_duration_since(start))
+                    .unwrap_or_default();
+                let pct = recovery_config.error_rate_threshold * 100.0;
+                try_emit_load_event(
+                    &self.event_sender,
+                    &self.load_name,
+                    format!("error rate returned to {pct:.0}% after {disruption:?} disruption"),
+                );
+                return Ok(disruption);
+            }
+
+            tokio::time::sleep(recovery_config.poll_interval).await;
+        }
+    }
+
     pub async fn await_phase(&self, name_or_index: &str) -> Result<(), LoadError> {
         let index = resolve_phase_index(self.profile.phases(), name_or_index)?;
         let mut phase_rx = self.phase_watch.clone();
@@ -135,16 +192,21 @@ where
 
     let events = context.load_event_sender().cloned();
     let load_name_owned = load_name.to_string();
+    let error_rate_alert_band = Arc::new(AtomicU8::new(0));
+    // Rolling-window / alert fields only; `timeout` is unused in the driver task.
+    let recovery_defaults = RecoveryConfig::new(Duration::from_secs(60));
 
     let join_handle = tokio::spawn(run_driver(
         load_name_owned.clone(),
         profile.clone(),
         work,
         metrics.clone(),
-        events,
+        events.clone(),
         shutdown_rx.clone(),
         paused.clone(),
         phase_watch_tx,
+        error_rate_alert_band.clone(),
+        recovery_defaults.clone(),
     ));
 
     Ok(LoadHandle {
@@ -156,6 +218,7 @@ where
         metrics,
         paused,
         phase_watch: phase_watch_rx,
+        event_sender: events,
     })
 }
 
@@ -199,6 +262,8 @@ async fn run_driver<E, F, Fut>(
     shutdown_rx: watch::Receiver<bool>,
     paused: Arc<AtomicBool>,
     phase_watch_tx: watch::Sender<Option<usize>>,
+    error_rate_alert_band: Arc<AtomicU8>,
+    recovery_defaults: RecoveryConfig,
 ) -> Result<(), LoadError>
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -213,13 +278,11 @@ where
             break;
         }
 
+        let phase_display = phase_label(named, phase_index);
         try_emit_load_event(
             &events,
             &load_name,
-            format!(
-                "phase {phase_index} start ({})",
-                phase_label(named, phase_index)
-            ),
+            format!("phase {phase_index} start ({phase_display})",),
         );
         phase_watch_tx
             .send(Some(phase_index))
@@ -238,6 +301,9 @@ where
                     &semaphore,
                     &shutdown_rx,
                     &paused,
+                    phase_display.as_str(),
+                    &error_rate_alert_band,
+                    &recovery_defaults,
                 )
                 .await?;
             }
@@ -258,6 +324,9 @@ where
                     &semaphore,
                     &shutdown_rx,
                     &paused,
+                    phase_display.as_str(),
+                    &error_rate_alert_band,
+                    &recovery_defaults,
                 )
                 .await?;
             }
@@ -276,6 +345,9 @@ where
                     &semaphore,
                     &shutdown_rx,
                     &paused,
+                    phase_display.as_str(),
+                    &error_rate_alert_band,
+                    &recovery_defaults,
                 )
                 .await?;
             }
@@ -298,6 +370,9 @@ where
                     &events,
                     &shutdown_rx,
                     &paused,
+                    phase_display.as_str(),
+                    &error_rate_alert_band,
+                    &recovery_defaults,
                 )
                 .await?;
             }
@@ -342,6 +417,9 @@ async fn run_open_model_constant<E, F, Fut>(
     semaphore: &Arc<Semaphore>,
     shutdown_rx: &watch::Receiver<bool>,
     paused: &Arc<AtomicBool>,
+    phase_label: &str,
+    error_rate_alert_band: &Arc<AtomicU8>,
+    recovery_defaults: &RecoveryConfig,
 ) -> Result<(), LoadError>
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -368,6 +446,9 @@ where
             load_name,
             semaphore,
             shutdown_rx,
+            phase_label,
+            error_rate_alert_band,
+            recovery_defaults,
         )
         .await?;
         next_arrival += period;
@@ -400,6 +481,9 @@ async fn run_open_model_ramp<E, F, Fut>(
     semaphore: &Arc<Semaphore>,
     shutdown_rx: &watch::Receiver<bool>,
     paused: &Arc<AtomicBool>,
+    phase_label: &str,
+    error_rate_alert_band: &Arc<AtomicU8>,
+    recovery_defaults: &RecoveryConfig,
 ) -> Result<(), LoadError>
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -427,12 +511,16 @@ where
             semaphore,
             shutdown_rx,
             paused,
+            phase_label,
+            error_rate_alert_band,
+            recovery_defaults,
         )
         .await?;
     }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_open_model_arrival<E, F, Fut>(
     profile: &LoadProfile,
     work: &Arc<F>,
@@ -441,6 +529,9 @@ async fn dispatch_open_model_arrival<E, F, Fut>(
     load_name: &str,
     semaphore: &Arc<Semaphore>,
     shutdown_rx: &watch::Receiver<bool>,
+    phase_label: &str,
+    error_rate_alert_band: &Arc<AtomicU8>,
+    recovery_defaults: &RecoveryConfig,
 ) -> Result<(), LoadError>
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -454,14 +545,24 @@ where
     match profile.saturation_policy() {
         SaturationPolicy::Drop => match semaphore.clone().try_acquire_owned() {
             Ok(permit) => {
-                spawn_work_unit(work, metrics, permit, events, load_name);
+                spawn_work_unit(
+                    work,
+                    metrics,
+                    permit,
+                    events,
+                    load_name,
+                    error_rate_alert_band,
+                    recovery_defaults,
+                );
             }
             Err(_) => {
                 metrics.record_dropped(std::time::Instant::now());
                 try_emit_load_event(
                     events,
                     load_name,
-                    "iteration dropped (all workers busy, SaturationPolicy::Drop)",
+                    format!(
+                        "iteration dropped during phase '{phase_label}' (all workers busy, SaturationPolicy::Drop)"
+                    ),
                 );
             }
         },
@@ -474,11 +575,27 @@ where
                     .map_err(|_| LoadError::DriverFailed {
                         message: "semaphore closed".into(),
                     })?;
-            spawn_work_unit(work, metrics, permit, events, load_name);
+            spawn_work_unit(
+                work,
+                metrics,
+                permit,
+                events,
+                load_name,
+                error_rate_alert_band,
+                recovery_defaults,
+            );
         }
         SaturationPolicy::Error => match semaphore.clone().try_acquire_owned() {
             Ok(permit) => {
-                spawn_work_unit(work, metrics, permit, events, load_name);
+                spawn_work_unit(
+                    work,
+                    metrics,
+                    permit,
+                    events,
+                    load_name,
+                    error_rate_alert_band,
+                    recovery_defaults,
+                );
             }
             Err(_) => {
                 try_emit_load_event(
@@ -493,12 +610,15 @@ where
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_work_unit<E, F, Fut>(
     work: &Arc<F>,
     metrics: &Arc<LoadMetricsAccumulator>,
     permit: OwnedSemaphorePermit,
     events: &Option<std::sync::mpsc::Sender<Event>>,
     load_name: &str,
+    error_rate_alert_band: &Arc<AtomicU8>,
+    recovery_defaults: &RecoveryConfig,
 ) where
     F: Fn() -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(), E>> + Send + 'static,
@@ -508,6 +628,8 @@ fn spawn_work_unit<E, F, Fut>(
     let metrics = metrics.clone();
     let events = events.clone();
     let load_name = load_name.to_string();
+    let band = error_rate_alert_band.clone();
+    let recovery = recovery_defaults.clone();
     tokio::spawn(async move {
         let start = std::time::Instant::now();
         let result = work().await;
@@ -515,13 +637,47 @@ fn spawn_work_unit<E, F, Fut>(
         let latency = start.elapsed();
         drop(permit);
         match result {
-            Ok(()) => metrics.record_success(completed_at, latency),
+            Ok(()) => {
+                metrics.record_success(completed_at, latency);
+            }
             Err(error) => {
                 metrics.record_failure(completed_at, latency);
                 try_emit_load_event(&events, &load_name, format!("iteration failed: {error}"));
             }
         }
+        maybe_emit_rolling_error_rate_threshold(&metrics, &events, &load_name, &band, &recovery);
     });
+}
+
+fn maybe_emit_rolling_error_rate_threshold(
+    metrics: &Arc<LoadMetricsAccumulator>,
+    events: &Option<std::sync::mpsc::Sender<Event>>,
+    load_name: &str,
+    band: &Arc<AtomicU8>,
+    recovery_defaults: &RecoveryConfig,
+) {
+    let snapshot = LoadMetrics::new(metrics.clone());
+    if snapshot.successful_operations() + snapshot.failed_operations() == 0 {
+        return;
+    }
+    let rate = snapshot.error_rate_in_window(recovery_defaults.rolling_window);
+    let alert = recovery_defaults.alert_threshold;
+    let above = rate > alert;
+    let prev_above = band.load(Ordering::Acquire) == 1;
+    if above && !prev_above {
+        band.store(1, Ordering::Release);
+        try_emit_load_event(
+            events,
+            load_name,
+            format!(
+                "error rate crossed above {:.0}% (rolling {:?})",
+                alert * 100.0,
+                recovery_defaults.rolling_window
+            ),
+        );
+    } else if !above && prev_above {
+        band.store(0, Ordering::Release);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -535,6 +691,9 @@ async fn run_closed_model_constant_vus<E, F, Fut>(
     events: &Option<std::sync::mpsc::Sender<Event>>,
     shutdown_rx: &watch::Receiver<bool>,
     paused: &Arc<AtomicBool>,
+    _phase_label: &str,
+    error_rate_alert_band: &Arc<AtomicU8>,
+    recovery_defaults: &RecoveryConfig,
 ) -> Result<(), LoadError>
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -556,6 +715,8 @@ where
         let load_name = load_name.to_string();
         let shutdown_rx = shutdown_rx.clone();
         let paused = paused.clone();
+        let band = error_rate_alert_band.clone();
+        let recovery = recovery_defaults.clone();
         join_handles.push(tokio::spawn(async move {
             loop {
                 if Instant::now() >= deadline {
@@ -585,6 +746,9 @@ where
                         );
                     }
                 }
+                maybe_emit_rolling_error_rate_threshold(
+                    &metrics, &events, &load_name, &band, &recovery,
+                );
             }
         }));
     }

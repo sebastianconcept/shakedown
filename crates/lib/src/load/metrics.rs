@@ -37,7 +37,7 @@ fn new_latency_histogram() -> Histogram<u64> {
 }
 
 /// Tracks longest failure burst and last recovery interval (topology / disruption metrics).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct BurstState {
     /// First failure in the current consecutive failure run.
     first_failure_in_burst: Option<Instant>,
@@ -45,6 +45,17 @@ struct BurstState {
     last_failure_in_burst: Option<Instant>,
     longest_burst: Option<Duration>,
     last_recovery: Option<Duration>,
+}
+
+impl Default for BurstState {
+    fn default() -> Self {
+        Self {
+            first_failure_in_burst: None,
+            last_failure_in_burst: None,
+            longest_burst: None,
+            last_recovery: None,
+        }
+    }
 }
 
 impl BurstState {
@@ -79,6 +90,8 @@ pub struct LoadMetricsAccumulator {
     successful_operations: AtomicU64,
     failed_operations: AtomicU64,
     dropped_iterations: AtomicU64,
+    /// Wall time of the first failed iteration in this run (US-009 recovery / disruption duration).
+    first_failure_instant: Mutex<Option<Instant>>,
     /// Combined latency for all completed iterations (success + failure) — global percentiles.
     global_latency_ns: Mutex<Histogram<u64>>,
     min_latency_ns: AtomicU64,
@@ -101,6 +114,7 @@ impl LoadMetricsAccumulator {
             successful_operations: AtomicU64::new(0),
             failed_operations: AtomicU64::new(0),
             dropped_iterations: AtomicU64::new(0),
+            first_failure_instant: Mutex::new(None),
             global_latency_ns: Mutex::new(new_latency_histogram()),
             min_latency_ns: AtomicU64::new(u64::MAX),
             max_latency_ns: AtomicU64::new(0),
@@ -116,6 +130,7 @@ impl LoadMetricsAccumulator {
             successful_operations: AtomicU64::new(0),
             failed_operations: AtomicU64::new(0),
             dropped_iterations: AtomicU64::new(0),
+            first_failure_instant: Mutex::new(None),
             global_latency_ns: Mutex::new(new_latency_histogram()),
             min_latency_ns: AtomicU64::new(u64::MAX),
             max_latency_ns: AtomicU64::new(0),
@@ -192,6 +207,12 @@ impl LoadMetricsAccumulator {
                 burst.on_success(completed_at);
             }
             CompletionKind::Failure => {
+                {
+                    let mut first = self.first_failure_instant.lock().expect("first_failure");
+                    if first.is_none() {
+                        *first = Some(completed_at);
+                    }
+                }
                 let mut burst = self.burst.lock().expect("burst");
                 burst.on_failure(completed_at);
             }
@@ -317,6 +338,11 @@ impl LoadMetricsAccumulator {
 
     fn burst_snapshot(&self) -> BurstState {
         self.burst.lock().expect("burst").clone()
+    }
+
+    /// Instant of the first failed iteration in this load run, if any.
+    pub(crate) fn first_failure_instant(&self) -> Option<Instant> {
+        *self.first_failure_instant.lock().expect("first_failure")
     }
 }
 
@@ -483,6 +509,20 @@ impl LoadMetrics {
     /// Longest span from first to last failure within a consecutive failure burst (then cleared by a success).
     pub fn error_burst_duration(&self) -> Option<Duration> {
         self.inner.burst_snapshot().longest_burst
+    }
+
+    /// Failed / completed in the last `window` of wall time (relative to [`Instant::now()`]).
+    pub fn error_rate_in_window(&self, window: Duration) -> f64 {
+        let now = Instant::now();
+        let epoch = self.inner.epoch();
+        let start = now.checked_sub(window).unwrap_or(epoch);
+        let range_start = if start < epoch { epoch } else { start };
+        self.error_rate_during(&(range_start..now))
+    }
+
+    /// First failure instant in this load run (for disruption span / [`LoadHandle::await_recovery`](crate::load::LoadHandle::await_recovery)).
+    pub fn first_failure_instant(&self) -> Option<Instant> {
+        self.inner.first_failure_instant()
     }
 }
 

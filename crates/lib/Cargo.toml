@@ -19,6 +19,8 @@ time = { version = "0.3", default-features = false, features = ["formatting"] }
 # Tokio async executor (public async lifecycle API)
 tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 async-trait = "0.1"
+# `FutureExt::catch_unwind` so run_scenario still merges load/cluster/fault events if the scenario panics
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 
 # Kafka integration (behind feature gate per D-2)
 # `tokio` enables `FutureProducer` + `AsyncRuntime` (helpers and mock services use async send).
@@ -62,9 +64,6 @@ reqwest = { version = "0.11", optional = true, default-features = false, feature
 # Docker Engine API (read-only observability; feature `diagnostics`)
 # Align with testcontainers' bollard to avoid duplicate bollard-stubs versions in the lockfile.
 bollard = { version = "0.20", optional = true, default-features = false, features = ["ssl"] }
-# Stream combinators for bollard `/events` (diagnostics only)
-futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"], optional = true }
-
 # Structured logging for diagnostics connection and future ShakedownLayer (SPECS §1)
 tracing = "0.1"
 
@@ -125,7 +124,7 @@ grpc-mock-services = [
     "dep:tower",
 ]
 # Infrastructure diagnostics (bollard); implied by Docker-backed resource features unless `no-diagnostics` is set
-diagnostics = ["dep:bollard", "dep:futures-util"]
+diagnostics = ["dep:bollard"]
 # Disables Docker socket diagnostics at compile time (stub APIs; no bollard client)
 no-diagnostics = []
 # Kafka integration with real infrastructure (requires Docker)
@@ -200,7 +199,6 @@ valkey = [
 # MongoDB (`mongo` image via testcontainers-modules)
 mongodb = [
     "dep:mongodb",
-    "dep:futures-util",
     "dep:testcontainers",
     "dep:testcontainers-modules",
     "testcontainers-modules/mongo",
@@ -216,7 +214,6 @@ mongodb-cluster = [
 nats = [
     "dep:async-nats",
     "dep:bytes",
-    "dep:futures-util",
     "dep:testcontainers",
     "dep:testcontainers-modules",
     "testcontainers-modules/nats",

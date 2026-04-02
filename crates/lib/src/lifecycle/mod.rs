@@ -3346,8 +3346,28 @@ where
         ctx.set_load_event_sender(Some(sender));
         receiver
     };
-    // Execute the scenario function
-    let _ = scenario_fn(ctx).await;
+
+    // Execute the scenario function. If the body panics, we still merge load/cluster/fault events
+    // into `event_log` before re-panicking so failure timelines correlate load and topology rows (US-009).
+    #[cfg(any(
+        feature = "load",
+        feature = "mongodb-cluster",
+        feature = "fault-injection"
+    ))]
+    let scenario_result = {
+        use futures_util::future::FutureExt;
+        std::panic::AssertUnwindSafe(scenario_fn(ctx))
+            .catch_unwind()
+            .await
+    };
+    #[cfg(not(any(
+        feature = "load",
+        feature = "mongodb-cluster",
+        feature = "fault-injection"
+    )))]
+    {
+        scenario_fn(ctx).await;
+    }
 
     #[cfg(feature = "load")]
     {
@@ -3369,6 +3389,15 @@ where
     #[cfg(feature = "fault-injection")]
     for event in fault_event_receiver.try_iter() {
         event_log.append(event);
+    }
+
+    #[cfg(any(
+        feature = "load",
+        feature = "mongodb-cluster",
+        feature = "fault-injection"
+    ))]
+    if let Err(panic_payload) = scenario_result {
+        std::panic::resume_unwind(panic_payload);
     }
 
     // Assert phase (in a real implementation, this would run assertions)
