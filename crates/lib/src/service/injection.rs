@@ -58,6 +58,10 @@ struct MappingOverrides {
     timescaledb: Option<String>,
     mock_services: HashMap<String, String>,
     services: HashMap<String, String>,
+    #[cfg(feature = "redis-sentinel")]
+    redis_sentinel_hosts: Option<String>,
+    #[cfg(feature = "redis-sentinel")]
+    redis_sentinel_master: Option<String>,
 }
 
 impl MappingOverrides {
@@ -81,6 +85,10 @@ impl MappingOverrides {
             timescaledb: None,
             mock_services: HashMap::new(),
             services: HashMap::new(),
+            #[cfg(feature = "redis-sentinel")]
+            redis_sentinel_hosts: None,
+            #[cfg(feature = "redis-sentinel")]
+            redis_sentinel_master: None,
         };
         for mapping in mappings {
             match mapping {
@@ -90,6 +98,14 @@ impl MappingOverrides {
                 EnvMapping::Mysql(name) => overrides.mysql = Some(name.clone()),
                 EnvMapping::Rabbitmq(name) => overrides.rabbitmq = Some(name.clone()),
                 EnvMapping::Redis(name) => overrides.redis = Some(name.clone()),
+                #[cfg(feature = "redis-sentinel")]
+                EnvMapping::RedisSentinel {
+                    sentinel_hosts_var,
+                    master_name_var,
+                } => {
+                    overrides.redis_sentinel_hosts = Some(sentinel_hosts_var.clone());
+                    overrides.redis_sentinel_master = Some(master_name_var.clone());
+                }
                 EnvMapping::Mongo(name) => overrides.mongo = Some(name.clone()),
                 EnvMapping::Nats(name) => overrides.nats = Some(name.clone()),
                 EnvMapping::Neo4j(name) => overrides.neo4j = Some(name.clone()),
@@ -191,6 +207,20 @@ fn inject_conventions(
     if let Some(bindings) = context.redis_bindings() {
         let key = overrides.redis.as_deref().unwrap_or("REDIS_URL");
         environment.insert(key.to_string(), bindings.connection_url.clone());
+    }
+
+    #[cfg(feature = "redis-sentinel")]
+    if let Some(bindings) = context.redis_sentinel_bindings() {
+        let hosts_key = overrides
+            .redis_sentinel_hosts
+            .as_deref()
+            .unwrap_or("REDIS_SENTINEL_HOSTS");
+        let master_key = overrides
+            .redis_sentinel_master
+            .as_deref()
+            .unwrap_or("REDIS_SENTINEL_MASTER_NAME");
+        environment.insert(hosts_key.to_string(), bindings.sentinel_hosts.clone());
+        environment.insert(master_key.to_string(), bindings.master_name.clone());
     }
 
     #[cfg(feature = "mongodb")]
@@ -311,6 +341,18 @@ fn inject_only_env_mappings(
     environment: &mut HashMap<String, String>,
 ) {
     for mapping in &service_spec.env_mappings {
+        #[cfg(feature = "redis-sentinel")]
+        if let EnvMapping::RedisSentinel {
+            sentinel_hosts_var,
+            master_name_var,
+        } = mapping
+        {
+            if let Some(bindings) = context.redis_sentinel_bindings() {
+                environment.insert(sentinel_hosts_var.clone(), bindings.sentinel_hosts.clone());
+                environment.insert(master_name_var.clone(), bindings.master_name.clone());
+            }
+            continue;
+        }
         if let Some((key, value)) = resolve_env_mapping(context, service_spec.name(), mapping) {
             environment.insert(key, value);
         }
@@ -396,6 +438,8 @@ fn resolve_env_mapping(
             .map(|bindings| (key.clone(), bindings.connection_url.clone())),
         #[cfg(not(any(feature = "redis", feature = "valkey")))]
         EnvMapping::Redis(_) => None,
+        #[cfg(feature = "redis-sentinel")]
+        EnvMapping::RedisSentinel { .. } => None,
         #[cfg(feature = "mongodb")]
         EnvMapping::Mongo(key) => context.mongo_bindings().map(|bindings| {
             (

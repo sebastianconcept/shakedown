@@ -282,6 +282,10 @@ pub enum BuiltinResource {
     /// Docker-backed multi-broker KRaft Kafka cluster (shared bridge network; US-010).
     KafkaCluster(crate::KafkaClusterResource),
 
+    #[cfg(feature = "redis-sentinel")]
+    /// Docker-backed Redis primary/replicas + Sentinel quorum (shared bridge network; US-012).
+    RedisSentinel(crate::RedisSentinelResource),
+
     #[cfg(feature = "nats")]
     /// Docker-backed NATS (official image via testcontainers-modules; suite-shared server; core pub/sub only).
     Nats(NatsResource),
@@ -349,6 +353,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MongoReplicaSet(r) => r.provision(scenario_id).await,
             #[cfg(feature = "kafka-cluster")]
             BuiltinResource::KafkaCluster(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "redis-sentinel")]
+            BuiltinResource::RedisSentinel(r) => r.provision(scenario_id).await,
             #[cfg(feature = "nats")]
             BuiltinResource::Nats(r) => r.provision(scenario_id).await,
             #[cfg(feature = "neo4j")]
@@ -397,6 +403,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MongoReplicaSet(r) => r.check_ready().await,
             #[cfg(feature = "kafka-cluster")]
             BuiltinResource::KafkaCluster(r) => r.check_ready().await,
+            #[cfg(feature = "redis-sentinel")]
+            BuiltinResource::RedisSentinel(r) => r.check_ready().await,
             #[cfg(feature = "nats")]
             BuiltinResource::Nats(r) => r.check_ready().await,
             #[cfg(feature = "neo4j")]
@@ -445,6 +453,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MongoReplicaSet(r) => r.apply_default_seed().await,
             #[cfg(feature = "kafka-cluster")]
             BuiltinResource::KafkaCluster(r) => r.apply_default_seed().await,
+            #[cfg(feature = "redis-sentinel")]
+            BuiltinResource::RedisSentinel(r) => r.apply_default_seed().await,
             #[cfg(feature = "nats")]
             BuiltinResource::Nats(r) => r.apply_default_seed().await,
             #[cfg(feature = "neo4j")]
@@ -493,6 +503,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MongoReplicaSet(r) => r.teardown().await,
             #[cfg(feature = "kafka-cluster")]
             BuiltinResource::KafkaCluster(r) => r.teardown().await,
+            #[cfg(feature = "redis-sentinel")]
+            BuiltinResource::RedisSentinel(r) => r.teardown().await,
             #[cfg(feature = "nats")]
             BuiltinResource::Nats(r) => r.teardown().await,
             #[cfg(feature = "neo4j")]
@@ -6596,6 +6608,24 @@ pub struct RedisBindings {
     pub port: u16,
     /// Prefix prepended to logical keys for isolation (`shakedown:<scenario>:`).
     pub key_prefix: String,
+}
+
+/// Redis Sentinel discovery endpoints plus primary URL (`redis-sentinel` feature).
+///
+/// Populated when [`BuiltinResource::RedisSentinel`] provisions the suite. [`connection_url`] is the
+/// current primary (same wire URL [`RedisHelpers`](crate::helpers::RedisHelpers) use via
+/// [`crate::lifecycle::Context::redis_bindings`]).
+#[cfg(feature = "redis-sentinel")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedisSentinelBindings {
+    /// Comma-separated `host:port` Sentinel endpoints (harness host + mapped ports).
+    pub sentinel_hosts: String,
+    /// Logical master name (`SENTINEL MONITOR` / `get-master-addr-by-name`).
+    pub master_name: String,
+    /// `redis://` URL to the current primary (writable).
+    pub connection_url: String,
+    /// Host-mapped `redis://` URLs for replica nodes (read-only), in replica order.
+    pub replica_connection_urls: Vec<String>,
 }
 
 /// Connection details for a provisioned MongoDB scenario database (`mongodb` feature).

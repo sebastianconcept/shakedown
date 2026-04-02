@@ -45,3 +45,5 @@ sqlite = []
 mongodb-cluster = []
 # Kafka KRaft multi-broker cluster (propagates to `resources = [KafkaCluster]`)
 kafka-cluster = []
+# Redis + Sentinel suite (propagates to `resources = [RedisSentinel]`)
+redis-sentinel = []
