@@ -371,6 +371,12 @@ pub use crate::fault_injection::{StreamDirection, Toxic, ToxicKind};
 #[cfg(feature = "fault-injection")]
 pub use crate::resources::ToxiproxyResource;
 
+#[cfg(feature = "load")]
+pub use crate::load::{
+    LoadError, LoadHandle, LoadMetrics, LoadProfile, LoadProfileBuilder, LoadRuntime, NamedPhase,
+    Phase as LoadPhase, Rate, SaturationPolicy,
+};
+
 #[cfg(feature = "rabbitmq")]
 pub use crate::resources::{RabbitBindings, RabbitResource};
 
