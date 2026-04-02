@@ -52,6 +52,42 @@ fn suite_kafka_cluster_mutex() -> &'static Mutex<SuiteKafkaClusterState> {
     SUITE_KAFKA_CLUSTER.get_or_init(|| Mutex::new(SuiteKafkaClusterState::Idle))
 }
 
+/// Suite layout for Kafka cluster topology control (host ports + container IDs).
+#[cfg(feature = "kafka-cluster")]
+pub(crate) struct KafkaClusterSuiteSnapshot {
+    pub(crate) node_count: usize,
+    pub(crate) container_ids: Vec<String>,
+    pub(crate) bootstrap_servers: String,
+}
+
+/// Latest KRaft multi-broker layout when the suite has running containers.
+#[cfg(feature = "kafka-cluster")]
+pub(crate) async fn kafka_cluster_suite_snapshot() -> Option<KafkaClusterSuiteSnapshot> {
+    let guard = suite_kafka_cluster_mutex().lock().await;
+    match &*guard {
+        SuiteKafkaClusterState::Idle => None,
+        SuiteKafkaClusterState::Running {
+            nodes,
+            host_ports,
+            node_count,
+            ..
+        } => {
+            let container_ids = nodes.iter().map(|node| node.id().to_string()).collect();
+            let harness_host = "127.0.0.1";
+            let bootstrap_servers = host_ports
+                .iter()
+                .map(|port| format!("{harness_host}:{port}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            Some(KafkaClusterSuiteSnapshot {
+                node_count: *node_count,
+                container_ids,
+                bootstrap_servers,
+            })
+        }
+    }
+}
+
 fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
     InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
 }
@@ -486,6 +522,7 @@ impl Resource for KafkaClusterResource {
             metadata: Some(serde_json::json!({
                 "bootstrap_servers": bootstrap,
                 "topic_prefix": self.topic_prefix,
+                "kafka_cluster": "kraft",
             })),
         }])
     }

@@ -371,6 +371,10 @@ pub struct Context {
     mongo_replica_set_cluster: Option<
         std::sync::Arc<crate::mongo_replica_set_cluster_control::MongoReplicaSetClusterControl>,
     >,
+    /// Shared KRaft Kafka cluster control ([`crate::cluster::kafka_cluster::KafkaClusterOps`]).
+    #[cfg(feature = "kafka-cluster")]
+    kafka_cluster_control:
+        Option<std::sync::Arc<crate::kafka_cluster_cluster_control::KafkaClusterClusterControl>>,
     /// Merge point for [`crate::load::LoadHandle`] timeline rows (US-007+); set for the run phase only.
     #[cfg(feature = "load")]
     load_event_sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
@@ -468,6 +472,8 @@ impl Context {
             cluster_handles: HashMap::new(),
             #[cfg(feature = "mongodb-cluster")]
             mongo_replica_set_cluster: None,
+            #[cfg(feature = "kafka-cluster")]
+            kafka_cluster_control: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -564,6 +570,8 @@ impl Context {
             cluster_handles: HashMap::new(),
             #[cfg(feature = "mongodb-cluster")]
             mongo_replica_set_cluster: None,
+            #[cfg(feature = "kafka-cluster")]
+            kafka_cluster_control: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -660,6 +668,8 @@ impl Context {
             cluster_handles: HashMap::new(),
             #[cfg(feature = "mongodb-cluster")]
             mongo_replica_set_cluster: None,
+            #[cfg(feature = "kafka-cluster")]
+            kafka_cluster_control: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -749,6 +759,24 @@ impl Context {
         self.mongo_replica_set_cluster
             .as_ref()
             .map(crate::cluster::mongo_replica_set::MongoClusterHandle::new)
+    }
+
+    #[cfg(feature = "kafka-cluster")]
+    pub(crate) fn set_kafka_cluster_control(
+        &mut self,
+        cluster: Option<
+            std::sync::Arc<crate::kafka_cluster_cluster_control::KafkaClusterClusterControl>,
+        >,
+    ) {
+        self.kafka_cluster_control = cluster;
+    }
+
+    /// KRaft multi-broker Kafka partition leadership ([`crate::cluster::kafka_cluster::KafkaClusterOps`]).
+    #[cfg(feature = "kafka-cluster")]
+    pub fn kafka_cluster(&self) -> Option<crate::cluster::kafka_cluster::KafkaClusterHandle<'_>> {
+        self.kafka_cluster_control
+            .as_ref()
+            .map(crate::cluster::kafka_cluster::KafkaClusterHandle::new)
     }
 
     /// Get a reference to all registered resources.
@@ -2365,6 +2393,39 @@ async fn register_mongo_replica_set_cluster_control(ctx: &mut Context, handles: 
     }
 }
 
+#[cfg(feature = "kafka-cluster")]
+async fn register_kafka_cluster_control(ctx: &mut Context, handles: &[ResourceHandle]) {
+    use std::sync::Arc;
+
+    use crate::cluster::kafka_cluster::KafkaClusterMarker;
+    use crate::cluster::ClusterHandle;
+    use crate::kafka_cluster_cluster_control::KafkaClusterClusterControl;
+    use crate::kafka_cluster_resource::kafka_cluster_suite_snapshot;
+
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        if meta.get("kafka_cluster").and_then(|value| value.as_str()) != Some("kraft") {
+            continue;
+        }
+        let Some(snapshot) = kafka_cluster_suite_snapshot().await else {
+            continue;
+        };
+        let arc = Arc::new(KafkaClusterClusterControl::new(
+            snapshot.node_count,
+            snapshot.bootstrap_servers.clone(),
+        ));
+        ctx.set_kafka_cluster_control(Some(Arc::clone(&arc)));
+        ctx.register_cluster_handle::<KafkaClusterMarker>(ClusterHandle::new(
+            "kafka",
+            Box::new(arc),
+            None,
+        ));
+        return;
+    }
+}
+
 /// Runs a scenario through all lifecycle phases.
 ///
 /// This function executes the scenario in order:
@@ -2952,6 +3013,8 @@ where
                 apply_resource_handles_to_mongo_bindings(ctx, &handles);
                 #[cfg(feature = "mongodb-cluster")]
                 register_mongo_replica_set_cluster_control(ctx, &handles).await;
+                #[cfg(feature = "kafka-cluster")]
+                register_kafka_cluster_control(ctx, &handles).await;
                 #[cfg(feature = "nats")]
                 apply_resource_handles_to_nats_bindings(ctx, &handles);
                 #[cfg(feature = "neo4j")]
@@ -3339,6 +3402,25 @@ where
             None
         }
     };
+    #[cfg(feature = "kafka-cluster")]
+    let kafka_cluster_event_receiver = {
+        use crate::cluster::kafka_cluster::KafkaClusterMarker;
+        use crate::cluster::CLUSTER_EVENT_CHANNEL_CAPACITY;
+        use crate::event::Event;
+        if ctx.cluster_handle::<KafkaClusterMarker>().is_some() {
+            let (sender, receiver) =
+                std::sync::mpsc::sync_channel::<Event>(CLUSTER_EVENT_CHANNEL_CAPACITY);
+            if let Some(handle) = ctx.cluster_handle_mut::<KafkaClusterMarker>() {
+                handle.set_event_sender(sender.clone());
+            }
+            if let Some(control) = ctx.kafka_cluster_control.as_ref() {
+                control.set_event_sender(sender);
+            }
+            Some(receiver)
+        } else {
+            None
+        }
+    };
     #[cfg(feature = "load")]
     let load_event_receiver = {
         use crate::event::Event;
@@ -3352,6 +3434,7 @@ where
     #[cfg(any(
         feature = "load",
         feature = "mongodb-cluster",
+        feature = "kafka-cluster",
         feature = "fault-injection"
     ))]
     let scenario_result = {
@@ -3363,6 +3446,7 @@ where
     #[cfg(not(any(
         feature = "load",
         feature = "mongodb-cluster",
+        feature = "kafka-cluster",
         feature = "fault-injection"
     )))]
     {
@@ -3384,6 +3468,13 @@ where
         }
     }
 
+    #[cfg(feature = "kafka-cluster")]
+    if let Some(receiver) = kafka_cluster_event_receiver {
+        for event in receiver.try_iter() {
+            event_log.append(event);
+        }
+    }
+
     // Drain fault events into the caller-owned log after the scenario body and before assert/teardown,
     // so timelines and tests that read `event_log` after `run_scenario` see a complete run-phase slice.
     #[cfg(feature = "fault-injection")]
@@ -3394,6 +3485,7 @@ where
     #[cfg(any(
         feature = "load",
         feature = "mongodb-cluster",
+        feature = "kafka-cluster",
         feature = "fault-injection"
     ))]
     if let Err(panic_payload) = scenario_result {
