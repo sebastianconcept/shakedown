@@ -167,6 +167,8 @@ mod mongo_replica_set_resource;
 pub mod outbox;
 /// Lifecycle phase labels (shared with infrastructure event records).
 pub mod phase;
+#[cfg(feature = "postgres-cluster")]
+mod postgres_replica_set_cluster_control;
 /// PostgreSQL primary + streaming replica per scenario (`postgres` + `cluster`; US-014+).
 #[cfg(feature = "postgres-cluster")]
 mod postgres_replica_set_resource;
@@ -271,6 +273,12 @@ pub use crate::cluster::kafka_cluster::{
 #[cfg(feature = "redis-sentinel")]
 pub use crate::cluster::redis_sentinel::{
     RedisSentinelClusterControl, RedisSentinelHandle, RedisSentinelMarker, RedisSentinelOps,
+};
+
+#[cfg(feature = "postgres-cluster")]
+pub use crate::cluster::postgres_replica_set::{
+    PostgresReplicaSetClusterControl, PostgresReplicaSetHandle, PostgresReplicaSetMarker,
+    PostgresReplicaSetOps,
 };
 
 #[cfg(any(
