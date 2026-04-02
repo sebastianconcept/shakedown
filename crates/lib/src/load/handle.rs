@@ -457,7 +457,7 @@ where
                 spawn_work_unit(work, metrics, permit, events, load_name);
             }
             Err(_) => {
-                metrics.record_dropped();
+                metrics.record_dropped(std::time::Instant::now());
                 try_emit_load_event(
                     events,
                     load_name,
@@ -509,12 +509,15 @@ fn spawn_work_unit<E, F, Fut>(
     let events = events.clone();
     let load_name = load_name.to_string();
     tokio::spawn(async move {
+        let start = std::time::Instant::now();
         let result = work().await;
+        let completed_at = std::time::Instant::now();
+        let latency = start.elapsed();
         drop(permit);
         match result {
-            Ok(()) => metrics.record_success(),
+            Ok(()) => metrics.record_success(completed_at, latency),
             Err(error) => {
-                metrics.record_failure();
+                metrics.record_failure(completed_at, latency);
                 try_emit_load_event(&events, &load_name, format!("iteration failed: {error}"));
             }
         }
@@ -567,11 +570,14 @@ where
                         return;
                     }
                 }
+                let start = std::time::Instant::now();
                 let result = work().await;
+                let completed_at = std::time::Instant::now();
+                let latency = start.elapsed();
                 match result {
-                    Ok(()) => metrics.record_success(),
+                    Ok(()) => metrics.record_success(completed_at, latency),
                     Err(error) => {
-                        metrics.record_failure();
+                        metrics.record_failure(completed_at, latency);
                         try_emit_load_event(
                             &events,
                             &load_name,
