@@ -49,3 +49,5 @@ kafka-cluster = []
 redis-sentinel = []
 # Postgres primary + replica cluster (propagates to `resources = [PostgresReplicaSet]`)
 postgres-cluster = []
+# RabbitMQ Erlang cluster (propagates to `resources = [RabbitCluster]`)
+rabbitmq-cluster = []

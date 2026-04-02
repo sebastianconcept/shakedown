@@ -193,6 +193,13 @@ rabbitmq = [
     "testcontainers-modules/rabbitmq",
     "diagnostics",
 ]
+# RabbitMQ Erlang cluster + quorum default queue type (US-016)
+rabbitmq-cluster = [
+    "rabbitmq",
+    "cluster",
+    "dep:uuid",
+    "shakedown-macros/rabbitmq-cluster",
+]
 # Fault injection (Toxiproxy via testcontainers + noxious-client); composable with `kafka` etc.
 fault-injection = [
     "dep:noxious-client",
@@ -330,6 +337,12 @@ required-features = ["kafka"]
 name = "helpers_rabbit"
 path = "tests/helpers_rabbit.rs"
 required-features = ["rabbitmq"]
+
+# RabbitMQ 3-node cluster + quorum queue (Docker); ignored unless --ignored
+[[test]]
+name = "rabbit_cluster_vertical"
+path = "tests/rabbit_cluster_vertical.rs"
+required-features = ["rabbitmq-cluster"]
 
 # Postgres typed helpers execute/assert integration (Docker); ignored unless --ignored
 [[test]]
