@@ -1785,6 +1785,10 @@ fn apply_resource_handles_to_postgres_bindings(ctx: &mut Context, handles: &[Res
             Some(connection_url),
         ) = (host, port, database, username, password, connection_url)
         {
+            let replica_port = meta
+                .get("replica_port")
+                .and_then(|value| value.as_u64())
+                .map(|port| port as u16);
             ctx.set_postgres_bindings(PostgresBindings {
                 host: host.to_string(),
                 port,
@@ -1792,6 +1796,7 @@ fn apply_resource_handles_to_postgres_bindings(ctx: &mut Context, handles: &[Res
                 username: username.to_string(),
                 password: password.to_string(),
                 connection_url: connection_url.to_string(),
+                replica_port,
             });
         }
     }
@@ -2264,6 +2269,7 @@ fn apply_resource_handles_to_timescaledb_bindings(ctx: &mut Context, handles: &[
                 username: username.to_string(),
                 password: password.to_string(),
                 connection_url: connection_url.to_string(),
+                replica_port: None,
             });
         }
     }

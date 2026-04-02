@@ -793,6 +793,7 @@ mod tests {
             username: "u".to_string(),
             password: "p".to_string(),
             connection_url: "postgresql://u:p@127.0.0.1:5432/scenario_db".to_string(),
+            replica_port: None,
         };
         context.set_postgres_bindings(bindings);
         context.register_service(spec_named("api")).unwrap();
@@ -827,6 +828,7 @@ mod tests {
             username: "u".to_string(),
             password: "p".to_string(),
             connection_url: url.to_string(),
+            replica_port: None,
         };
         context.set_postgres_bindings(bindings);
         context.register_service(spec_named("only")).unwrap();

@@ -242,6 +242,10 @@ pub enum BuiltinResource {
     /// Docker-backed PostgreSQL (suite-shared container via testcontainers-modules).
     Postgres(PostgresResource),
 
+    #[cfg(feature = "postgres-cluster")]
+    /// Docker-backed PostgreSQL primary + streaming replica (per-scenario containers; US-014).
+    PostgresReplicaSet(crate::PostgresReplicaSetResource),
+
     #[cfg(feature = "mariadb")]
     /// Docker-backed MariaDB (suite-shared container via testcontainers-modules).
     MariaDB(MariaDBResource),
@@ -333,6 +337,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Rabbit(r) => r.provision(scenario_id).await,
             #[cfg(feature = "postgres")]
             BuiltinResource::Postgres(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "postgres-cluster")]
+            BuiltinResource::PostgresReplicaSet(r) => r.provision(scenario_id).await,
             #[cfg(feature = "mariadb")]
             BuiltinResource::MariaDB(r) => r.provision(scenario_id).await,
             #[cfg(feature = "mysql")]
@@ -383,6 +389,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Rabbit(r) => r.check_ready().await,
             #[cfg(feature = "postgres")]
             BuiltinResource::Postgres(r) => r.check_ready().await,
+            #[cfg(feature = "postgres-cluster")]
+            BuiltinResource::PostgresReplicaSet(r) => r.check_ready().await,
             #[cfg(feature = "mariadb")]
             BuiltinResource::MariaDB(r) => r.check_ready().await,
             #[cfg(feature = "mysql")]
@@ -433,6 +441,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Rabbit(r) => r.apply_default_seed().await,
             #[cfg(feature = "postgres")]
             BuiltinResource::Postgres(r) => r.apply_default_seed().await,
+            #[cfg(feature = "postgres-cluster")]
+            BuiltinResource::PostgresReplicaSet(r) => r.apply_default_seed().await,
             #[cfg(feature = "mariadb")]
             BuiltinResource::MariaDB(r) => r.apply_default_seed().await,
             #[cfg(feature = "mysql")]
@@ -483,6 +493,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::Rabbit(r) => r.teardown().await,
             #[cfg(feature = "postgres")]
             BuiltinResource::Postgres(r) => r.teardown().await,
+            #[cfg(feature = "postgres-cluster")]
+            BuiltinResource::PostgresReplicaSet(r) => r.teardown().await,
             #[cfg(feature = "mariadb")]
             BuiltinResource::MariaDB(r) => r.teardown().await,
             #[cfg(feature = "mysql")]
@@ -6529,6 +6541,8 @@ pub struct PostgresBindings {
     pub password: String,
     /// JDBC/libpq-style URL for this scenario database.
     pub connection_url: String,
+    /// When using [`crate::PostgresReplicaSetResource`], the streaming replica’s mapped host port (`postgres-cluster`).
+    pub replica_port: Option<u16>,
 }
 
 /// Connection details for a provisioned MariaDB scenario database.

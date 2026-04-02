@@ -167,6 +167,9 @@ mod mongo_replica_set_resource;
 pub mod outbox;
 /// Lifecycle phase labels (shared with infrastructure event records).
 pub mod phase;
+/// PostgreSQL primary + streaming replica per scenario (`postgres` + `cluster`; US-014+).
+#[cfg(feature = "postgres-cluster")]
+mod postgres_replica_set_resource;
 /// Publication observation spec and [`publication::PublicationVerifier`] (`outbox` feature).
 ///
 /// Does not require `kafka` or `rabbitmq`; transport implementations are added by those features.
@@ -329,6 +332,9 @@ pub use crate::resources::PostgresBindings;
 
 #[cfg(feature = "postgres")]
 pub use crate::resources::PostgresResource;
+
+#[cfg(feature = "postgres-cluster")]
+pub use crate::postgres_replica_set_resource::PostgresReplicaSetResource;
 
 #[cfg(feature = "timescaledb")]
 pub use crate::resources::TimescaledbResource;
