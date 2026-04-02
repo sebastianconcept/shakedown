@@ -47,3 +47,5 @@ mongodb-cluster = []
 kafka-cluster = []
 # Redis + Sentinel suite (propagates to `resources = [RedisSentinel]`)
 redis-sentinel = []
+# Postgres primary + replica cluster (propagates to `resources = [PostgresReplicaSet]`)
+postgres-cluster = []

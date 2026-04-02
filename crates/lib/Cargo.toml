@@ -157,6 +157,12 @@ postgres = [
     "testcontainers-modules/postgres",
     "diagnostics",
 ]
+# PostgreSQL primary + streaming replica per scenario (US-014+)
+postgres-cluster = [
+    "postgres",
+    "cluster",
+    "shakedown-macros/postgres-cluster",
+]
 # MariaDB integration with real infrastructure (requires Docker)
 mariadb = [
     "dep:mysql_async",
@@ -348,6 +354,12 @@ required-features = ["duckdb"]
 name = "postgres_vertical"
 path = "tests/postgres_vertical.rs"
 required-features = ["postgres"]
+
+# Postgres primary + replica streaming (Docker); ignored unless --ignored
+[[test]]
+name = "postgres_replica_set_vertical"
+path = "tests/postgres_replica_set_vertical.rs"
+required-features = ["postgres-cluster"]
 
 # MariaDB suite + bindings (Docker); ignored unless --ignored
 [[test]]

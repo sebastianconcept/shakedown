@@ -460,6 +460,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "PostgresReplicaSet" => Ok(quote! {
+            #[cfg(feature = "postgres-cluster")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::PostgresReplicaSet(
+                    ::shakedown::PostgresReplicaSetResource::new().with_image_tag_from_env(),
+                ));
+            }
+            #[cfg(not(feature = "postgres-cluster"))]
+            {
+                ::core::compile_error!(
+                    "PostgresReplicaSet in #[shakedown::test(resources = [...])] requires `postgres-cluster` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "MariaDB" => Ok(quote! {
             #[cfg(feature = "mariadb")]
             {
@@ -743,7 +757,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `KafkaCluster`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `MongoReplicaSet`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `KafkaCluster`, `Rabbit`, `Postgres`, `PostgresReplicaSet`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `RedisSentinel`, `Valkey`, `Mongo`, `MongoReplicaSet`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`"
             ),
         )),
     }
