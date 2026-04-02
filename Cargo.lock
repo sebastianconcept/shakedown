@@ -4974,6 +4974,7 @@ dependencies = [
  "mysql_async",
  "neo4rs",
  "noxious-client",
+ "percent-encoding",
  "prost 0.14.3",
  "qdrant-client",
  "rdkafka",

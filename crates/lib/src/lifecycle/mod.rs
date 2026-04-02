@@ -391,6 +391,10 @@ pub struct Context {
             crate::postgres_replica_set_cluster_control::PostgresReplicaSetClusterControl,
         >,
     >,
+    /// Shared RabbitMQ Erlang cluster control ([`crate::cluster::rabbit_cluster::RabbitClusterOps`]).
+    #[cfg(feature = "rabbitmq-cluster")]
+    rabbit_cluster_control:
+        Option<std::sync::Arc<crate::rabbit_cluster_cluster_control::RabbitClusterClusterControl>>,
     /// Merge point for [`crate::load::LoadHandle`] timeline rows (US-007+); set for the run phase only.
     #[cfg(feature = "load")]
     load_event_sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
@@ -497,6 +501,8 @@ impl Context {
             redis_sentinel_cluster: None,
             #[cfg(feature = "postgres-cluster")]
             postgres_replica_set_cluster: None,
+            #[cfg(feature = "rabbitmq-cluster")]
+            rabbit_cluster_control: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -602,6 +608,8 @@ impl Context {
             redis_sentinel_cluster: None,
             #[cfg(feature = "postgres-cluster")]
             postgres_replica_set_cluster: None,
+            #[cfg(feature = "rabbitmq-cluster")]
+            rabbit_cluster_control: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -707,6 +715,8 @@ impl Context {
             redis_sentinel_cluster: None,
             #[cfg(feature = "postgres-cluster")]
             postgres_replica_set_cluster: None,
+            #[cfg(feature = "rabbitmq-cluster")]
+            rabbit_cluster_control: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -856,6 +866,26 @@ impl Context {
         self.postgres_replica_set_cluster
             .as_ref()
             .map(crate::cluster::postgres_replica_set::PostgresReplicaSetHandle::new)
+    }
+
+    #[cfg(feature = "rabbitmq-cluster")]
+    pub(crate) fn set_rabbit_cluster_control(
+        &mut self,
+        cluster: Option<
+            std::sync::Arc<crate::rabbit_cluster_cluster_control::RabbitClusterClusterControl>,
+        >,
+    ) {
+        self.rabbit_cluster_control = cluster;
+    }
+
+    /// RabbitMQ Erlang cluster quorum queue leadership ([`crate::cluster::rabbit_cluster::RabbitClusterOps`]).
+    #[cfg(feature = "rabbitmq-cluster")]
+    pub fn rabbit_cluster(
+        &self,
+    ) -> Option<crate::cluster::rabbit_cluster::RabbitClusterHandle<'_>> {
+        self.rabbit_cluster_control
+            .as_ref()
+            .map(crate::cluster::rabbit_cluster::RabbitClusterHandle::new)
     }
 
     /// Get a reference to all registered resources.
@@ -2616,6 +2646,40 @@ async fn register_postgres_replica_set_cluster_control(
     }
 }
 
+#[cfg(feature = "rabbitmq-cluster")]
+async fn register_rabbit_cluster_control(ctx: &mut Context, handles: &[ResourceHandle]) {
+    use std::sync::Arc;
+
+    use crate::cluster::rabbit_cluster::RabbitClusterMarker;
+    use crate::cluster::ClusterHandle;
+    use crate::rabbit_cluster_cluster_control::RabbitClusterClusterControl;
+    use crate::rabbit_cluster_resource::rabbit_cluster_suite_snapshot;
+
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        if meta
+            .get("rabbitmq_cluster")
+            .and_then(|value| value.as_str())
+            != Some("suite")
+        {
+            continue;
+        }
+        let Some(snapshot) = rabbit_cluster_suite_snapshot().await else {
+            continue;
+        };
+        let arc = Arc::new(RabbitClusterClusterControl::new(snapshot));
+        ctx.set_rabbit_cluster_control(Some(Arc::clone(&arc)));
+        ctx.register_cluster_handle::<RabbitClusterMarker>(ClusterHandle::new(
+            "rabbitmq",
+            Box::new(arc),
+            None,
+        ));
+        return;
+    }
+}
+
 /// Runs a scenario through all lifecycle phases.
 ///
 /// This function executes the scenario in order:
@@ -3209,6 +3273,8 @@ where
                 register_redis_sentinel_cluster_control(ctx, &handles).await;
                 #[cfg(feature = "postgres-cluster")]
                 register_postgres_replica_set_cluster_control(ctx, &handles).await;
+                #[cfg(feature = "rabbitmq-cluster")]
+                register_rabbit_cluster_control(ctx, &handles).await;
                 #[cfg(feature = "nats")]
                 apply_resource_handles_to_nats_bindings(ctx, &handles);
                 #[cfg(feature = "neo4j")]
@@ -3653,6 +3719,25 @@ where
             None
         }
     };
+    #[cfg(feature = "rabbitmq-cluster")]
+    let rabbit_cluster_event_receiver = {
+        use crate::cluster::rabbit_cluster::RabbitClusterMarker;
+        use crate::cluster::CLUSTER_EVENT_CHANNEL_CAPACITY;
+        use crate::event::Event;
+        if ctx.cluster_handle::<RabbitClusterMarker>().is_some() {
+            let (sender, receiver) =
+                std::sync::mpsc::sync_channel::<Event>(CLUSTER_EVENT_CHANNEL_CAPACITY);
+            if let Some(handle) = ctx.cluster_handle_mut::<RabbitClusterMarker>() {
+                handle.set_event_sender(sender.clone());
+            }
+            if let Some(control) = ctx.rabbit_cluster_control.as_ref() {
+                control.set_event_sender(sender);
+            }
+            Some(receiver)
+        } else {
+            None
+        }
+    };
     #[cfg(feature = "load")]
     let load_event_receiver = {
         use crate::event::Event;
@@ -3669,6 +3754,7 @@ where
         feature = "kafka-cluster",
         feature = "redis-sentinel",
         feature = "postgres-cluster",
+        feature = "rabbitmq-cluster",
         feature = "fault-injection"
     ))]
     let scenario_result = {
@@ -3683,6 +3769,7 @@ where
         feature = "kafka-cluster",
         feature = "redis-sentinel",
         feature = "postgres-cluster",
+        feature = "rabbitmq-cluster",
         feature = "fault-injection"
     )))]
     {
@@ -3725,6 +3812,13 @@ where
         }
     }
 
+    #[cfg(feature = "rabbitmq-cluster")]
+    if let Some(receiver) = rabbit_cluster_event_receiver {
+        for event in receiver.try_iter() {
+            event_log.append(event);
+        }
+    }
+
     // Drain fault events into the caller-owned log after the scenario body and before assert/teardown,
     // so timelines and tests that read `event_log` after `run_scenario` see a complete run-phase slice.
     #[cfg(feature = "fault-injection")]
@@ -3738,6 +3832,7 @@ where
         feature = "kafka-cluster",
         feature = "redis-sentinel",
         feature = "postgres-cluster",
+        feature = "rabbitmq-cluster",
         feature = "fault-injection"
     ))]
     if let Err(panic_payload) = scenario_result {

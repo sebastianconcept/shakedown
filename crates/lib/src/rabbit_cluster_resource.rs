@@ -26,8 +26,10 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::{GenericImage, ImageExt};
 
 const RABBIT_AMQP_PORT: u16 = 5672;
-/// Non-management image by default to reduce memory vs `*-management` when three nodes start in one suite.
-const DEFAULT_IMAGE_TAG: &str = "4.0";
+/// RabbitMQ management plugin / HTTP API (queue details, quorum leader; US-017).
+const RABBIT_MGMT_PORT: u16 = 15672;
+/// **`rabbitmq:<tag>-management`** so the management API is available for quorum leadership queries.
+const DEFAULT_IMAGE_TAG: &str = "4.0-management";
 const DEFAULT_NODE_COUNT: usize = 3;
 const PROVISION_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -38,6 +40,10 @@ enum SuiteRabbitClusterState {
         network_name: String,
         nodes: Vec<testcontainers::ContainerAsync<GenericImage>>,
         host_ports: Vec<u16>,
+        /// Mapped host ports for `15672` (management API), aligned with `nodes` / `host_ports`.
+        management_host_ports: Vec<u16>,
+        /// Docker hostnames for each node (`shakedown-rabbit-{suite}-{i}`), for mapping Raft leaders.
+        hostnames: Vec<String>,
         refs: usize,
         image_key: String,
         node_count: usize,
@@ -131,6 +137,35 @@ async fn wait_amqp_uri_ready(uri: &str, resource_label: &str) -> Result<(), Infr
         resource: resource_label.to_string(),
         source: Box::new(std::io::Error::other(
             "RabbitMQ AMQP connection did not succeed in time",
+        )),
+    })
+}
+
+async fn wait_management_api_ready(port: u16) -> Result<(), InfrastructureError> {
+    let url = format!("http://127.0.0.1:{port}/api/overview");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|error| InfrastructureError::Readiness {
+            resource: "rabbitmq-cluster".into(),
+            source: Box::new(std::io::Error::other(error.to_string())),
+        })?;
+    for _ in 0..90u32 {
+        match client
+            .get(&url)
+            .basic_auth("guest", Some("guest"))
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => return Ok(()),
+            _ => {}
+        }
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+    Err(InfrastructureError::Readiness {
+        resource: "rabbitmq-cluster".into(),
+        source: Box::new(std::io::Error::other(
+            "RabbitMQ management API did not become ready in time",
         )),
     })
 }
@@ -280,6 +315,7 @@ async fn provision_suite_inner(
             let nodename0 = format!("rabbit@{hostname0}");
             let start0 = GenericImage::new("rabbitmq", tag)
                 .with_exposed_port(RABBIT_AMQP_PORT.tcp())
+                .with_exposed_port(RABBIT_MGMT_PORT.tcp())
                 .with_wait_for(WaitFor::seconds(2))
                 .with_env_var("RABBITMQ_ERLANG_COOKIE", cookie.as_str())
                 .with_env_var("RABBITMQ_NODENAME", nodename0.as_str())
@@ -296,11 +332,16 @@ async fn provision_suite_inner(
                 .get_host_port_ipv4(RABBIT_AMQP_PORT)
                 .await
                 .map_err(map_tc_err)?;
+            let mgmt0 = node0
+                .get_host_port_ipv4(RABBIT_MGMT_PORT)
+                .await
+                .map_err(map_tc_err)?;
             let single0 = format!("amqp://{username}:{password}@{harness_host}:{port0}/%2f");
             wait_amqp_uri_ready(single0.as_str(), "rabbitmq-cluster").await?;
 
             let mut nodes = vec![node0];
             let mut host_ports = vec![port0];
+            let mut management_host_ports = vec![mgmt0];
 
             if node_count > 1 {
                 let start_futures = (1..node_count).map(|index| {
@@ -314,6 +355,7 @@ async fn provision_suite_inner(
                         let nodename = format!("rabbit@{hostname}");
                         let start_image = GenericImage::new("rabbitmq", tag.as_str())
                             .with_exposed_port(RABBIT_AMQP_PORT.tcp())
+                            .with_exposed_port(RABBIT_MGMT_PORT.tcp())
                             .with_wait_for(WaitFor::seconds(2))
                             .with_env_var("RABBITMQ_ERLANG_COOKIE", cookie.as_str())
                             .with_env_var("RABBITMQ_NODENAME", nodename.as_str())
@@ -334,7 +376,12 @@ async fn provision_suite_inner(
                         .get_host_port_ipv4(RABBIT_AMQP_PORT)
                         .await
                         .map_err(map_tc_err)?;
+                    let mgmt_mapped = node
+                        .get_host_port_ipv4(RABBIT_MGMT_PORT)
+                        .await
+                        .map_err(map_tc_err)?;
                     host_ports.push(mapped);
+                    management_host_ports.push(mgmt_mapped);
                     nodes.push(node);
                 }
             }
@@ -343,6 +390,14 @@ async fn provision_suite_inner(
                 let single = format!("amqp://{username}:{password}@{harness_host}:{port}/%2f");
                 wait_amqp_uri_ready(single.as_str(), "rabbitmq-cluster").await?;
             }
+
+            for management_port in management_host_ports.iter() {
+                wait_management_api_ready(*management_port).await?;
+            }
+
+            let hostnames: Vec<String> = (0..node_count)
+                .map(|index| rabbit_hostname(suite_id.as_str(), index))
+                .collect();
 
             for follower in nodes.iter().skip(1) {
                 join_follower_to_cluster(follower, disc.as_str()).await?;
@@ -362,6 +417,8 @@ async fn provision_suite_inner(
                 network_name,
                 nodes,
                 host_ports: host_ports.clone(),
+                management_host_ports: management_host_ports.clone(),
+                hostnames,
                 refs: 1,
                 image_key: want_key.to_string(),
                 node_count,
@@ -529,5 +586,39 @@ impl Resource for RabbitClusterResource {
         self.amqp_uri = None;
         self.resource_prefix.clear();
         Ok(())
+    }
+}
+
+/// Suite layout for RabbitMQ cluster topology control (management API + Docker node IDs).
+pub(crate) struct RabbitClusterSuiteSnapshot {
+    pub(crate) node_count: usize,
+    pub(crate) container_ids: Vec<String>,
+    pub(crate) hostnames: Vec<String>,
+    pub(crate) management_host_ports: Vec<u16>,
+    pub(crate) username: String,
+    pub(crate) password: String,
+}
+
+pub(crate) async fn rabbit_cluster_suite_snapshot() -> Option<RabbitClusterSuiteSnapshot> {
+    let guard = suite_rabbit_cluster_mutex().lock().await;
+    match &*guard {
+        SuiteRabbitClusterState::Idle => None,
+        SuiteRabbitClusterState::Running {
+            nodes,
+            management_host_ports,
+            hostnames,
+            node_count,
+            ..
+        } => {
+            let container_ids = nodes.iter().map(|node| node.id().to_string()).collect();
+            Some(RabbitClusterSuiteSnapshot {
+                node_count: *node_count,
+                container_ids,
+                hostnames: hostnames.clone(),
+                management_host_ports: management_host_ports.clone(),
+                username: "guest".to_string(),
+                password: "guest".to_string(),
+            })
+        }
     }
 }

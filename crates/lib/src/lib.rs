@@ -177,6 +177,8 @@ mod postgres_replica_set_resource;
 /// Does not require `kafka` or `rabbitmq`; transport implementations are added by those features.
 #[cfg(feature = "outbox")]
 pub mod publication;
+#[cfg(feature = "rabbitmq-cluster")]
+mod rabbit_cluster_cluster_control;
 /// RabbitMQ Erlang cluster on a suite bridge (`rabbit` + `cluster`; US-016).
 #[cfg(feature = "rabbitmq-cluster")]
 mod rabbit_cluster_resource;
@@ -282,6 +284,11 @@ pub use crate::cluster::redis_sentinel::{
 pub use crate::cluster::postgres_replica_set::{
     PostgresReplicaSetClusterControl, PostgresReplicaSetHandle, PostgresReplicaSetMarker,
     PostgresReplicaSetOps,
+};
+
+#[cfg(feature = "rabbitmq-cluster")]
+pub use crate::cluster::rabbit_cluster::{
+    RabbitClusterClusterControl, RabbitClusterHandle, RabbitClusterMarker, RabbitClusterOps,
 };
 
 #[cfg(any(
