@@ -586,6 +586,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "KafkaCluster" => Ok(quote! {
+            #[cfg(feature = "kafka-cluster")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::KafkaCluster(
+                    ::shakedown::KafkaClusterResource::new().with_image_tag_from_env(),
+                ));
+            }
+            #[cfg(not(feature = "kafka-cluster"))]
+            {
+                ::core::compile_error!(
+                    "KafkaCluster in #[shakedown::test(resources = [...])] requires `kafka-cluster` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Nats" => Ok(quote! {
             #[cfg(feature = "nats")]
             {
@@ -715,7 +729,7 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
         _ => Err(syn::Error::new(
             ident.span(),
             format!(
-                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `MongoReplicaSet`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`"
+                "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `KafkaCluster`, `Rabbit`, `Postgres`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `Valkey`, `Mongo`, `MongoReplicaSet`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`"
             ),
         )),
     }

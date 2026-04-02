@@ -133,6 +133,9 @@ pub mod event;
 pub mod fault_injection;
 /// Typed helpers on [`lifecycle::Context`] for Kafka, RabbitMQ, and relational resources (feature-gated submodules).
 pub mod helpers;
+/// Multi-broker KRaft Kafka cluster (`kafka` + `cluster`; US-010+).
+#[cfg(feature = "kafka-cluster")]
+mod kafka_cluster_resource;
 /// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
 /// Open-model load profiles (`load` feature; US-006+).
@@ -389,6 +392,8 @@ pub use crate::resources::RedisResource;
 #[cfg(feature = "valkey")]
 pub use crate::resources::ValkeyResource;
 
+#[cfg(feature = "kafka-cluster")]
+pub use crate::kafka_cluster_resource::KafkaClusterResource;
 #[cfg(feature = "mongodb-cluster")]
 pub use crate::mongo_replica_set_resource::MongoReplicaSetResource;
 #[cfg(feature = "mongodb")]

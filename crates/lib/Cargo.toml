@@ -87,6 +87,10 @@ qdrant-client = { version = "1.17", optional = true, default-features = false }
 # HdrHistogram for load metrics and windowed percentiles (`load` feature; US-006+)
 hdrhistogram = { version = "7", optional = true }
 
+# Kafka KRaft multi-broker cluster id generation (`kafka-cluster` feature; US-010+)
+uuid = { version = "1", optional = true, features = ["v4"] }
+base64 = { version = "0.22", optional = true, default-features = false, features = ["std"] }
+
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 async-nats = "0.46"
@@ -135,6 +139,14 @@ kafka = [
     "dep:testcontainers-modules",
     "testcontainers-modules/kafka",
     "diagnostics",
+]
+# Multi-broker KRaft cluster on a shared Docker network (US-010+)
+kafka-cluster = [
+    "kafka",
+    "cluster",
+    "dep:uuid",
+    "dep:base64",
+    "shakedown-macros/kafka-cluster",
 ]
 # Postgres integration with real infrastructure (requires Docker)
 postgres = [
@@ -473,6 +485,12 @@ required-features = ["mongodb"]
 name = "mongo_replica_set_vertical"
 path = "tests/mongo_replica_set_vertical.rs"
 required-features = ["mongodb-cluster"]
+
+# Kafka 3-broker KRaft cluster (Docker); ignored unless --ignored
+[[test]]
+name = "kafka_cluster_vertical"
+path = "tests/kafka_cluster_vertical.rs"
+required-features = ["kafka-cluster"]
 
 # MongoDB helpers round-trip (Docker); ignored unless --ignored
 [[test]]
