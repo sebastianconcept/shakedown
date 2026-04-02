@@ -286,6 +286,10 @@ pub enum BuiltinResource {
     /// Docker-backed multi-broker KRaft Kafka cluster (shared bridge network; US-010).
     KafkaCluster(crate::KafkaClusterResource),
 
+    #[cfg(feature = "rabbitmq-cluster")]
+    /// Docker-backed RabbitMQ Erlang cluster (shared bridge network; quorum default queue type; US-016).
+    RabbitCluster(crate::RabbitClusterResource),
+
     #[cfg(feature = "redis-sentinel")]
     /// Docker-backed Redis primary/replicas + Sentinel quorum (shared bridge network; US-012).
     RedisSentinel(crate::RedisSentinelResource),
@@ -359,6 +363,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MongoReplicaSet(r) => r.provision(scenario_id).await,
             #[cfg(feature = "kafka-cluster")]
             BuiltinResource::KafkaCluster(r) => r.provision(scenario_id).await,
+            #[cfg(feature = "rabbitmq-cluster")]
+            BuiltinResource::RabbitCluster(r) => r.provision(scenario_id).await,
             #[cfg(feature = "redis-sentinel")]
             BuiltinResource::RedisSentinel(r) => r.provision(scenario_id).await,
             #[cfg(feature = "nats")]
@@ -411,6 +417,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MongoReplicaSet(r) => r.check_ready().await,
             #[cfg(feature = "kafka-cluster")]
             BuiltinResource::KafkaCluster(r) => r.check_ready().await,
+            #[cfg(feature = "rabbitmq-cluster")]
+            BuiltinResource::RabbitCluster(r) => r.check_ready().await,
             #[cfg(feature = "redis-sentinel")]
             BuiltinResource::RedisSentinel(r) => r.check_ready().await,
             #[cfg(feature = "nats")]
@@ -463,6 +471,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MongoReplicaSet(r) => r.apply_default_seed().await,
             #[cfg(feature = "kafka-cluster")]
             BuiltinResource::KafkaCluster(r) => r.apply_default_seed().await,
+            #[cfg(feature = "rabbitmq-cluster")]
+            BuiltinResource::RabbitCluster(r) => r.apply_default_seed().await,
             #[cfg(feature = "redis-sentinel")]
             BuiltinResource::RedisSentinel(r) => r.apply_default_seed().await,
             #[cfg(feature = "nats")]
@@ -515,6 +525,8 @@ impl Resource for BuiltinResource {
             BuiltinResource::MongoReplicaSet(r) => r.teardown().await,
             #[cfg(feature = "kafka-cluster")]
             BuiltinResource::KafkaCluster(r) => r.teardown().await,
+            #[cfg(feature = "rabbitmq-cluster")]
+            BuiltinResource::RabbitCluster(r) => r.teardown().await,
             #[cfg(feature = "redis-sentinel")]
             BuiltinResource::RedisSentinel(r) => r.teardown().await,
             #[cfg(feature = "nats")]
@@ -6473,6 +6485,8 @@ impl KafkaBindings {
 pub struct RabbitBindings {
     /// Full AMQP URI (includes credentials; test images only — do not use in production).
     pub amqp_uri: String,
+    /// Same connection string as [`Self::amqp_uri`]; multi-host comma form for [`BuiltinResource::RabbitCluster`].
+    pub connection_url: String,
     /// Broker hostname or IP (typically `127.0.0.1`).
     pub host: String,
     /// Mapped host port for AMQP (`5672` in the default image).
@@ -6491,9 +6505,34 @@ pub struct RabbitBindings {
 
 #[cfg(feature = "rabbitmq")]
 impl RabbitBindings {
-    /// Build bindings from provision metadata fields.
+    /// Build bindings from provision metadata fields (`connection_url` matches `amqp_uri`).
     pub fn new(
         amqp_uri: impl Into<String>,
+        host: impl Into<String>,
+        port: u16,
+        username: impl Into<String>,
+        password: impl Into<String>,
+        vhost: impl Into<String>,
+        resource_prefix: impl Into<String>,
+    ) -> Self {
+        let amqp_uri = amqp_uri.into();
+        Self::with_connection_url(
+            amqp_uri.clone(),
+            amqp_uri,
+            host,
+            port,
+            username,
+            password,
+            vhost,
+            resource_prefix,
+        )
+    }
+
+    /// Build bindings when the canonical multi-host URI differs from the lapin-friendly `amqp_uri` (e.g. [`BuiltinResource::RabbitCluster`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_connection_url(
+        amqp_uri: impl Into<String>,
+        connection_url: impl Into<String>,
         host: impl Into<String>,
         port: u16,
         username: impl Into<String>,
@@ -6505,6 +6544,7 @@ impl RabbitBindings {
         let prefix_trimmed = resource_prefix.trim_end_matches('_').to_string();
         RabbitBindings {
             amqp_uri: amqp_uri.into(),
+            connection_url: connection_url.into(),
             host: host.into(),
             port,
             username: username.into(),
@@ -7188,6 +7228,7 @@ mod tests {
             "shakedown_test_",
         );
         assert_eq!(bindings.amqp_uri, "amqp://guest:guest@127.0.0.1:5672");
+        assert_eq!(bindings.connection_url, bindings.amqp_uri);
         assert_eq!(bindings.port, 5672);
         assert_eq!(bindings.vhost, "/");
         assert_eq!(bindings.namespaced_name("proof"), "shakedown_test_proof");

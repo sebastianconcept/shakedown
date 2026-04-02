@@ -2438,6 +2438,7 @@ fn apply_resource_handles_to_rabbit_bindings(ctx: &mut Context, handles: &[Resou
             continue;
         }
         let amqp_uri = meta.get("amqp_uri").and_then(|v| v.as_str());
+        let connection_url = meta.get("connection_url").and_then(|v| v.as_str());
         let host = meta.get("host").and_then(|v| v.as_str());
         let port = meta
             .get("port")
@@ -2464,8 +2465,10 @@ fn apply_resource_handles_to_rabbit_bindings(ctx: &mut Context, handles: &[Resou
             vhost,
             resource_prefix,
         ) {
-            ctx.set_rabbit_bindings(RabbitBindings::new(
+            let connection_url = connection_url.unwrap_or(amqp_uri);
+            ctx.set_rabbit_bindings(RabbitBindings::with_connection_url(
                 amqp_uri,
+                connection_url,
                 host,
                 port,
                 username,

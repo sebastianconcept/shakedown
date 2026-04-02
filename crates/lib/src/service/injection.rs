@@ -200,7 +200,7 @@ fn inject_conventions(
     #[cfg(feature = "rabbitmq")]
     if let Some(bindings) = context.rabbit_bindings() {
         let key = overrides.rabbitmq.as_deref().unwrap_or("RABBITMQ_URL");
-        environment.insert(key.to_string(), bindings.amqp_uri.clone());
+        environment.insert(key.to_string(), bindings.connection_url.clone());
     }
 
     #[cfg(any(feature = "redis", feature = "valkey"))]
@@ -429,7 +429,7 @@ fn resolve_env_mapping(
         #[cfg(feature = "rabbitmq")]
         EnvMapping::Rabbitmq(key) => context
             .rabbit_bindings()
-            .map(|bindings| (key.clone(), bindings.amqp_uri.clone())),
+            .map(|bindings| (key.clone(), bindings.connection_url.clone())),
         #[cfg(not(feature = "rabbitmq"))]
         EnvMapping::Rabbitmq(_) => None,
         #[cfg(any(feature = "redis", feature = "valkey"))]
