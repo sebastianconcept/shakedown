@@ -140,6 +140,8 @@ pub mod lifecycle;
 pub mod mock_service;
 /// MongoDB replica set resource (`mongodb` + `cluster`; US-003+).
 #[cfg(feature = "mongodb-cluster")]
+mod mongo_replica_set_cluster_control;
+#[cfg(feature = "mongodb-cluster")]
 mod mongo_replica_set_resource;
 /// Outbox table setup and assertions (`outbox` + at least one storage engine feature).
 #[cfg(all(
@@ -237,6 +239,11 @@ pub use crate::timeline::{
 pub use crate::cluster::{
     cluster_network_name, create_cluster_network, remove_cluster_network, ClusterControl,
     ClusterError, ClusterHandle, NodeStatus, CLUSTER_EVENT_SOURCE,
+};
+
+#[cfg(feature = "mongodb-cluster")]
+pub use crate::cluster::mongo_replica_set::{
+    MongoClusterHandle, MongoClusterOps, MongoReplicaSetClusterControl, MongoReplicaSetMarker,
 };
 
 #[cfg(any(

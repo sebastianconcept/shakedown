@@ -58,6 +58,38 @@ fn suite_mongo_rs_mutex() -> &'static Mutex<SuiteMongoRsState> {
     SUITE_MONGO_RS.get_or_init(|| Mutex::new(SuiteMongoRsState::Idle))
 }
 
+/// Snapshot of suite-shared replica set endpoints for cluster control (host-mapped ports + container IDs).
+#[cfg(feature = "mongodb-cluster")]
+pub(crate) struct MongoReplicaSetSuiteSnapshot {
+    pub(crate) client_host: String,
+    pub(crate) host_ports: Vec<u16>,
+    pub(crate) container_ids: Vec<String>,
+    pub(crate) node_count: usize,
+}
+
+/// Latest suite replica set layout, if the suite has provisioned members.
+#[cfg(feature = "mongodb-cluster")]
+pub(crate) async fn mongo_replica_set_suite_snapshot() -> Option<MongoReplicaSetSuiteSnapshot> {
+    let guard = suite_mongo_rs_mutex().lock().await;
+    match &*guard {
+        SuiteMongoRsState::Idle => None,
+        SuiteMongoRsState::Running {
+            host_ports,
+            nodes,
+            node_count,
+            ..
+        } => {
+            let container_ids = nodes.iter().map(|node| node.id().to_string()).collect();
+            Some(MongoReplicaSetSuiteSnapshot {
+                client_host: client_host_for_harness().to_string(),
+                host_ports: host_ports.clone(),
+                container_ids,
+                node_count: *node_count,
+            })
+        }
+    }
+}
+
 fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
     InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
 }

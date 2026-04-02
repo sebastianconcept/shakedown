@@ -366,6 +366,11 @@ pub struct Context {
     /// Cluster topology handles keyed by resource marker type ([`Context::register_cluster_handle`]).
     #[cfg(feature = "cluster")]
     cluster_handles: HashMap<std::any::TypeId, crate::cluster::ClusterHandle>,
+    /// Shared MongoDB replica set cluster control ([`crate::cluster::mongo_replica_set::MongoClusterOps`]).
+    #[cfg(feature = "mongodb-cluster")]
+    mongo_replica_set_cluster: Option<
+        std::sync::Arc<crate::mongo_replica_set_cluster_control::MongoReplicaSetClusterControl>,
+    >,
 }
 
 impl Context {
@@ -458,6 +463,8 @@ impl Context {
             services: HashMap::new(),
             #[cfg(feature = "cluster")]
             cluster_handles: HashMap::new(),
+            #[cfg(feature = "mongodb-cluster")]
+            mongo_replica_set_cluster: None,
         }
     }
 
@@ -550,6 +557,8 @@ impl Context {
             services: HashMap::new(),
             #[cfg(feature = "cluster")]
             cluster_handles: HashMap::new(),
+            #[cfg(feature = "mongodb-cluster")]
+            mongo_replica_set_cluster: None,
         }
     }
 
@@ -642,6 +651,8 @@ impl Context {
             services: HashMap::new(),
             #[cfg(feature = "cluster")]
             cluster_handles: HashMap::new(),
+            #[cfg(feature = "mongodb-cluster")]
+            mongo_replica_set_cluster: None,
         }
     }
 
@@ -670,6 +681,32 @@ impl Context {
     #[cfg(feature = "cluster")]
     pub fn cluster_handle<T: 'static>(&self) -> Option<&crate::cluster::ClusterHandle> {
         self.cluster_handles.get(&std::any::TypeId::of::<T>())
+    }
+
+    /// Mutable cluster handle for wiring [`crate::cluster::ClusterHandle::set_event_sender`] before the run phase.
+    #[cfg(feature = "cluster")]
+    pub fn cluster_handle_mut<T: 'static>(&mut self) -> Option<&mut crate::cluster::ClusterHandle> {
+        self.cluster_handles.get_mut(&std::any::TypeId::of::<T>())
+    }
+
+    #[cfg(feature = "mongodb-cluster")]
+    pub(crate) fn set_mongo_replica_set_cluster(
+        &mut self,
+        cluster: Option<
+            std::sync::Arc<crate::mongo_replica_set_cluster_control::MongoReplicaSetClusterControl>,
+        >,
+    ) {
+        self.mongo_replica_set_cluster = cluster;
+    }
+
+    /// MongoDB replica set topology control ([`crate::cluster::mongo_replica_set::MongoClusterOps`]).
+    #[cfg(feature = "mongodb-cluster")]
+    pub fn mongo_cluster(
+        &self,
+    ) -> Option<crate::cluster::mongo_replica_set::MongoClusterHandle<'_>> {
+        self.mongo_replica_set_cluster
+            .as_ref()
+            .map(crate::cluster::mongo_replica_set::MongoClusterHandle::new)
     }
 
     /// Get a reference to all registered resources.
@@ -2256,6 +2293,36 @@ async fn teardown_all_resources(ctx: &mut Context) {
     ctx.clear_fault_handle();
 }
 
+#[cfg(feature = "mongodb-cluster")]
+async fn register_mongo_replica_set_cluster_control(ctx: &mut Context, handles: &[ResourceHandle]) {
+    use std::sync::Arc;
+
+    use crate::cluster::mongo_replica_set::MongoReplicaSetMarker;
+    use crate::cluster::ClusterHandle;
+    use crate::mongo_replica_set_cluster_control::MongoReplicaSetClusterControl;
+    use crate::mongo_replica_set_resource::mongo_replica_set_suite_snapshot;
+
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        if meta.get("mongodb_cluster").and_then(|value| value.as_str()) != Some("replica_set") {
+            continue;
+        }
+        let Some(snapshot) = mongo_replica_set_suite_snapshot().await else {
+            continue;
+        };
+        let arc = Arc::new(MongoReplicaSetClusterControl::new(snapshot.node_count));
+        ctx.set_mongo_replica_set_cluster(Some(Arc::clone(&arc)));
+        ctx.register_cluster_handle::<MongoReplicaSetMarker>(ClusterHandle::new(
+            "mongo",
+            Box::new(arc),
+            None,
+        ));
+        return;
+    }
+}
+
 /// Runs a scenario through all lifecycle phases.
 ///
 /// This function executes the scenario in order:
@@ -2841,6 +2908,8 @@ where
                 apply_resource_handles_to_redis_bindings(ctx, &handles);
                 #[cfg(feature = "mongodb")]
                 apply_resource_handles_to_mongo_bindings(ctx, &handles);
+                #[cfg(feature = "mongodb-cluster")]
+                register_mongo_replica_set_cluster_control(ctx, &handles).await;
                 #[cfg(feature = "nats")]
                 apply_resource_handles_to_nats_bindings(ctx, &handles);
                 #[cfg(feature = "neo4j")]
@@ -3209,8 +3278,34 @@ where
         }
         receiver
     };
+    #[cfg(feature = "mongodb-cluster")]
+    let cluster_event_receiver = {
+        use crate::cluster::mongo_replica_set::MongoReplicaSetMarker;
+        use crate::cluster::CLUSTER_EVENT_CHANNEL_CAPACITY;
+        use crate::event::Event;
+        if ctx.cluster_handle::<MongoReplicaSetMarker>().is_some() {
+            let (sender, receiver) =
+                std::sync::mpsc::sync_channel::<Event>(CLUSTER_EVENT_CHANNEL_CAPACITY);
+            if let Some(handle) = ctx.cluster_handle_mut::<MongoReplicaSetMarker>() {
+                handle.set_event_sender(sender.clone());
+            }
+            if let Some(control) = ctx.mongo_replica_set_cluster.as_ref() {
+                control.set_event_sender(sender);
+            }
+            Some(receiver)
+        } else {
+            None
+        }
+    };
     // Execute the scenario function
     let _ = scenario_fn(ctx).await;
+
+    #[cfg(feature = "mongodb-cluster")]
+    if let Some(receiver) = cluster_event_receiver {
+        for event in receiver.try_iter() {
+            event_log.append(event);
+        }
+    }
 
     // Drain fault events into the caller-owned log after the scenario body and before assert/teardown,
     // so timelines and tests that read `event_log` after `run_scenario` see a complete run-phase slice.

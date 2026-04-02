@@ -6,10 +6,13 @@
 //! cargo test -p shakedown --features mongodb-cluster --test mongo_replica_set_vertical -- --ignored
 //! ```
 
+use std::time::Duration;
+
 use mongodb::bson::doc;
 
 use shakedown::{
     run_scenario, BuiltinResource, Context, EventLog, MongoReplicaSetResource, RegisteredResource,
+    CLUSTER_EVENT_SOURCE,
 };
 
 #[tokio::test]
@@ -79,5 +82,58 @@ async fn mongo_replica_set_provisions_three_nodes_and_elects_primary() {
             ))
         ),
         "expected MongoReplicaSet builtin"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features mongodb-cluster --test mongo_replica_set_vertical -- --ignored"]
+async fn mongo_replica_set_step_down_elects_different_primary() {
+    let mut ctx = Context::new();
+    ctx.register_builtin(BuiltinResource::MongoReplicaSet(
+        MongoReplicaSetResource::new().with_image_tag_from_env(),
+    ));
+    let mut event_log = EventLog::new();
+
+    run_scenario(
+        &mut ctx,
+        "mongo_rs_step_down_ops",
+        |ctx: &mut Context| {
+            Box::pin(async move {
+                let mongo = ctx
+                    .mongo_cluster()
+                    .expect("mongo cluster handle after provision");
+                let before = mongo
+                    .current_primary()
+                    .await
+                    .expect("current primary before step-down");
+                mongo
+                    .step_down_primary()
+                    .await
+                    .expect("replSetStepDown");
+                let after = mongo
+                    .await_new_primary(Duration::from_secs(60))
+                    .await
+                    .expect("new primary election");
+                assert_ne!(
+                    before, after,
+                    "expected a different node to become primary after step-down (before={before}, after={after})"
+                );
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("scenario");
+
+    let cluster_events: Vec<_> = event_log
+        .events()
+        .filter(|event_record| event_record.source == CLUSTER_EVENT_SOURCE)
+        .collect();
+    assert!(
+        cluster_events
+            .iter()
+            .any(|event_record| event_record.message.contains("step_down_primary")),
+        "expected cluster event for step_down_primary in {:?}",
+        cluster_events
     );
 }
