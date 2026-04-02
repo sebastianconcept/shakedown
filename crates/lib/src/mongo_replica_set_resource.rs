@@ -457,6 +457,7 @@ impl Resource for MongoReplicaSetResource {
                     "engine": "mongodb",
                     "replica_set": replica_set_id,
                     "mongodb_cluster": "replica_set",
+                    "host_ports": host_ports,
                 })),
             }]
         })

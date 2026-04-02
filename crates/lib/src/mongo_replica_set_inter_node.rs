@@ -228,6 +228,7 @@ pub(crate) async fn finalize_mongo_replica_set_inter_node_mesh(
         username: String::new(),
         password: String::new(),
         connection_url: connection_url.clone(),
+        replica_set_host_ports: pending.host_ports.clone(),
     });
 
     let proxy_names = all_mesh_proxy_names(&suite_key, node_count);

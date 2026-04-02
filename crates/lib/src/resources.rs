@@ -6887,6 +6887,8 @@ pub struct MongoBindings {
     pub password: String,
     /// Full MongoDB connection URI for this scenario database (`authSource=admin`).
     pub connection_url: String,
+    /// Published host ports for each replica-set member index (`0..N`), suite order (empty for standalone).
+    pub replica_set_host_ports: Vec<u16>,
 }
 
 /// A marker trait for resources that can be cloned.
