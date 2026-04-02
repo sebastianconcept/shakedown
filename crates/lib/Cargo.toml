@@ -203,6 +203,12 @@ mongodb = [
     "testcontainers-modules/mongo",
     "diagnostics",
 ]
+# MongoDB replica set (multi-container, bridge network + `replSetInitiate`; `mongodb` + `cluster`)
+mongodb-cluster = [
+    "mongodb",
+    "cluster",
+    "shakedown-macros/mongodb-cluster",
+]
 # NATS core pub/sub (`nats` image via testcontainers-modules)
 nats = [
     "dep:async-nats",
@@ -453,6 +459,12 @@ required-features = ["valkey"]
 name = "mongo_vertical"
 path = "tests/mongo_vertical.rs"
 required-features = ["mongodb"]
+
+# MongoDB 3-node replica set (Docker); ignored unless --ignored
+[[test]]
+name = "mongo_replica_set_vertical"
+path = "tests/mongo_replica_set_vertical.rs"
+required-features = ["mongodb-cluster"]
 
 # MongoDB helpers round-trip (Docker); ignored unless --ignored
 [[test]]

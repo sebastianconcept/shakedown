@@ -41,3 +41,5 @@ timescaledb = []
 rabbitmq = []
 # SQLite in-memory resource (propagates to generated code in macros)
 sqlite = []
+# MongoDB replica set cluster (propagates to `resources = [MongoReplicaSet]`)
+mongodb-cluster = []
