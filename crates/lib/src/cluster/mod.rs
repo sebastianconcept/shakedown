@@ -7,10 +7,13 @@ pub mod network;
 #[cfg(feature = "mongodb-cluster")]
 pub mod mongo_replica_set;
 
+#[cfg(feature = "kafka-cluster")]
+pub mod kafka_cluster;
+
 pub use network::{cluster_network_name, create_cluster_network, remove_cluster_network};
 
 /// Bounded queue for [`ClusterHandle`] [`Event`] delivery into [`crate::lifecycle::run_scenario`].
-#[cfg(feature = "mongodb-cluster")]
+#[cfg(any(feature = "mongodb-cluster", feature = "kafka-cluster"))]
 pub const CLUSTER_EVENT_CHANNEL_CAPACITY: usize = 64;
 
 use std::sync::mpsc::SyncSender;

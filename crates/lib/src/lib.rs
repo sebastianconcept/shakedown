@@ -133,6 +133,8 @@ pub mod event;
 pub mod fault_injection;
 /// Typed helpers on [`lifecycle::Context`] for Kafka, RabbitMQ, and relational resources (feature-gated submodules).
 pub mod helpers;
+#[cfg(feature = "kafka-cluster")]
+mod kafka_cluster_cluster_control;
 /// Multi-broker KRaft Kafka cluster (`kafka` + `cluster`; US-010+).
 #[cfg(feature = "kafka-cluster")]
 mod kafka_cluster_resource;
@@ -250,6 +252,11 @@ pub use crate::cluster::{
 #[cfg(feature = "mongodb-cluster")]
 pub use crate::cluster::mongo_replica_set::{
     MongoClusterHandle, MongoClusterOps, MongoReplicaSetClusterControl, MongoReplicaSetMarker,
+};
+
+#[cfg(feature = "kafka-cluster")]
+pub use crate::cluster::kafka_cluster::{
+    KafkaClusterClusterControl, KafkaClusterHandle, KafkaClusterMarker, KafkaClusterOps,
 };
 
 #[cfg(any(

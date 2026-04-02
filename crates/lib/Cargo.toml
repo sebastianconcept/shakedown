@@ -93,6 +93,7 @@ base64 = { version = "0.22", optional = true, default-features = false, features
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
+rdkafka = { version = "=0.38", default-features = false, features = ["ssl-vendored", "tokio"] }
 async-nats = "0.46"
 async-trait = "0.1"
 bytes = "1"
