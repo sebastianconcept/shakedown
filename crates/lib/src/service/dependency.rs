@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::error::{InternalError, ShakedownError};
-use crate::service::state::ServiceReference;
+use crate::service::ServiceReference;
 
 /// Returns service names in startup order: dependencies before dependents. Fails on cycles or
 /// missing dependency names.

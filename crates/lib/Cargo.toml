@@ -209,6 +209,12 @@ valkey = [
     "testcontainers-modules/valkey",
     "diagnostics",
 ]
+# Redis primary + replicas + Sentinel on a suite bridge (`redis` + `cluster`; US-012+)
+redis-sentinel = [
+    "redis",
+    "cluster",
+    "shakedown-macros/redis-sentinel",
+]
 # MongoDB (`mongo` image via testcontainers-modules)
 mongodb = [
     "dep:mongodb",
@@ -492,6 +498,12 @@ required-features = ["mongodb-cluster"]
 name = "kafka_cluster_vertical"
 path = "tests/kafka_cluster_vertical.rs"
 required-features = ["kafka-cluster"]
+
+# Redis replication + Sentinel (Docker); ignored unless --ignored
+[[test]]
+name = "redis_sentinel_vertical"
+path = "tests/redis_sentinel_vertical.rs"
+required-features = ["redis-sentinel"]
 
 # MongoDB helpers round-trip (Docker); ignored unless --ignored
 [[test]]

@@ -133,6 +133,8 @@ use crate::resources::QdrantBindings;
 use crate::resources::RabbitBindings;
 #[cfg(any(feature = "redis", feature = "valkey"))]
 use crate::resources::RedisBindings;
+#[cfg(feature = "redis-sentinel")]
+use crate::resources::RedisSentinelBindings;
 #[cfg(feature = "sqlite")]
 use crate::resources::SqliteBindings;
 #[cfg(feature = "weaviate")]
@@ -274,6 +276,9 @@ pub struct Context {
     /// Redis / Valkey bindings when a matching resource populated them (`redis` / `valkey` features).
     #[cfg(any(feature = "redis", feature = "valkey"))]
     redis_bindings: Option<RedisBindings>,
+    /// Redis Sentinel discovery + primary URL when [`crate::BuiltinResource::RedisSentinel`] provisioned (`redis-sentinel`).
+    #[cfg(feature = "redis-sentinel")]
+    redis_sentinel_bindings: Option<RedisSentinelBindings>,
     /// MongoDB bindings when a Mongo resource populated them (`mongodb` feature).
     #[cfg(feature = "mongodb")]
     mongo_bindings: Option<MongoBindings>,
@@ -402,6 +407,8 @@ impl Context {
             duckdb_bindings: None,
             #[cfg(any(feature = "redis", feature = "valkey"))]
             redis_bindings: None,
+            #[cfg(feature = "redis-sentinel")]
+            redis_sentinel_bindings: None,
             #[cfg(feature = "mongodb")]
             mongo_bindings: None,
             #[cfg(feature = "nats")]
@@ -438,6 +445,7 @@ impl Context {
                     feature = "mariadb",
                     feature = "mysql",
                     feature = "redis",
+                    feature = "redis-sentinel",
                     feature = "valkey",
                     feature = "mongodb",
                     feature = "nats",
@@ -500,6 +508,8 @@ impl Context {
             duckdb_bindings: None,
             #[cfg(any(feature = "redis", feature = "valkey"))]
             redis_bindings: None,
+            #[cfg(feature = "redis-sentinel")]
+            redis_sentinel_bindings: None,
             #[cfg(feature = "mongodb")]
             mongo_bindings: None,
             #[cfg(feature = "nats")]
@@ -536,6 +546,7 @@ impl Context {
                     feature = "mariadb",
                     feature = "mysql",
                     feature = "redis",
+                    feature = "redis-sentinel",
                     feature = "valkey",
                     feature = "mongodb",
                     feature = "nats",
@@ -598,6 +609,8 @@ impl Context {
             duckdb_bindings: None,
             #[cfg(any(feature = "redis", feature = "valkey"))]
             redis_bindings: None,
+            #[cfg(feature = "redis-sentinel")]
+            redis_sentinel_bindings: None,
             #[cfg(feature = "mongodb")]
             mongo_bindings: None,
             #[cfg(feature = "nats")]
@@ -634,6 +647,7 @@ impl Context {
                     feature = "mariadb",
                     feature = "mysql",
                     feature = "redis",
+                    feature = "redis-sentinel",
                     feature = "valkey",
                     feature = "mongodb",
                     feature = "nats",
@@ -896,6 +910,18 @@ impl Context {
     #[cfg(any(feature = "redis", feature = "valkey"))]
     pub fn redis_bindings(&self) -> Option<&RedisBindings> {
         self.redis_bindings.as_ref()
+    }
+
+    /// Set Redis Sentinel discovery bindings when [`crate::BuiltinResource::RedisSentinel`] populated them.
+    #[cfg(feature = "redis-sentinel")]
+    pub fn set_redis_sentinel_bindings(&mut self, redis_sentinel_bindings: RedisSentinelBindings) {
+        self.redis_sentinel_bindings = Some(redis_sentinel_bindings);
+    }
+
+    /// Sentinel endpoints + master name + primary URL (`redis-sentinel` feature).
+    #[cfg(feature = "redis-sentinel")]
+    pub fn redis_sentinel_bindings(&self) -> Option<&RedisSentinelBindings> {
+        self.redis_sentinel_bindings.as_ref()
     }
 
     /// Set MongoDB bindings for this scenario (typically after Mongo provision).
@@ -2268,7 +2294,8 @@ fn apply_resource_handles_to_qdrant_bindings(ctx: &mut Context, handles: &[Resou
 }
 
 #[cfg(any(feature = "redis", feature = "valkey"))]
-/// If any handle metadata carries Redis or Valkey engine fields, set [`Context::set_redis_bindings`].
+/// If any handle metadata carries Redis, Valkey, or Redis Sentinel engine fields, set
+/// [`Context::set_redis_bindings`] (and [`Context::set_redis_sentinel_bindings`] for Sentinel).
 fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[ResourceHandle]) {
     for handle in handles {
         let Some(meta) = &handle.metadata else {
@@ -2277,7 +2304,7 @@ fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[Resour
         let Some(engine) = meta.get("engine").and_then(|value| value.as_str()) else {
             continue;
         };
-        if engine != "redis" && engine != "valkey" {
+        if engine != "redis" && engine != "valkey" && engine != "redis-sentinel" {
             continue;
         }
         let host = meta.get("host").and_then(|value| value.as_str());
@@ -2296,6 +2323,32 @@ fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[Resour
                 connection_url: connection_url.to_string(),
                 key_prefix: key_prefix.to_string(),
             });
+        }
+        #[cfg(feature = "redis-sentinel")]
+        if engine == "redis-sentinel" {
+            let sentinel_hosts = meta.get("sentinel_hosts").and_then(|value| value.as_str());
+            let master_name = meta.get("master_name").and_then(|value| value.as_str());
+            let connection_url = meta.get("connection_url").and_then(|value| value.as_str());
+            let replica_urls = meta
+                .get("replica_connection_urls")
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(str::to_owned))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if let (Some(sentinel_hosts), Some(master_name), Some(connection_url)) =
+                (sentinel_hosts, master_name, connection_url)
+            {
+                ctx.set_redis_sentinel_bindings(RedisSentinelBindings {
+                    sentinel_hosts: sentinel_hosts.to_string(),
+                    master_name: master_name.to_string(),
+                    connection_url: connection_url.to_string(),
+                    replica_connection_urls: replica_urls,
+                });
+            }
         }
     }
 }

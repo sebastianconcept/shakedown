@@ -111,6 +111,7 @@ pub mod cluster;
     feature = "mariadb",
     feature = "mysql",
     feature = "redis",
+    feature = "redis-sentinel",
     feature = "valkey",
     feature = "mongodb",
     feature = "nats",
@@ -171,6 +172,9 @@ pub mod phase;
 /// Does not require `kafka` or `rabbitmq`; transport implementations are added by those features.
 #[cfg(feature = "outbox")]
 pub mod publication;
+/// Redis replication + Sentinel (`redis` + `cluster`; US-012+).
+#[cfg(feature = "redis-sentinel")]
+mod redis_sentinel_resource;
 /// [`resources::Resource`] implementations, registration, and Kafka bindings.
 pub mod resources;
 /// Service-under-test Docker containers and bindings (`services` feature).
@@ -266,6 +270,7 @@ pub use crate::cluster::kafka_cluster::{
     feature = "mariadb",
     feature = "mysql",
     feature = "redis",
+    feature = "redis-sentinel",
     feature = "valkey",
     feature = "mongodb",
     feature = "nats",
@@ -403,6 +408,10 @@ pub use crate::resources::ValkeyResource;
 pub use crate::kafka_cluster_resource::KafkaClusterResource;
 #[cfg(feature = "mongodb-cluster")]
 pub use crate::mongo_replica_set_resource::MongoReplicaSetResource;
+#[cfg(feature = "redis-sentinel")]
+pub use crate::redis_sentinel_resource::RedisSentinelResource;
+#[cfg(feature = "redis-sentinel")]
+pub use crate::resources::RedisSentinelBindings;
 #[cfg(feature = "mongodb")]
 pub use crate::resources::{MongoBindings, MongoResource};
 

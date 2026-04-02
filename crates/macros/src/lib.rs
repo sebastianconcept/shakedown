@@ -544,6 +544,20 @@ fn build_resource_registration(ident: &Ident) -> syn::Result<proc_macro2::TokenS
                 );
             }
         }),
+        "RedisSentinel" => Ok(quote! {
+            #[cfg(feature = "redis-sentinel")]
+            {
+                ctx.register_builtin(::shakedown::BuiltinResource::RedisSentinel(
+                    ::shakedown::RedisSentinelResource::new().with_image_tag_from_env(),
+                ));
+            }
+            #[cfg(not(feature = "redis-sentinel"))]
+            {
+                ::core::compile_error!(
+                    "RedisSentinel in #[shakedown::test(resources = [...])] requires `redis-sentinel` feature on the `shakedown` dependency"
+                );
+            }
+        }),
         "Valkey" => Ok(quote! {
             #[cfg(feature = "valkey")]
             {

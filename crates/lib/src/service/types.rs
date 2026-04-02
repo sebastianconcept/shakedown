@@ -63,6 +63,12 @@ pub enum EnvMapping {
     Rabbitmq(String),
     /// Redis or Valkey `redis://` URL (`redis` / `valkey` features) → custom env var name.
     Redis(String),
+    /// Redis Sentinel discovery: comma-separated `host:port` list and logical master name (`redis-sentinel` + `services`).
+    #[cfg(feature = "redis-sentinel")]
+    RedisSentinel {
+        sentinel_hosts_var: String,
+        master_name_var: String,
+    },
     /// MongoDB connection URI (`mongodb` feature) → custom env var name.
     Mongo(String),
     /// NATS server URL (`nats` feature) → custom env var name.
@@ -124,6 +130,18 @@ impl EnvMapping {
     /// Map Redis / Valkey bindings to `environment_variable_name`.
     pub fn redis(environment_variable_name: impl Into<String>) -> Self {
         Self::Redis(environment_variable_name.into())
+    }
+
+    /// Map Redis Sentinel bindings to custom env var names (defaults **`REDIS_SENTINEL_HOSTS`** and **`REDIS_SENTINEL_MASTER_NAME`**).
+    #[cfg(feature = "redis-sentinel")]
+    pub fn redis_sentinel(
+        sentinel_hosts_environment_variable: impl Into<String>,
+        master_name_environment_variable: impl Into<String>,
+    ) -> Self {
+        Self::RedisSentinel {
+            sentinel_hosts_var: sentinel_hosts_environment_variable.into(),
+            master_name_var: master_name_environment_variable.into(),
+        }
     }
 
     /// Map MongoDB bindings to `environment_variable_name`.
@@ -256,6 +274,19 @@ mod tests {
     fn env_mapping_redis() {
         let mapping = EnvMapping::redis("CACHE_URL");
         assert_eq!(mapping, EnvMapping::Redis("CACHE_URL".to_string()));
+    }
+
+    #[cfg(feature = "redis-sentinel")]
+    #[test]
+    fn env_mapping_redis_sentinel() {
+        let mapping = EnvMapping::redis_sentinel("S_HOSTS", "S_MASTER");
+        assert_eq!(
+            mapping,
+            EnvMapping::RedisSentinel {
+                sentinel_hosts_var: "S_HOSTS".to_string(),
+                master_name_var: "S_MASTER".to_string(),
+            }
+        );
     }
 
     #[test]
