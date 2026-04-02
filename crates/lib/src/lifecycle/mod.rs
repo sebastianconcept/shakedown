@@ -384,6 +384,13 @@ pub struct Context {
     #[cfg(feature = "redis-sentinel")]
     redis_sentinel_cluster:
         Option<std::sync::Arc<crate::redis_sentinel_cluster_control::RedisSentinelClusterControl>>,
+    /// Per-scenario PostgreSQL primary + replica control ([`crate::cluster::postgres_replica_set::PostgresReplicaSetOps`]).
+    #[cfg(feature = "postgres-cluster")]
+    postgres_replica_set_cluster: Option<
+        std::sync::Arc<
+            crate::postgres_replica_set_cluster_control::PostgresReplicaSetClusterControl,
+        >,
+    >,
     /// Merge point for [`crate::load::LoadHandle`] timeline rows (US-007+); set for the run phase only.
     #[cfg(feature = "load")]
     load_event_sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
@@ -488,6 +495,8 @@ impl Context {
             kafka_cluster_control: None,
             #[cfg(feature = "redis-sentinel")]
             redis_sentinel_cluster: None,
+            #[cfg(feature = "postgres-cluster")]
+            postgres_replica_set_cluster: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -591,6 +600,8 @@ impl Context {
             kafka_cluster_control: None,
             #[cfg(feature = "redis-sentinel")]
             redis_sentinel_cluster: None,
+            #[cfg(feature = "postgres-cluster")]
+            postgres_replica_set_cluster: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -694,6 +705,8 @@ impl Context {
             kafka_cluster_control: None,
             #[cfg(feature = "redis-sentinel")]
             redis_sentinel_cluster: None,
+            #[cfg(feature = "postgres-cluster")]
+            postgres_replica_set_cluster: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
         }
@@ -821,6 +834,28 @@ impl Context {
         self.redis_sentinel_cluster
             .as_ref()
             .map(crate::cluster::redis_sentinel::RedisSentinelHandle::new)
+    }
+
+    #[cfg(feature = "postgres-cluster")]
+    pub(crate) fn set_postgres_replica_set_cluster(
+        &mut self,
+        cluster: Option<
+            std::sync::Arc<
+                crate::postgres_replica_set_cluster_control::PostgresReplicaSetClusterControl,
+            >,
+        >,
+    ) {
+        self.postgres_replica_set_cluster = cluster;
+    }
+
+    /// PostgreSQL replica-set promotion and primary discovery ([`crate::cluster::postgres_replica_set::PostgresReplicaSetOps`]).
+    #[cfg(feature = "postgres-cluster")]
+    pub fn postgres_replica_set_cluster(
+        &self,
+    ) -> Option<crate::cluster::postgres_replica_set::PostgresReplicaSetHandle<'_>> {
+        self.postgres_replica_set_cluster
+            .as_ref()
+            .map(crate::cluster::postgres_replica_set::PostgresReplicaSetHandle::new)
     }
 
     /// Get a reference to all registered resources.
@@ -2549,6 +2584,35 @@ async fn register_redis_sentinel_cluster_control(ctx: &mut Context, handles: &[R
     }
 }
 
+#[cfg(feature = "postgres-cluster")]
+async fn register_postgres_replica_set_cluster_control(
+    ctx: &mut Context,
+    handles: &[ResourceHandle],
+) {
+    use std::sync::Arc;
+
+    use crate::cluster::postgres_replica_set::PostgresReplicaSetMarker;
+    use crate::cluster::ClusterHandle;
+    use crate::postgres_replica_set_cluster_control::PostgresReplicaSetClusterControl;
+
+    for handle in handles {
+        let Some(meta) = &handle.metadata else {
+            continue;
+        };
+        let Some(control) = PostgresReplicaSetClusterControl::from_handle_metadata(meta) else {
+            continue;
+        };
+        let arc = Arc::new(control);
+        ctx.set_postgres_replica_set_cluster(Some(Arc::clone(&arc)));
+        ctx.register_cluster_handle::<PostgresReplicaSetMarker>(ClusterHandle::new(
+            "postgres",
+            Box::new(arc),
+            None,
+        ));
+        return;
+    }
+}
+
 /// Runs a scenario through all lifecycle phases.
 ///
 /// This function executes the scenario in order:
@@ -3140,6 +3204,8 @@ where
                 register_kafka_cluster_control(ctx, &handles).await;
                 #[cfg(feature = "redis-sentinel")]
                 register_redis_sentinel_cluster_control(ctx, &handles).await;
+                #[cfg(feature = "postgres-cluster")]
+                register_postgres_replica_set_cluster_control(ctx, &handles).await;
                 #[cfg(feature = "nats")]
                 apply_resource_handles_to_nats_bindings(ctx, &handles);
                 #[cfg(feature = "neo4j")]
@@ -3565,6 +3631,25 @@ where
             None
         }
     };
+    #[cfg(feature = "postgres-cluster")]
+    let postgres_replica_set_cluster_event_receiver = {
+        use crate::cluster::postgres_replica_set::PostgresReplicaSetMarker;
+        use crate::cluster::CLUSTER_EVENT_CHANNEL_CAPACITY;
+        use crate::event::Event;
+        if ctx.cluster_handle::<PostgresReplicaSetMarker>().is_some() {
+            let (sender, receiver) =
+                std::sync::mpsc::sync_channel::<Event>(CLUSTER_EVENT_CHANNEL_CAPACITY);
+            if let Some(handle) = ctx.cluster_handle_mut::<PostgresReplicaSetMarker>() {
+                handle.set_event_sender(sender.clone());
+            }
+            if let Some(control) = ctx.postgres_replica_set_cluster.as_ref() {
+                control.set_event_sender(sender);
+            }
+            Some(receiver)
+        } else {
+            None
+        }
+    };
     #[cfg(feature = "load")]
     let load_event_receiver = {
         use crate::event::Event;
@@ -3580,6 +3665,7 @@ where
         feature = "mongodb-cluster",
         feature = "kafka-cluster",
         feature = "redis-sentinel",
+        feature = "postgres-cluster",
         feature = "fault-injection"
     ))]
     let scenario_result = {
@@ -3593,6 +3679,7 @@ where
         feature = "mongodb-cluster",
         feature = "kafka-cluster",
         feature = "redis-sentinel",
+        feature = "postgres-cluster",
         feature = "fault-injection"
     )))]
     {
@@ -3628,6 +3715,13 @@ where
         }
     }
 
+    #[cfg(feature = "postgres-cluster")]
+    if let Some(receiver) = postgres_replica_set_cluster_event_receiver {
+        for event in receiver.try_iter() {
+            event_log.append(event);
+        }
+    }
+
     // Drain fault events into the caller-owned log after the scenario body and before assert/teardown,
     // so timelines and tests that read `event_log` after `run_scenario` see a complete run-phase slice.
     #[cfg(feature = "fault-injection")]
@@ -3640,6 +3734,7 @@ where
         feature = "mongodb-cluster",
         feature = "kafka-cluster",
         feature = "redis-sentinel",
+        feature = "postgres-cluster",
         feature = "fault-injection"
     ))]
     if let Err(panic_payload) = scenario_result {

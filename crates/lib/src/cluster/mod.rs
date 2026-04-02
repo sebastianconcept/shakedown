@@ -13,6 +13,9 @@ pub mod kafka_cluster;
 #[cfg(feature = "redis-sentinel")]
 pub mod redis_sentinel;
 
+#[cfg(feature = "postgres-cluster")]
+pub mod postgres_replica_set;
+
 pub use network::{cluster_network_name, create_cluster_network, remove_cluster_network};
 
 /// Bounded queue for [`ClusterHandle`] [`Event`] delivery into [`crate::lifecycle::run_scenario`].
@@ -20,6 +23,7 @@ pub use network::{cluster_network_name, create_cluster_network, remove_cluster_n
     feature = "mongodb-cluster",
     feature = "kafka-cluster",
     feature = "redis-sentinel",
+    feature = "postgres-cluster",
 ))]
 pub const CLUSTER_EVENT_CHANNEL_CAPACITY: usize = 64;
 

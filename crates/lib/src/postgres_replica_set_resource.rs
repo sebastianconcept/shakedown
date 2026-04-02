@@ -502,6 +502,9 @@ async fn provision_inner(
     )
     .await?;
 
+    let primary_container_id = primary.id().to_string();
+    let replica_container_id = replica.id().to_string();
+
     let connection_url = scenario_connection_url(
         primary_host.as_str(),
         primary_port,
@@ -533,6 +536,8 @@ async fn provision_inner(
             "engine": "postgres",
             "postgres_cluster": "primary_replica",
             "replica_port": replica_port,
+            "primary_container_id": primary_container_id,
+            "replica_container_id": replica_container_id,
         })),
     }])
 }
