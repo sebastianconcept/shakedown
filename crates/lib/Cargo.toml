@@ -527,6 +527,12 @@ name = "mongo_replica_set_inter_node_toxiproxy"
 path = "tests/mongo_replica_set_inter_node_toxiproxy.rs"
 required-features = ["mongodb-cluster", "fault-injection"]
 
+# MongoDB RS + load + step-down capstone (US-019); Docker + ignored
+[[test]]
+name = "mongo_cluster_load_disruption"
+path = "tests/mongo_cluster_load_disruption.rs"
+required-features = ["mongodb-cluster", "load"]
+
 # Kafka 3-broker KRaft cluster (Docker); ignored unless --ignored
 [[test]]
 name = "kafka_cluster_vertical"

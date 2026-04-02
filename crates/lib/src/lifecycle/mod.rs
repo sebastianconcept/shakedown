@@ -2033,6 +2033,16 @@ fn apply_resource_handles_to_mongo_bindings(ctx: &mut Context, handles: &[Resour
         let username = meta.get("username").and_then(|value| value.as_str());
         let password = meta.get("password").and_then(|value| value.as_str());
         let connection_url = meta.get("connection_url").and_then(|value| value.as_str());
+        let replica_set_host_ports = meta
+            .get("host_ports")
+            .and_then(|value| value.as_array())
+            .map(|ports| {
+                ports
+                    .iter()
+                    .filter_map(|entry| entry.as_u64().map(|port| port as u16))
+                    .collect::<Vec<u16>>()
+            })
+            .unwrap_or_default();
         if let (
             Some(host),
             Some(port),
@@ -2049,6 +2059,7 @@ fn apply_resource_handles_to_mongo_bindings(ctx: &mut Context, handles: &[Resour
                 username: username.to_string(),
                 password: password.to_string(),
                 connection_url: connection_url.to_string(),
+                replica_set_host_ports,
             });
         }
     }
