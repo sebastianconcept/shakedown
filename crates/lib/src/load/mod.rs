@@ -2,6 +2,13 @@
 //!
 //! Load [`Phase`] values describe traffic shape (constant, ramp, spike, pause, and closed-model VU phases).
 //! [`LoadProfile`] is built with [`LoadProfile::open_model`] and validated by [`LoadProfileBuilder::build`].
+//! [`LoadHandle`](handle::LoadHandle) schedules work from [`crate::lifecycle::Context::start_load`] (US-007).
+
+pub(crate) mod handle;
+mod metrics;
+
+pub use handle::LoadHandle;
+pub use metrics::LoadMetrics;
 
 use std::time::Duration;
 
@@ -163,21 +170,16 @@ pub enum SaturationPolicy {
 }
 
 /// Tokio runtime affinity for the load driver (US-007+).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum LoadRuntime {
     /// Use the scenario / test runtime.
+    #[default]
     Shared,
     /// Dedicated threads for load workers.
     Dedicated {
         /// Thread count for the dedicated runtime.
         threads: usize,
     },
-}
-
-impl Default for LoadRuntime {
-    fn default() -> Self {
-        Self::Shared
-    }
 }
 
 /// Validated load profile: phases, worker bounds, saturation, and runtime hint.
@@ -301,7 +303,7 @@ impl LoadProfileBuilder {
     }
 }
 
-/// Invalid [`LoadProfile`] construction.
+/// Invalid [`LoadProfile`] construction, load driver failures, or phase lookup errors.
 #[derive(Debug, Display, Error)]
 pub enum LoadError {
     /// load profile must contain at least one phase
@@ -334,6 +336,27 @@ pub enum LoadError {
         from: usize,
         /// Ramp end (virtual users).
         to: usize,
+    },
+    /// dedicated load runtime is not implemented yet (use LoadRuntime::Shared)
+    UnsupportedRuntime,
+    /// load phase is not implemented in this milestone: {description}
+    UnsupportedPhase {
+        /// Static description for diagnostics.
+        description: &'static str,
+    },
+    /// no load phase matches name `{name}`
+    PhaseNotFound {
+        /// Requested phase label.
+        name: String,
+    },
+    /// load driver stopped before the awaited phase started
+    DriverStopped,
+    /// open-model saturation policy was Error and all workers were busy
+    SaturationExceeded,
+    /// load driver failed: {message}
+    DriverFailed {
+        /// Error message.
+        message: String,
     },
 }
 

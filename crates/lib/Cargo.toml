@@ -285,6 +285,12 @@ services = ["dep:testcontainers", "dep:reqwest", "diagnostics"]
 # Open-model load profiles, metrics, and scheduling (US-006+)
 load = ["dep:hdrhistogram"]
 
+# LoadHandle open-model scheduling + event log merge (no Docker)
+[[test]]
+name = "load_handle"
+path = "tests/load_handle.rs"
+required-features = ["load"]
+
 # Optional macro + Kafka Docker integration test; avoids compiling `resources = [Kafka]` without rdkafka
 [[test]]
 name = "macro_kafka"

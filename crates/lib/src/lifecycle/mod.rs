@@ -371,6 +371,9 @@ pub struct Context {
     mongo_replica_set_cluster: Option<
         std::sync::Arc<crate::mongo_replica_set_cluster_control::MongoReplicaSetClusterControl>,
     >,
+    /// Merge point for [`crate::load::LoadHandle`] timeline rows (US-007+); set for the run phase only.
+    #[cfg(feature = "load")]
+    load_event_sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
 }
 
 impl Context {
@@ -465,6 +468,8 @@ impl Context {
             cluster_handles: HashMap::new(),
             #[cfg(feature = "mongodb-cluster")]
             mongo_replica_set_cluster: None,
+            #[cfg(feature = "load")]
+            load_event_sender: None,
         }
     }
 
@@ -559,6 +564,8 @@ impl Context {
             cluster_handles: HashMap::new(),
             #[cfg(feature = "mongodb-cluster")]
             mongo_replica_set_cluster: None,
+            #[cfg(feature = "load")]
+            load_event_sender: None,
         }
     }
 
@@ -653,6 +660,8 @@ impl Context {
             cluster_handles: HashMap::new(),
             #[cfg(feature = "mongodb-cluster")]
             mongo_replica_set_cluster: None,
+            #[cfg(feature = "load")]
+            load_event_sender: None,
         }
     }
 
@@ -687,6 +696,39 @@ impl Context {
     #[cfg(feature = "cluster")]
     pub fn cluster_handle_mut<T: 'static>(&mut self) -> Option<&mut crate::cluster::ClusterHandle> {
         self.cluster_handles.get_mut(&std::any::TypeId::of::<T>())
+    }
+
+    /// Start an open-model (or closed-model VU) load driver; see [`crate::load::LoadHandle`] (US-007).
+    #[cfg(feature = "load")]
+    pub async fn start_load<E, F, Fut>(
+        &mut self,
+        load_name: &str,
+        profile: crate::load::LoadProfile,
+        work: F,
+    ) -> Result<crate::load::LoadHandle, crate::load::LoadError>
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<(), E>> + Send + 'static,
+        E: std::fmt::Display + Send + 'static,
+    {
+        crate::load::handle::start_load(self, load_name, profile, work).await
+    }
+
+    /// Used by [`run_scenario`] to wire [`Event`] merge for load phase transitions (US-007).
+    #[cfg(feature = "load")]
+    pub(crate) fn set_load_event_sender(
+        &mut self,
+        sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
+    ) {
+        self.load_event_sender = sender;
+    }
+
+    /// Sender cloned by [`crate::load::handle::start_load`] for structured load timeline rows.
+    #[cfg(feature = "load")]
+    pub(crate) fn load_event_sender(
+        &self,
+    ) -> Option<&std::sync::mpsc::Sender<crate::event::Event>> {
+        self.load_event_sender.as_ref()
     }
 
     #[cfg(feature = "mongodb-cluster")]
@@ -3297,8 +3339,23 @@ where
             None
         }
     };
+    #[cfg(feature = "load")]
+    let load_event_receiver = {
+        use crate::event::Event;
+        let (sender, receiver) = std::sync::mpsc::channel::<Event>();
+        ctx.set_load_event_sender(Some(sender));
+        receiver
+    };
     // Execute the scenario function
     let _ = scenario_fn(ctx).await;
+
+    #[cfg(feature = "load")]
+    {
+        ctx.set_load_event_sender(None);
+        for event in load_event_receiver.try_iter() {
+            event_log.append(event);
+        }
+    }
 
     #[cfg(feature = "mongodb-cluster")]
     if let Some(receiver) = cluster_event_receiver {
