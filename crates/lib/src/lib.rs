@@ -135,6 +135,9 @@ pub mod fault_injection;
 pub mod helpers;
 /// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
+/// Open-model load profiles (`load` feature; US-006+).
+#[cfg(feature = "load")]
+pub mod load;
 /// Service mock service types and traits (`mock-services` feature, default).
 #[cfg(feature = "mock-services")]
 pub mod mock_service;

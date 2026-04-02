@@ -85,6 +85,9 @@ tower = { version = "0.5", optional = true, default-features = false, features =
 duckdb = { version = "1", default-features = false, features = ["bundled"], optional = true }
 qdrant-client = { version = "1.17", optional = true, default-features = false }
 
+# HdrHistogram for load metrics and windowed percentiles (`load` feature; US-006+)
+hdrhistogram = { version = "7", optional = true }
+
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 async-nats = "0.46"
@@ -279,6 +282,8 @@ cluster = ["dep:bollard"]
 # Service-under-test: Docker-backed application containers in scenarios (opt-in; see PRD service-under-test)
 # `diagnostics` enables bollard log/stats/events for labeled service containers.
 services = ["dep:testcontainers", "dep:reqwest", "diagnostics"]
+# Open-model load profiles, metrics, and scheduling (US-006+)
+load = ["dep:hdrhistogram"]
 
 # Optional macro + Kafka Docker integration test; avoids compiling `resources = [Kafka]` without rdkafka
 [[test]]
