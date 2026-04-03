@@ -10,7 +10,7 @@ use testcontainers_modules::mariadb::Mariadb;
 use tokio::sync::Mutex;
 
 const MARIADB_PORT: u16 = 3306;
-/// Default `mariadb` image tag (non-alpine; see `mvp-postgres-mariadb` SPECS).
+/// Default `mariadb` image tag (non-alpine).
 pub const DEFAULT_MARIADB_IMAGE_TAG: &str = "11";
 
 #[allow(clippy::large_enum_variant)]

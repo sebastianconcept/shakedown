@@ -10,7 +10,7 @@ use testcontainers_modules::mysql::Mysql as MysqlImage;
 use tokio::sync::Mutex;
 
 const MYSQL_PORT: u16 = 3306;
-/// Default `mysql` image tag (Oracle MySQL; non-alpine; see `mvp-postgres-mariadb` SPECS).
+/// Default `mysql` image tag (Oracle MySQL; non-alpine).
 pub const DEFAULT_MYSQL_IMAGE_TAG: &str = "8.4";
 
 #[allow(clippy::large_enum_variant)]

@@ -14,7 +14,7 @@ const RESOURCE_NAME: &str = "timescaledb";
 const TIMESCALEDB_PORT: u16 = 5432;
 /// Default image repository (`timescale/timescaledb`).
 pub const DEFAULT_TIMESCALEDB_IMAGE_REPOSITORY: &str = "timescale/timescaledb";
-/// Default image tag (`latest-pg16` — pinned major Postgres line per SPECS).
+/// Default image tag (`latest-pg16` — Timescale image pinned to Postgres 16 line).
 pub const DEFAULT_TIMESCALEDB_IMAGE_TAG: &str = "latest-pg16";
 
 #[allow(clippy::large_enum_variant)]

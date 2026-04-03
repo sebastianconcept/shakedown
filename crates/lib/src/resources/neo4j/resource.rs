@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 const NEO4J_BOLT_PORT: u16 = 7687;
 const NEO4J_HTTP_PORT: u16 = 7474;
-/// Default image tag: Enterprise edition for multi-database isolation (extra-infra SPECS / OQ-1.2).
+/// Default image tag: Enterprise edition so each scenario can use a separate database on one broker.
 pub const DEFAULT_NEO4J_IMAGE_TAG: &str = "5-enterprise";
 const SUITE_USER: &str = "neo4j";
 const SUITE_PASSWORD: &str = "shakedown";

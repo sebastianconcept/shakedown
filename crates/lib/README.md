@@ -33,14 +33,14 @@ shakedown/
 |---------------|--------|
 | `mvp-typed-helpers` | ✅ **Complete** (2026-03-29) — typed helpers on [`Context`](src/lifecycle/mod.rs) ([`KafkaHelpers`](src/resources/kafka/helpers.rs), [`RabbitHelpers`](src/resources/rabbit/helpers.rs), relational [`PostgresHelpers`](src/resources/postgres/helpers.rs) / [`MariaDbHelpers`](src/resources/mariadb/helpers.rs) / [`MysqlHelpers`](src/resources/mysql/helpers.rs) / [`SqliteHelpers`](src/resources/sqlite/helpers.rs)); see [Typed helpers](#typed-helpers) |
 | `extra-infra` | ✅ **Complete** (2026-03-31) — twelve additional first-party resources (Redis, Valkey, MongoDB, NATS, Neo4j, DuckDB, Elasticsearch, OpenSearch, Qdrant, Weaviate, InfluxDB, TimescaleDB); see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) |
-| `mvp-examples` | **Next** — living `crates/examples` catalog ( **`MVP.md`** row 9 in adopted docs under `~/docs/shakedown/`) |
+| `mvp-examples` | **Next** — living `crates/examples` catalog showcasing common harness patterns |
 
 - **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka**, **RabbitMQ**, **NATS** (JetStream), and **Redis Streams** publication proof (`assert_kafka_published`, `assert_rabbit_published`, `assert_nats_published`, `assert_redis_streams_published`) on top of relational, document, or in-process storage bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below). **Extended outbox** (2026-04): **MongoDB** and **DuckDB** storage paths match the same `Outbox` row APIs as SQL engines.
 - **Also shipped:** `mock-services` — mock upstream HTTP/gRPC servers bound on localhost so scenarios assert outbound calls at the **network** layer; see [Mock services](#mock-services).
 - **Also shipped:** **`services`** (service-under-test) — opt-in Cargo feature to run **application containers** via testcontainers during scenarios: [`ServiceUnderTest`](src/service/builder.rs) → [`ServiceSpec`](src/service/types.rs), convention-based **env injection** (Kafka, relational DBs, RabbitMQ, Redis/Valkey, MongoDB, Neo4j, mock services, `depends_on` peers), **convergence health checks**, [`Context::service_url`](src/lifecycle/mod.rs) / [`service_handle`](src/lifecycle/mod.rs) on the test host (`127.0.0.1`), and **bollard** diagnostics labels — see [Service under test](#service-under-test-services-feature).
 - **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle/mod.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
 - **Previous milestone:** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
-- **Roadmap:** Further milestones are listed in adopted product docs (`MVP.md` under `~/docs/shakedown/`).
+- **Roadmap:** Further milestones are tracked in product planning materials linked from the workspace [`docs/README.md`](../../docs/README.md).
 
 Default `cargo test -p shakedown` does not require Docker.
 
@@ -215,7 +215,7 @@ Docker-backed tests are opt-in; see [Running tests](#running-tests) for the full
 
 **Kafka (KRaft, `testcontainers-modules::kafka::apache`):**
 
-- [`KafkaResource`](src/resources.rs) uses a **suite-level** broker: the first provision in a process starts one container; further `KafkaResource` instances share it until the last `Resource::teardown` removes the container (see adopted docs `SPECS-IMPLEMENTATION.md`, linked from [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md)).
+- [`KafkaResource`](src/resources.rs) uses a **suite-level** broker: the first provision in a process starts one container; further `KafkaResource` instances share it until the last `Resource::teardown` removes the container. For a walkthrough of Docker-backed checks, see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) when that tree exists in your checkout.
 - **Image tag:** [`KafkaResource::with_image_tag`](src/resources.rs), or set `SHAKEDOWN_KAFKA_IMAGE_TAG` and use [`KafkaResource::with_image_tag_from_env`](src/resources.rs).
 - **JVM image:** [`KafkaResource::with_jvm_image`](src/resources.rs) (`apache/kafka` instead of `apache/kafka-native`).
 
@@ -248,7 +248,7 @@ See [`KafkaResource::apply_default_seed`](src/resources.rs) and [DECISIONS.md D-
 
 ### Fault injection (Toxiproxy) and the Kafka path
 
-Shakedown injects **TCP-level** faults on traffic that flows through **[Toxiproxy](https://github.com/Shopify/toxiproxy)** (latency, bandwidth, timeout toxics, and so on). This is **not** a general chaos layer: it does **not** simulate arbitrary failure modes (for example process crashes, disk exhaustion, or cloud-AZ loss). It answers “what happens when the **network path to a dependency** is degraded?” — aligned with *trusting the result* (see **MISSION.md** in adopted docs, mode 3): failures are classifiable as harness-level TCP faults vs application bugs.
+Shakedown injects **TCP-level** faults on traffic that flows through **[Toxiproxy](https://github.com/Shopify/toxiproxy)** (latency, bandwidth, timeout toxics, and so on). This is **not** a general chaos layer: it does **not** simulate arbitrary failure modes (for example process crashes, disk exhaustion, or cloud-AZ loss). It answers “what happens when the **network path to a dependency** is degraded?” so you can tell **harness-level TCP faults** apart from **application bugs** when interpreting a failing run.
 
 **Cargo feature:** enable the capability with **`fault-injection`** (kebab-case). It pulls in the Toxiproxy control-plane client and suite-level container wiring; it does **not** enable Kafka by itself — compose with **`kafka`** for the Kafka vertical:
 
@@ -300,20 +300,20 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 **Postgres (`testcontainers-modules::postgres`, `postgres:16` default tag):**
 
 - [`PostgresResource`](src/resources.rs) uses a **suite-level** server: the first provision in a process starts one container; further instances share it until the last `Resource::teardown` drops the refcounted container. Each scenario gets a dedicated database name derived from [`sanitize_sql_database_name`](src/resources.rs).
-- **Image tag:** [`PostgresResource::with_image_tag`](src/resources.rs), or set `SHAKEDOWN_POSTGRES_IMAGE_TAG` and use [`PostgresResource::with_image_tag_from_env`](src/resources.rs). Default image tag is **`16`** (non-alpine, aligned with adopted SPECS).
+- **Image tag:** [`PostgresResource::with_image_tag`](src/resources.rs), or set `SHAKEDOWN_POSTGRES_IMAGE_TAG` and use [`PostgresResource::with_image_tag_from_env`](src/resources.rs). Default image tag is **`16`** (Debian-based, non-alpine).
 
 [`PostgresBindings`](src/resources.rs) is applied to [`Context`] after provision (same pattern as `KafkaBindings`). Default seed for Postgres is empty; scenarios own schema and data.
 
 **MariaDB (`testcontainers-modules::mariadb`, `mariadb:11` default tag):**
 
 - [`MariaDBResource`](src/resources.rs) mirrors Postgres: suite-level container, per-scenario `CREATE DATABASE` / `DROP DATABASE`, `mysql_async` for admin and readiness (`SELECT 1` on the scenario database). Root user matches the official image (empty password in the testcontainers module).
-- **Image tag:** [`MariaDBResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_MARIADB_IMAGE_TAG` via [`MariaDBResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`11`** (adopted SPECS).
+- **Image tag:** [`MariaDBResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_MARIADB_IMAGE_TAG` via [`MariaDBResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`11`**.
 - [`MariaDBBindings`](src/resources.rs) is applied after provision (`engine: mariadb` in handle metadata).
 
 **Oracle MySQL (`testcontainers-modules::mysql`, `mysql:8.4` default tag):**
 
 - [`MysqlResource`](src/resources.rs) is a **separate** builtin from MariaDB (R-8): suite-level container, per-scenario database, `mysql_async` for admin and readiness. Uses the official **`mysql`** Docker image, not `mariadb`.
-- **Image tag:** [`MysqlResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_MYSQL_IMAGE_TAG` via [`MysqlResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`8.4`** (adopted SPECS).
+- **Image tag:** [`MysqlResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_MYSQL_IMAGE_TAG` via [`MysqlResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`8.4`**.
 - [`MysqlBindings`](src/resources.rs) is applied after provision (`engine: mysql` in handle metadata).
 
 **Redis (`redis` feature, `testcontainers-modules::redis`, default tag `7`):**
@@ -353,7 +353,7 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 
 **InfluxDB 2.x (`influxdb` feature, `influxdb:2` via `GenericImage`):**
 
-- [`InfluxDbResource`](src/resources.rs) uses a **suite-level** node: first provision starts one container with **`DOCKER_INFLUXDB_INIT_MODE=setup`**, fixed org **`shakedown`**, and admin token **`shakedown-admin-token`**; each scenario gets a **per-scenario bucket** via **`POST /api/v2/buckets`**; refcounted teardown **`DELETE`s** that bucket, then may remove the container. Helpers use **`reqwest`** only (no `influxdb2` client crate — OQ-6.1).
+- [`InfluxDbResource`](src/resources.rs) uses a **suite-level** node: first provision starts one container with **`DOCKER_INFLUXDB_INIT_MODE=setup`**, fixed org **`shakedown`**, and admin token **`shakedown-admin-token`**; each scenario gets a **per-scenario bucket** via **`POST /api/v2/buckets`**; refcounted teardown **`DELETE`s** that bucket, then may remove the container. Helpers use **`reqwest`** only (no bundled Influx 2.x client crate).
 - **Image tag:** [`InfluxDbResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_INFLUXDB_IMAGE_TAG`** via [`InfluxDbResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`2`** (`influxdb:2`).
 - [`InfluxDbBindings`](src/resources.rs) (`url`, `token`, `organization`, `bucket`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::influxdb()`](src/lifecycle/mod.rs) for [`InfluxDbHelpers`](src/resources/influxdb/helpers.rs) (`write_point`, `query`, `assert_point_exists`). Readiness uses **`GET /health`** with JSON **`status: pass`**.
 
@@ -367,7 +367,7 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 
 Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, Redis, Valkey, MongoDB, NATS, Neo4j, Weaviate, InfluxDB, TimescaleDB, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
 
-Verification steps: adopted docs `VERIFY.md` (see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) for the path under `~/docs/shakedown/`).
+Verification steps for Kafka vertical work are summarized in [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) (checklists and expected outcomes for Docker-backed runs).
 
 ## Infrastructure diagnostics (bollard)
 
@@ -604,7 +604,7 @@ Full quality gates for this crate often include: `cargo check --workspace`, `car
 shakedown = { version = "...", features = ["outbox", "postgres", "kafka"] }
 ```
 
-**Postgres + RabbitMQ** — same row APIs; use `assert_rabbit_published` instead of Kafka (declare/bind queue in seed per Option A topology — exchange + queue + routing key; see `SPECS.md` under `~/docs/shakedown/feature/publication-verifier-rabbitmq/`):
+**Postgres + RabbitMQ** — same row APIs; use `assert_rabbit_published` instead of Kafka. In seed, declare the exchange, queue, and binding (routing key) so the outbox relay and consumer topology match what the verifier expects.
 
 ```toml
 [dependencies]
@@ -917,6 +917,6 @@ Use the **logical service name** you passed to [`.name`](src/service/builder.rs)
 
 ## See also
 
-- **Adopted product docs** (PRD, SPECS, decisions) — workspace [`docs/README.md`](../../docs/README.md) points at **`~/docs/shakedown/`**.
-- **Pluggable outbox + queue** — design background: **`~/docs/shakedown/ideation/scoping-brief-pluggable-outbox-queue.md`**
-- **Verifier naming decision** — *Verifier traits for custom resource assertions* in **`~/docs/shakedown/DECISIONS.md`**
+- **Where docs live** — workspace [`docs/README.md`](../../docs/README.md) explains how this repo’s notes relate to any separate product doc tree your team uses.
+- **Pluggable outbox + queue** — background: treat the outbox as storage + dispatcher; Shakedown asserts both the row and the message observed on the bus (`PublicationVerifier`).
+- **Verifier naming** — custom transports implement the same publication-verification trait shape as the built-in Kafka/Rabbit/NATS/Redis helpers.

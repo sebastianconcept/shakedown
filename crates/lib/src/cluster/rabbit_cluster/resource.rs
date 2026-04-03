@@ -26,7 +26,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::{GenericImage, ImageExt};
 
 const RABBIT_AMQP_PORT: u16 = 5672;
-/// RabbitMQ management plugin / HTTP API (queue details, quorum leader; US-017).
+/// RabbitMQ management plugin / HTTP API (queue details, quorum leader election).
 const RABBIT_MGMT_PORT: u16 = 15672;
 /// **`rabbitmq:<tag>-management`** so the management API is available for quorum leadership queries.
 const DEFAULT_IMAGE_TAG: &str = "4.0-management";

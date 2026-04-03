@@ -52,7 +52,7 @@ async fn kafka_cluster_three_brokers_produce_consume(ctx: &mut shakedown::Contex
     assert_eq!(parsed, payload);
 }
 
-/// US-011: stop the broker leading a partition, wait for a new leader via metadata, then produce/consume.
+/// Stop the broker leading a partition, wait for a new leader via metadata, then produce/consume.
 #[shakedown::test(resources = [KafkaCluster])]
 #[serial]
 #[ignore = "requires Docker; run: cargo test -p shakedown --features kafka-cluster --test kafka_cluster_vertical -- --ignored"]

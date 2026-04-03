@@ -11,8 +11,9 @@
 //! broker’s metadata advertises partition leaders on addresses that do not route via the proxy
 //! (common Kafka + transparent-proxy caveat). Bootstrap rewrite and control-plane toxics are proven
 //! in this file and in [`faulty_kafka_bootstrap_matches_toxiproxy_listen_and_toxic_applies`]; end-to-end
-//! rdkafka through the proxy may require broker `advertised.listeners` tuning — see adopted-docs
-//! `feature/mvp-typed-helpers/NOTES.md`.
+//! rdkafka through the proxy may require broker `advertised.listeners` (and related listener
+//! settings) so metadata-advertised broker addresses still route through Toxiproxy; otherwise
+//! clients can follow leaders to addresses that bypass the proxy and time out.
 //!
 //! ```text
 //! cargo test -p shakedown --features kafka,fault-injection --test fault_injection_kafka -- --ignored

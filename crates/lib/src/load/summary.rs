@@ -1,6 +1,7 @@
-//! Terminal-friendly load run summaries (US-004).
+//! Terminal-friendly load run summaries.
 
 use super::baseline::ComparisonResult;
+use super::fmt::{format_duration, format_rate_pct, format_throughput};
 use super::metrics::LoadMetrics;
 use super::AssertionVerdict;
 
@@ -36,7 +37,7 @@ pub fn render_summary_with_verdicts(
     render_summary_styled(load_name, metrics, Some(verdicts), None, false)
 }
 
-/// Summary with verdict rows and an optional baseline comparison block (US-007).
+/// Summary with verdict rows and an optional baseline comparison block.
 pub fn render_summary_with_comparison(
     load_name: &str,
     metrics: &LoadMetrics,
@@ -174,125 +175,5 @@ fn indent_line(text: &str, use_color: bool, bold: bool) -> String {
     }
 }
 
-fn format_duration(duration: std::time::Duration) -> String {
-    let seconds = duration.as_secs_f64();
-    if seconds >= 1.0 {
-        format!("{seconds:.2}s")
-    } else if duration.subsec_millis() > 0 || seconds >= 0.001 {
-        format!("{:.2}ms", seconds * 1000.0)
-    } else if duration.subsec_micros() > 0 {
-        format!("{}µs", duration.subsec_micros())
-    } else {
-        format!("{duration:?}")
-    }
-}
-
-fn format_throughput(ops_per_s: f64) -> String {
-    format!("{ops_per_s:.2}/s")
-}
-
-fn format_rate_pct(rate: f64) -> String {
-    format!("{:.2}%", rate * 100.0)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-    use std::time::{Duration, Instant};
-
-    use super::super::metrics::LoadMetricsAccumulator;
-
-    fn sample_metrics() -> LoadMetrics {
-        let epoch = Instant::now();
-        let accumulator = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
-        for index in 0..20u64 {
-            let completion = epoch + Duration::from_millis(index);
-            accumulator.record_success(completion, Duration::from_micros(800 + index * 50));
-        }
-        LoadMetrics::new(accumulator)
-    }
-
-    #[test]
-    fn render_summary_contains_expected_fields() {
-        let metrics = sample_metrics();
-        let text = render_summary("my-load", &metrics);
-        assert!(text.contains("my-load"));
-        assert!(text.contains("iterations"));
-        assert!(text.contains("successful"));
-        assert!(text.contains("failed"));
-        assert!(text.contains("dropped"));
-        assert!(text.contains("error rate"));
-        assert!(text.contains("p50"));
-        assert!(text.contains("p95"));
-        assert!(text.contains("p99"));
-        assert!(text.contains("min"));
-        assert!(text.contains("max"));
-        assert!(text.contains("Load Summary"));
-    }
-
-    #[test]
-    fn render_summary_plain_has_no_ansi() {
-        let text = render_summary("x", &sample_metrics());
-        assert!(!text.contains('\x1b'));
-    }
-
-    #[test]
-    fn render_summary_styled_with_color_has_escape_codes() {
-        let text = render_summary_styled("x", &sample_metrics(), None, None, true);
-        assert!(text.contains('\x1b'));
-    }
-
-    #[test]
-    fn render_summary_includes_baseline_comparison_section() {
-        use super::super::baseline::{ComparisonResult, MetricComparison, Tolerance};
-
-        let metrics = sample_metrics();
-        let comparison = ComparisonResult {
-            baseline_name: "main".to_string(),
-            tolerance: Tolerance::percent(0.05),
-            passed: true,
-            metrics: vec![MetricComparison {
-                name: "p99".to_string(),
-                baseline_value: "1.00ms".to_string(),
-                current_value: "1.05ms".to_string(),
-                change_pct: 0.05,
-                threshold_pct: 0.05,
-                passed: true,
-                limit_description: "≤ 1.10ms (+5.0% vs baseline)".to_string(),
-            }],
-        };
-        let text = render_summary_with_comparison("checkout", &metrics, &[], &comparison);
-        assert!(text.contains("Baseline comparison"));
-        assert!(text.contains("main"));
-        assert!(text.contains("p99"));
-        assert!(text.contains("✓"));
-    }
-
-    #[test]
-    fn render_summary_with_verdicts_shows_assertion_section() {
-        let metrics = sample_metrics();
-        let verdicts = vec![
-            AssertionVerdict {
-                metric: "p99".to_string(),
-                measured: "12.00ms".to_string(),
-                threshold: "<= 50.00ms".to_string(),
-                passed: true,
-            },
-            AssertionVerdict {
-                metric: "error_rate".to_string(),
-                measured: "0.00%".to_string(),
-                threshold: "<= 1.00%".to_string(),
-                passed: false,
-            },
-        ];
-        let text = render_summary_with_verdicts("checkout", &metrics, &verdicts);
-        assert!(text.contains("Assertions"));
-        assert!(text.contains("✓"));
-        assert!(text.contains("✗"));
-        assert!(text.contains("p99"));
-        assert!(text.contains("error_rate"));
-        assert!(text.contains("measured:"));
-        assert!(text.contains("threshold:"));
-    }
-}
+mod tests;

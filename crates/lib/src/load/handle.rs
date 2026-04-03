@@ -1,4 +1,5 @@
-//! [`LoadHandle`] and [`Context::start_load`](crate::lifecycle::Context::start_load) driver (US-007, US-009).
+//! [`LoadHandle`] and [`Context::start_load`](crate::lifecycle::Context::start_load) driver:
+//! open/closed-model scheduling, metrics accumulation, phase timeline events, and recovery signaling.
 
 use std::future::Future;
 use std::io::IsTerminal;
@@ -29,7 +30,7 @@ pub struct LoadHandle {
     metrics: Arc<LoadMetricsAccumulator>,
     paused: Arc<AtomicBool>,
     phase_watch: watch::Receiver<Option<usize>>,
-    /// Same channel as [`Context::start_load`] used for phase and recovery rows (US-009).
+    /// Same channel as [`Context::start_load`] used for phase and recovery rows.
     event_sender: Option<std::sync::mpsc::Sender<Event>>,
 }
 

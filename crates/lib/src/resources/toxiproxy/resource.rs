@@ -1,4 +1,4 @@
-//! Suite-shared Toxiproxy (`ghcr.io/shopify/toxiproxy`) for fault injection (SPECS §2).
+//! Suite-shared Toxiproxy (`ghcr.io/shopify/toxiproxy`) for fault injection (latency, loss, reset on proxied TCP).
 //!
 //! Container labels use [`crate::docker_labels`] (same strings as `diagnostics::labels`).
 
@@ -27,7 +27,7 @@ enum SuiteToxiproxyState {
     Idle,
     Running {
         api_base_url: String,
-        /// Docker container id (hex) for [`bollard::Docker::connect_network`] (US-018).
+        /// Docker container id (hex) for [`bollard::Docker::connect_network`] when wiring an inter-node mesh.
         container_id: String,
         container: testcontainers::ContainerAsync<GenericImage>,
         refs: usize,

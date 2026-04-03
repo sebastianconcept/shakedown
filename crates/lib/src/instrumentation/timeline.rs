@@ -47,7 +47,7 @@ pub struct RootCauseHint {
     pub mem_limit: Option<u64>,
 }
 
-/// Structured load / SLO assertion failure for timeline JSON and terminal output (US-008, `load` feature).
+/// Structured load / SLO assertion failure for timeline JSON and terminal output (only when the `load` feature is enabled).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PerformanceAssertionFailureJson {
     /// Load handle name from the scenario.
@@ -109,7 +109,7 @@ pub struct ResourceSnapshotJson {
     pub net_tx: u64,
 }
 
-/// Resource snapshot section (SPECS §9).
+/// Resource snapshot section in exported failure timelines.
 #[derive(Debug, Clone, Serialize)]
 pub struct ResourceSnapshotsJson {
     /// Latest sample per container name
@@ -185,7 +185,7 @@ pub struct FailureTimelineOptions {
     /// `[scenario_start, scenario_start + timeout]`. When `None`, the observed span
     /// from first to last log timestamp is used.
     pub scenario_timeout_secs: Option<u64>,
-    /// When set, terminal render and JSON include a performance assertion section (US-008).
+    /// When set, terminal render and JSON include a performance assertion section.
     pub performance_assertion_failure: Option<PerformanceAssertionFailureJson>,
 }
 
@@ -995,7 +995,7 @@ fn performance_assertion_failure_from_error(
     }
 }
 
-/// Renders a failure timeline and writes JSON for a harness [`ShakedownError`] after scenario teardown (US-008).
+/// Renders a failure timeline and writes JSON for a harness [`ShakedownError`] after scenario teardown (including performance assertion failures when applicable).
 ///
 /// When the error is [`ShakedownError::PerformanceAssertionFailed`] and the `load` feature is enabled,
 /// [`FailureTimelineDocument::performance_assertion_failure`] is populated for tooling.

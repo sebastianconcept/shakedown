@@ -406,7 +406,7 @@ pub struct Context {
             crate::cluster::rabbit_cluster::cluster_control::RabbitClusterClusterControl,
         >,
     >,
-    /// Merge point for [`crate::load::LoadHandle`] timeline rows (US-007+); set for the run phase only.
+    /// Merge point for [`crate::load::LoadHandle`] timeline rows; set for the run phase only.
     #[cfg(feature = "load")]
     load_event_sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
 }
@@ -766,7 +766,7 @@ impl Context {
         self.cluster_handles.get_mut(&std::any::TypeId::of::<T>())
     }
 
-    /// Start an open-model (or closed-model VU) load driver; see [`crate::load::LoadHandle`] (US-007).
+    /// Start an open-model (or closed-model VU) load driver; see [`crate::load::LoadHandle`].
     #[cfg(feature = "load")]
     pub async fn start_load<E, F, Fut>(
         &mut self,
@@ -782,7 +782,7 @@ impl Context {
         crate::load::handle::start_load(self, load_name, profile, work).await
     }
 
-    /// Used by [`run_scenario`] to wire [`Event`] merge for load phase transitions (US-007).
+    /// Used by [`run_scenario`] to wire [`Event`] merge for load phase transitions.
     #[cfg(feature = "load")]
     pub(crate) fn set_load_event_sender(
         &mut self,
@@ -1676,7 +1676,7 @@ fn install_fault_handle_if_toxiproxy_provisioned(ctx: &mut Context, handles: &[R
     }
 }
 
-/// Stable Toxiproxy proxy name for the suite Kafka broker (SPECS D-MVP-6).
+/// Stable Toxiproxy proxy name for the suite Kafka broker (must match fault-injection wiring and tests).
 #[cfg(all(feature = "fault-injection", feature = "kafka"))]
 const KAFKA_FAULT_PROXY_NAME: &str = "shakedown_kafka";
 
@@ -3141,7 +3141,7 @@ async fn start_and_readiness_mock_services(
     Ok(())
 }
 
-/// Final value produced by a [`run_scenario`] async body (US-008).
+/// Final value produced by a [`run_scenario`] async body: `()` for legacy scenarios, or `Result<(), ShakedownError>` to fail without panicking (e.g. performance assertions).
 ///
 /// Return `()` on success, or [`Result::Err`] with [`ShakedownError`] to fail the scenario without
 /// panicking and to integrate with the failure timeline (for example `ShakedownError::PerformanceAssertionFailed`
@@ -3869,7 +3869,7 @@ where
     };
 
     // Execute the scenario function. If the body panics, we still merge load/cluster/fault events
-    // into `event_log` before re-panicking so failure timelines correlate load and topology rows (US-009).
+    // into `event_log` before re-panicking so failure timelines correlate load and topology rows.
     #[cfg(any(
         feature = "load",
         feature = "mongodb-cluster",

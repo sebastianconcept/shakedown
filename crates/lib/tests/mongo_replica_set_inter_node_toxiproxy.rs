@@ -1,4 +1,4 @@
-//! Inter-node Toxiproxy mesh for MongoDB replica set (US-018): `N×(N−1)` proxies, `disconnect_node` /
+//! Inter-node Toxiproxy mesh for a MongoDB replica set: `N×(N−1)` proxies, `disconnect_node` /
 //! `reconnect_node` / `reset_topology` without stopping `mongod` containers.
 //!
 //! ```text

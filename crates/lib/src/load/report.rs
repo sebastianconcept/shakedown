@@ -1,4 +1,4 @@
-//! JSON load run reports under `target/shakedown/reports/` (US-005).
+//! JSON load run reports under `target/shakedown/reports/`.
 
 use std::fs::File;
 #[cfg(test)]
@@ -23,7 +23,7 @@ use super::metrics::LoadMetrics;
 use super::{ReportAssertion, ReportComparison};
 
 /// Schema version for [`LoadRunReport::schema_version`] (bump when fields are incompatible).
-pub const LOAD_RUN_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const LOAD_RUN_REPORT_SCHEMA_VERSION: u32 = 1;
 
 /// Scalar metrics embedded in a [`LoadRunReport`] (nanoseconds for latency fields).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,7 +64,7 @@ impl From<&LoadMetrics> for ReportMetrics {
     }
 }
 
-/// Machine-readable record of a single load run (US-005).
+/// Machine-readable record of a single load run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoadRunReport {
     pub schema_version: u32,
@@ -133,7 +133,7 @@ impl LoadRunReport {
 }
 
 /// Resolve `target/shakedown/reports/{scenario_id}/{load_name}.json`.
-pub fn resolve_load_report_path(scenario_id: &str, load_name: &str) -> PathBuf {
+pub(crate) fn resolve_load_report_path(scenario_id: &str, load_name: &str) -> PathBuf {
     let scenario_dir = sanitize_scenario_id_for_filename(scenario_id);
     let mut file_stem = sanitize_scenario_id_for_filename(load_name);
     if !file_stem.ends_with(".json") {
@@ -147,46 +147,54 @@ pub fn resolve_load_report_path(scenario_id: &str, load_name: &str) -> PathBuf {
 }
 
 /// Write pretty JSON for `report` to `path` (creates parent directories).
-pub fn write_load_run_report_to_path(
+pub(crate) fn write_load_run_report_to_path(
     report: &LoadRunReport,
     path: &Path,
 ) -> Result<(), ShakedownError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|source| {
-            ShakedownError::Internal(InternalError::Bug(format!(
-                "create load report directory: {source}"
-            )))
+            ShakedownError::Internal(InternalError::LoadArtifactIo {
+                operation: "create report directory",
+                detail: source.to_string(),
+            })
         })?;
     }
     let file = File::create(path).map_err(|source| {
-        ShakedownError::Internal(InternalError::Bug(format!(
-            "create load report file: {source}"
-        )))
+        ShakedownError::Internal(InternalError::LoadArtifactIo {
+            operation: "create report file",
+            detail: source.to_string(),
+        })
     })?;
     serde_json::to_writer_pretty(BufWriter::new(file), report).map_err(|source| {
-        ShakedownError::Internal(InternalError::Bug(format!(
-            "serialize load report JSON: {source}"
-        )))
+        ShakedownError::Internal(InternalError::LoadArtifactIo {
+            operation: "serialize report JSON",
+            detail: source.to_string(),
+        })
     })
 }
 
 /// Read and deserialize a report written by [`write_load_run_report_to_path`].
-pub fn read_load_run_report_from_path(path: &Path) -> Result<LoadRunReport, ShakedownError> {
+///
+/// Used by unit tests and for ad-hoc inspection; not referenced from non-test lib code (suppresses `dead_code`).
+#[allow(dead_code)]
+pub(crate) fn read_load_run_report_from_path(path: &Path) -> Result<LoadRunReport, ShakedownError> {
     let file = File::open(path).map_err(|source| {
-        ShakedownError::Internal(InternalError::Bug(format!(
-            "open load report file: {source}"
-        )))
+        ShakedownError::Internal(InternalError::LoadArtifactIo {
+            operation: "open report file",
+            detail: source.to_string(),
+        })
     })?;
     let report: LoadRunReport =
         serde_json::from_reader(BufReader::new(file)).map_err(|source| {
-            ShakedownError::Internal(InternalError::Bug(format!(
-                "deserialize load report JSON: {source}"
-            )))
+            ShakedownError::Internal(InternalError::LoadArtifactIo {
+                operation: "deserialize report JSON",
+                detail: source.to_string(),
+            })
         })?;
     Ok(report)
 }
 
-/// Persist [`LoadRunReport`] for `metrics` to the conventional reports path (US-005).
+/// Persist [`LoadRunReport`] for `metrics` to the conventional reports path.
 pub fn write_report(
     metrics: &LoadMetrics,
     load_name: &str,
@@ -200,7 +208,7 @@ pub fn write_report(
 
 /// Decode and deserialize the V2 histogram from a report (for round-trip tests).
 #[cfg(test)]
-fn decode_report_histogram(
+pub(super) fn decode_report_histogram(
     report: &LoadRunReport,
 ) -> Result<hdrhistogram::Histogram<u64>, ShakedownError> {
     let bytes = STANDARD
@@ -221,97 +229,4 @@ fn decode_report_histogram(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use crate::load::metrics::LoadMetricsAccumulator;
-
-    #[test]
-    fn load_run_report_round_trip_file_and_histogram() {
-        let epoch = std::time::Instant::now();
-        let accumulator = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
-        accumulator.set_load_profile_summary("Constant(1s, 10 it/s)".to_string());
-        for index in 0..30u64 {
-            let completion = epoch + Duration::from_millis(index * 3);
-            accumulator.record_success(completion, Duration::from_micros(400 + index * 20));
-        }
-        let metrics = LoadMetrics::new(accumulator);
-        metrics.set_report_assertions(vec![ReportAssertion {
-            metric: "p99".to_string(),
-            measured: "1.20ms".to_string(),
-            threshold: "<= 5.00ms".to_string(),
-            passed: true,
-        }]);
-        metrics.set_report_comparison(ReportComparison {
-            baseline_name: "main".to_string(),
-            passed: true,
-            tolerance_percent: 0.05,
-            metrics: vec![crate::load::ReportComparisonMetric {
-                name: "p99".to_string(),
-                baseline_value: "1.00ms".to_string(),
-                current_value: "1.10ms".to_string(),
-                change_pct: 0.1,
-                threshold_pct: 0.05,
-                passed: true,
-            }],
-        });
-
-        let temp = std::env::temp_dir().join(format!(
-            "shakedown-load-report-test-{}.json",
-            std::process::id()
-        ));
-        let report = LoadRunReport::from_load_metrics(&metrics, "checkout", "scenario_a")
-            .expect("build report");
-        write_load_run_report_to_path(&report, &temp).expect("write");
-        let loaded = read_load_run_report_from_path(&temp).expect("read");
-
-        assert_eq!(loaded.schema_version, LOAD_RUN_REPORT_SCHEMA_VERSION);
-        assert_eq!(loaded.scenario_id, "scenario_a");
-        assert_eq!(loaded.load_name, "checkout");
-        assert_eq!(loaded.load_profile_summary, "Constant(1s, 10 it/s)");
-        assert_eq!(loaded.metrics.successful_operations, 30);
-        assert_eq!(loaded.metrics.total_iterations, 30);
-        assert!(loaded
-            .assertions
-            .as_ref()
-            .is_some_and(|rows| rows.len() == 1));
-        assert!(loaded
-            .comparison
-            .as_ref()
-            .is_some_and(|comparison| comparison.passed));
-
-        let restored = decode_report_histogram(&loaded).expect("histogram");
-        assert_eq!(restored.len(), 30);
-        let from_live = metrics.clone_latency_histogram_for_report();
-        assert_eq!(restored.len(), from_live.len());
-
-        let _ = std::fs::remove_file(&temp);
-    }
-
-    #[test]
-    fn write_report_uses_target_shakedown_reports_path() {
-        let accumulator = Arc::new(LoadMetricsAccumulator::default());
-        accumulator.record_success(std::time::Instant::now(), Duration::from_micros(100));
-        let metrics = LoadMetrics::new(accumulator);
-        let path = write_report(&metrics, "my_load", "s1").expect("write_report");
-        assert_eq!(
-            path.file_name().and_then(|name| name.to_str()),
-            Some("my_load.json")
-        );
-        assert_eq!(
-            path.parent()
-                .and_then(|parent| parent.file_name())
-                .and_then(|name| name.to_str()),
-            Some("s1")
-        );
-        assert!(
-            path.strip_prefix(resolve_target_dir()).is_ok(),
-            "report path should live under the workspace target directory"
-        );
-        let loaded = read_load_run_report_from_path(&path).expect("read back");
-        assert_eq!(loaded.load_name, "my_load");
-        let _ = std::fs::remove_file(&path);
-    }
-}
+mod tests;

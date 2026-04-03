@@ -10,7 +10,7 @@ use testcontainers_modules::mongo::Mongo;
 use tokio::sync::Mutex;
 
 const MONGO_PORT: u16 = 27017;
-/// Default `mongo` image tag (official Docker Hub; extra-infra SPECS).
+/// Default `mongo` image tag (official Docker Hub image).
 pub const DEFAULT_MONGO_IMAGE_TAG: &str = "7";
 const SUITE_USER: &str = "root";
 const SUITE_PASSWORD: &str = "root";
