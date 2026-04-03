@@ -157,6 +157,7 @@ impl LoadHandle {
                         &self.load_name,
                         &metrics_snapshot,
                         None,
+                        None,
                         use_color,
                     );
                     eprintln!("{text}");

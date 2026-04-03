@@ -225,6 +225,7 @@ fn performance_assertion_failed_display_includes_fields() {
         measured: "12.00ms".to_string(),
         threshold: "<= 10.00ms".to_string(),
         phase: crate::load::Phase::pause(std::time::Duration::ZERO),
+        comparison_table: None,
     }));
     let displayed = format!("{err}");
     assert!(displayed.contains("checkout"));

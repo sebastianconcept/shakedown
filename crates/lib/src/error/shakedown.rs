@@ -24,6 +24,8 @@ pub struct PerformanceAssertionDetails {
     pub threshold: String,
     /// Load profile phase used for correlation (not lifecycle phase).
     pub phase: crate::load::Phase,
+    /// Per-metric baseline vs current table (US-007 regression checks).
+    pub comparison_table: Option<String>,
 }
 
 #[cfg(feature = "load")]
@@ -33,7 +35,11 @@ impl std::fmt::Display for PerformanceAssertionDetails {
             formatter,
             "performance assertion failed for load '{}', metric '{}': measured {}, threshold {} (load phase: {:?})",
             self.load_name, self.metric, self.measured, self.threshold, self.phase
-        )
+        )?;
+        if let Some(table) = &self.comparison_table {
+            write!(formatter, "\n\n{table}")?;
+        }
+        Ok(())
     }
 }
 
