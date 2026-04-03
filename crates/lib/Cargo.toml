@@ -315,7 +315,7 @@ cluster = ["dep:bollard"]
 # `diagnostics` enables bollard log/stats/events for labeled service containers.
 services = ["dep:testcontainers", "dep:reqwest", "diagnostics"]
 # Open-model load profiles, metrics, and scheduling (US-006+)
-load = ["dep:hdrhistogram"]
+load = ["dep:hdrhistogram", "dep:base64"]
 
 # LoadHandle open-model scheduling + event log merge (no Docker)
 [[test]]

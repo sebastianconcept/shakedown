@@ -19,14 +19,73 @@ pub struct AssertionVerdict {
     pub passed: bool,
 }
 
+/// One assertion row in a [`super::report::LoadRunReport`] (US-005).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReportAssertion {
+    /// Metric name (e.g. `p99`, `throughput`).
+    pub metric: String,
+    /// Observed value as displayed to the user.
+    pub measured: String,
+    /// Bound that was asserted.
+    pub threshold: String,
+    /// Whether the check passed.
+    pub passed: bool,
+}
+
+impl From<&AssertionVerdict> for ReportAssertion {
+    fn from(verdict: &AssertionVerdict) -> Self {
+        Self {
+            metric: verdict.metric.clone(),
+            measured: verdict.measured.clone(),
+            threshold: verdict.threshold.clone(),
+            passed: verdict.passed,
+        }
+    }
+}
+
+/// Baseline comparison block in a [`super::report::LoadRunReport`] (US-005, US-007).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ReportComparison {
+    /// Baseline artifact name compared against.
+    pub baseline_name: String,
+    /// Whether every compared metric stayed within tolerance.
+    pub passed: bool,
+    /// Configured relative tolerance (fraction, e.g. `0.05` for 5%).
+    pub tolerance_percent: f64,
+    /// Per-metric old vs new rows.
+    pub metrics: Vec<ReportComparisonMetric>,
+}
+
+/// One metric row inside [`ReportComparison`].
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ReportComparisonMetric {
+    /// Metric identifier (e.g. `p99`, `throughput`).
+    pub name: String,
+    /// Baseline value as a string (same formatting as summaries).
+    pub baseline_value: String,
+    /// Current run value as a string.
+    pub current_value: String,
+    /// Relative change as a fraction (signed).
+    pub change_pct: f64,
+    /// Allowed relative tolerance as a fraction for this comparison direction.
+    pub threshold_pct: f64,
+    /// Whether this row passed.
+    pub passed: bool,
+}
+
 mod assertions;
 pub(crate) mod handle;
 mod metrics;
+mod report;
 mod summary;
 
 pub use assertions::LoadMetricsAssertBuilder;
 pub use handle::LoadHandle;
 pub use metrics::LoadMetrics;
+pub use report::{
+    read_load_run_report_from_path, resolve_load_report_path, write_load_run_report_to_path,
+    LoadRunReport, ReportMetrics, LOAD_RUN_REPORT_SCHEMA_VERSION,
+};
 pub use summary::{render_summary, render_summary_with_verdicts};
 
 use std::time::Duration;
@@ -469,6 +528,48 @@ impl RecoveryConfig {
         self.alert_threshold = alert_threshold;
         self
     }
+}
+
+/// Compact, stable summary of a [`LoadProfile`] for reports and baselines (US-005).
+pub(crate) fn summarize_load_profile(profile: &LoadProfile) -> String {
+    let mut parts = Vec::new();
+    for (index, named) in profile.phases().iter().enumerate() {
+        let name = if let Some(phase_name) = named.name.as_deref() {
+            phase_name.to_string()
+        } else {
+            format!("#{index}")
+        };
+        let phase = match &named.phase {
+            Phase::Warmup { duration, rate } => {
+                format!("Warmup({duration:?}, {} it/s)", rate.as_f64())
+            }
+            Phase::Constant { duration, rate } => {
+                format!("Constant({duration:?}, {} it/s)", rate.as_f64())
+            }
+            Phase::Ramp {
+                duration,
+                from_rate,
+                to_rate,
+            } => format!(
+                "Ramp({duration:?}, {} → {} it/s)",
+                from_rate.as_f64(),
+                to_rate.as_f64()
+            ),
+            Phase::Spike {
+                duration,
+                peak_rate,
+            } => format!("Spike({duration:?}, {} it/s)", peak_rate.as_f64()),
+            Phase::Pause { duration } => format!("Pause({duration:?})"),
+            Phase::ConstantVus { duration, count } => {
+                format!("ConstantVus({duration:?}, {count} vu)")
+            }
+            Phase::RampVus { duration, from, to } => {
+                format!("RampVus({duration:?}, {from} → {to} vu)")
+            }
+        };
+        parts.push(format!("{name}: {phase}"));
+    }
+    parts.join(" | ")
 }
 
 #[cfg(test)]

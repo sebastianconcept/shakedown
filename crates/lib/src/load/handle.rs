@@ -203,6 +203,7 @@ where
     let work = Arc::new(work);
     let profile = Arc::new(profile);
     let metrics = Arc::new(LoadMetricsAccumulator::default());
+    metrics.set_load_profile_summary(super::summarize_load_profile(&profile));
     let paused = Arc::new(AtomicBool::new(false));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let (phase_watch_tx, phase_watch_rx) = watch::channel(None::<usize>);

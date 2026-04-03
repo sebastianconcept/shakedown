@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use hdrhistogram::Histogram;
 
+use super::{ReportAssertion, ReportComparison};
+
 /// 100ms buckets for windowed percentile merges (SPECS §2.3).
 const BUCKET_MS: u128 = 100;
 
@@ -99,6 +101,12 @@ pub struct LoadMetricsAccumulator {
     max_latency_ns: AtomicU64,
     buckets: RwLock<Vec<TimeBucket>>,
     burst: Mutex<BurstState>,
+    /// Set when a load run starts from [`super::handle::start_load`](super::handle::start_load) (US-005).
+    load_profile_summary: Mutex<Option<String>>,
+    /// Optional assertion rows to embed in JSON reports (US-005).
+    report_assertions: Mutex<Option<Vec<ReportAssertion>>>,
+    /// Optional baseline comparison block for JSON reports (US-005, US-007).
+    report_comparison: Mutex<Option<ReportComparison>>,
 }
 
 impl Default for LoadMetricsAccumulator {
@@ -122,6 +130,9 @@ impl LoadMetricsAccumulator {
             max_latency_ns: AtomicU64::new(0),
             buckets: RwLock::new(Vec::new()),
             burst: Mutex::new(BurstState::default()),
+            load_profile_summary: Mutex::new(None),
+            report_assertions: Mutex::new(None),
+            report_comparison: Mutex::new(None),
         }
     }
 
@@ -139,7 +150,53 @@ impl LoadMetricsAccumulator {
             max_latency_ns: AtomicU64::new(0),
             buckets: RwLock::new(Vec::new()),
             burst: Mutex::new(BurstState::default()),
+            load_profile_summary: Mutex::new(None),
+            report_assertions: Mutex::new(None),
+            report_comparison: Mutex::new(None),
         }
+    }
+
+    pub(crate) fn set_load_profile_summary(&self, summary: String) {
+        let mut guard = self
+            .load_profile_summary
+            .lock()
+            .expect("load_profile_summary");
+        *guard = Some(summary);
+    }
+
+    pub(crate) fn load_profile_summary(&self) -> Option<String> {
+        self.load_profile_summary
+            .lock()
+            .expect("load_profile_summary")
+            .clone()
+    }
+
+    pub(crate) fn set_report_assertions(&self, assertions: Option<Vec<ReportAssertion>>) {
+        let mut guard = self.report_assertions.lock().expect("report_assertions");
+        *guard = assertions;
+    }
+
+    pub(crate) fn set_report_comparison(&self, comparison: Option<ReportComparison>) {
+        let mut guard = self.report_comparison.lock().expect("report_comparison");
+        *guard = comparison;
+    }
+
+    pub(crate) fn report_assertions_snapshot(&self) -> Option<Vec<ReportAssertion>> {
+        self.report_assertions
+            .lock()
+            .expect("report_assertions")
+            .clone()
+    }
+
+    pub(crate) fn report_comparison_snapshot(&self) -> Option<ReportComparison> {
+        self.report_comparison
+            .lock()
+            .expect("report_comparison")
+            .clone()
+    }
+
+    pub(crate) fn wall_clock_origin(&self) -> Instant {
+        self.epoch
     }
 
     /// Mark the end of the warmup phase for steady-state metric queries (US-001, US-002).
@@ -458,12 +515,47 @@ impl LoadMetrics {
         }
     }
 
+    pub(crate) fn accumulator(&self) -> &Arc<LoadMetricsAccumulator> {
+        &self.inner
+    }
+
     /// Metrics view that includes warmup iterations in aggregates (same underlying run as `self`).
     pub fn including_warmup(&self) -> Self {
         Self {
             inner: self.inner.clone(),
             force_full_run: true,
         }
+    }
+
+    pub(crate) fn clone_latency_histogram_for_report(&self) -> Histogram<u64> {
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            return self
+                .inner
+                .global_latency_ns
+                .lock()
+                .expect("global_latency_ns")
+                .clone();
+        }
+        self.merged_steady_buckets().histogram
+    }
+
+    /// Write a JSON run report to `target/shakedown/reports/{scenario_id}/{load_name}.json` (US-005).
+    pub fn write_report(
+        &self,
+        load_name: impl AsRef<str>,
+        scenario_id: impl AsRef<str>,
+    ) -> Result<std::path::PathBuf, crate::ShakedownError> {
+        super::report::write_report(self, load_name.as_ref(), scenario_id.as_ref())
+    }
+
+    /// Attach assertion rows that [`Self::write_report`] will serialize (US-005).
+    pub fn set_report_assertions(&self, assertions: Vec<ReportAssertion>) {
+        self.inner.set_report_assertions(Some(assertions));
+    }
+
+    /// Attach a baseline comparison block for [`Self::write_report`] (US-005, US-007).
+    pub fn set_report_comparison(&self, comparison: ReportComparison) {
+        self.inner.set_report_comparison(Some(comparison));
     }
 
     fn merged_steady_buckets(&self) -> MergedBucketsSnapshot {

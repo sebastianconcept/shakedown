@@ -232,10 +232,10 @@ pub use crate::publication::{
 };
 pub use crate::timeline::{
     build_failure_timeline_document, emit_failure_timeline_to_stderr, render_failure_timeline,
-    resolve_target_timelines_dir, sanitize_scenario_id_for_filename, write_failure_timeline_json,
-    write_failure_timeline_json_to_path, FailureTimelineDocument, FailureTimelineOptions,
-    ResourceSnapshotJson, ResourceSnapshotsJson, RootCauseHint, ScenarioMetadataJson,
-    TimelineEventJson,
+    resolve_target_dir, resolve_target_timelines_dir, sanitize_scenario_id_for_filename,
+    write_failure_timeline_json, write_failure_timeline_json_to_path, FailureTimelineDocument,
+    FailureTimelineOptions, ResourceSnapshotJson, ResourceSnapshotsJson, RootCauseHint,
+    ScenarioMetadataJson, TimelineEventJson,
 };
 
 #[cfg(feature = "cluster")]
@@ -398,9 +398,12 @@ pub use crate::resources::ToxiproxyResource;
 
 #[cfg(feature = "load")]
 pub use crate::load::{
-    render_summary, render_summary_with_verdicts, AssertionVerdict, LoadError, LoadHandle,
-    LoadMetrics, LoadMetricsAssertBuilder, LoadProfile, LoadProfileBuilder, LoadRuntime,
-    NamedPhase, Phase as LoadPhase, Rate, RecoveryConfig, SaturationPolicy,
+    read_load_run_report_from_path, render_summary, render_summary_with_verdicts,
+    resolve_load_report_path, write_load_run_report_to_path, AssertionVerdict, LoadError,
+    LoadHandle, LoadMetrics, LoadMetricsAssertBuilder, LoadProfile, LoadProfileBuilder,
+    LoadRunReport, LoadRuntime, NamedPhase, Phase as LoadPhase, Rate, RecoveryConfig,
+    ReportAssertion, ReportComparison, ReportComparisonMetric, ReportMetrics, SaturationPolicy,
+    LOAD_RUN_REPORT_SCHEMA_VERSION,
 };
 
 #[cfg(feature = "rabbitmq")]
