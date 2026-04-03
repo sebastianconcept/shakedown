@@ -1321,7 +1321,7 @@ impl Context {
         MongoHelpers::new(self)
     }
 
-    /// NATS core pub/sub helpers (`nats` feature).
+    /// NATS client helpers — publish/subscribe on scenario-namespaced subjects (`nats` feature). The suite broker runs with JetStream for [`crate::outbox::Outbox::assert_nats_published`].
     #[cfg(feature = "nats")]
     pub fn nats(&self) -> NatsHelpers<'_> {
         NatsHelpers::new(self)

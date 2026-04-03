@@ -1,12 +1,10 @@
 #![cfg(all(feature = "outbox", feature = "sqlite", feature = "nats"))]
 
-//! SQLite outbox + NATS publication proof (NATS Docker; SQLite in-process).
+//! SQLite outbox + NATS JetStream publication proof (NATS Docker; SQLite in-process).
 //!
 //! ```text
 //! cargo test -p shakedown --features outbox,sqlite,nats --test outbox_nats_publication -- --ignored
 //! ```
-
-use std::time::Duration;
 
 use bytes::Bytes;
 use shakedown::{run_scenario, BuiltinResource, Context, EventLog, NatsResource, SqliteResource};
@@ -42,24 +40,24 @@ async fn outbox_nats_publication_verifier_observes_json_aggregate_id() {
                 let connection_url = nats_bindings.connection_url.clone();
                 let namespaced_subject = nats_bindings.subject_namespace(base_subject);
 
-                let publish = tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(80)).await;
-                    let client = async_nats::connect(connection_url.as_str())
-                        .await
-                        .expect("connect publisher client");
-                    client
-                        .publish(namespaced_subject, Bytes::from(payload.into_bytes()))
-                        .await
-                        .expect("publish to namespaced NATS subject");
-                    let _ = client.drain().await;
-                });
+                let publisher = async_nats::connect(connection_url.as_str())
+                    .await
+                    .expect("connect publisher client");
+                publisher
+                    .publish(
+                        namespaced_subject.clone(),
+                        Bytes::from(payload.into_bytes()),
+                    )
+                    .await
+                    .expect("publish to namespaced NATS subject");
+                publisher.flush().await.expect("flush NATS publish");
+                let _ = publisher.drain().await;
 
-                let outbox = scenario_context.outbox();
-                let verify = outbox.assert_nats_published(base_subject, aggregate_id);
-
-                let (publish_result, verify_result) = tokio::join!(publish, verify);
-                publish_result.expect("publish task");
-                verify_result.expect("NATS message should be observed");
+                scenario_context
+                    .outbox()
+                    .assert_nats_published(base_subject, aggregate_id)
+                    .await
+                    .expect("JetStream should retain the published message");
             })
         },
         &mut event_log,
