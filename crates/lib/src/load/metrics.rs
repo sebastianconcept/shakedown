@@ -548,6 +548,15 @@ impl LoadMetrics {
         super::report::write_report(self, load_name.as_ref(), scenario_id.as_ref())
     }
 
+    /// Write a named baseline JSON to `target/shakedown/baselines/{scenario_id}/{name}.json` (US-006).
+    pub fn save_baseline(
+        &self,
+        name: impl AsRef<str>,
+        scenario_id: impl AsRef<str>,
+    ) -> Result<std::path::PathBuf, crate::ShakedownError> {
+        super::baseline::save_baseline(self, name.as_ref(), scenario_id.as_ref())
+    }
+
     /// Attach assertion rows that [`Self::write_report`] will serialize (US-005).
     pub fn set_report_assertions(&self, assertions: Vec<ReportAssertion>) {
         self.inner.set_report_assertions(Some(assertions));
