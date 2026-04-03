@@ -3141,7 +3141,29 @@ async fn start_and_readiness_mock_services(
     Ok(())
 }
 
-pub async fn run_scenario<F>(
+/// Final value produced by a [`run_scenario`] async body (US-008).
+///
+/// Return `()` on success, or [`Result::Err`] with [`ShakedownError`] to fail the scenario without
+/// panicking and to integrate with the failure timeline (for example `ShakedownError::PerformanceAssertionFailed`
+/// when the `load` feature is enabled).
+pub trait ScenarioRunOutcome: Send + 'static {
+    /// Converts the scenario body's output into a harness result.
+    fn into_shakedown_result(self) -> Result<(), ShakedownError>;
+}
+
+impl ScenarioRunOutcome for () {
+    fn into_shakedown_result(self) -> Result<(), ShakedownError> {
+        Ok(())
+    }
+}
+
+impl ScenarioRunOutcome for Result<(), ShakedownError> {
+    fn into_shakedown_result(self) -> Result<(), ShakedownError> {
+        self
+    }
+}
+
+pub async fn run_scenario<F, O>(
     ctx: &mut Context,
     scenario_id: impl Into<String>,
     scenario_fn: F,
@@ -3150,7 +3172,8 @@ pub async fn run_scenario<F>(
 where
     F: for<'s> FnOnce(
         &'s mut Context,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 's>>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = O> + Send + 's>>,
+    O: ScenarioRunOutcome,
 {
     // Update scenario ID
     ctx.set_scenario_id(scenario_id);
@@ -3871,9 +3894,7 @@ where
         feature = "rabbitmq-cluster",
         feature = "fault-injection"
     )))]
-    {
-        scenario_fn(ctx).await;
-    }
+    let scenario_outcome = scenario_fn(ctx).await;
 
     #[cfg(feature = "load")]
     {
@@ -3934,9 +3955,20 @@ where
         feature = "rabbitmq-cluster",
         feature = "fault-injection"
     ))]
-    if let Err(panic_payload) = scenario_result {
-        std::panic::resume_unwind(panic_payload);
-    }
+    let run_result = match scenario_result {
+        Ok(outcome) => outcome.into_shakedown_result(),
+        Err(panic_payload) => std::panic::resume_unwind(panic_payload),
+    };
+    #[cfg(not(any(
+        feature = "load",
+        feature = "mongodb-cluster",
+        feature = "kafka-cluster",
+        feature = "redis-sentinel",
+        feature = "postgres-cluster",
+        feature = "rabbitmq-cluster",
+        feature = "fault-injection"
+    )))]
+    let run_result = scenario_outcome.into_shakedown_result();
 
     // Assert phase (in a real implementation, this would run assertions)
     #[cfg(all(
@@ -4058,7 +4090,15 @@ where
     ))]
     ctx.set_resource_stats_rings(None);
 
-    Ok(())
+    if let Err(ref error) = run_result {
+        crate::timeline::emit_failure_timeline_for_shakedown_error(
+            event_log,
+            scenario_id.as_str(),
+            error,
+        );
+    }
+
+    run_result
 }
 
 /// Builds a [`Context`] with [`crate::resources::BuiltinResource::Fake`] already registered.

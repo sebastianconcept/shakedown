@@ -16,10 +16,11 @@ use std::fs::{self, File};
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use crate::error::ShakedownError;
 use crate::event::{
     DockerEventKind, EventLevel, EventLog, InfraEvent, InfraSeverity, LogEntry, ScenarioLogEntry,
 };
@@ -46,6 +47,24 @@ pub struct RootCauseHint {
     pub mem_limit: Option<u64>,
 }
 
+/// Structured load / SLO assertion failure for timeline JSON and terminal output (US-008, `load` feature).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerformanceAssertionFailureJson {
+    /// Load handle name from the scenario.
+    pub load_name: String,
+    /// Aggregate under test (e.g. `p99`, `throughput`).
+    pub metric: String,
+    /// Observed value (human-readable).
+    pub measured: String,
+    /// Asserted bound (human-readable).
+    pub threshold: String,
+    /// Debug label of the load profile phase (distinct from lifecycle [`Phase`]).
+    pub load_phase: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional regression comparison table from baseline / tolerance checks.
+    pub comparison_table: Option<String>,
+}
+
 /// JSON artifact for a failed scenario (machine-readable timeline).
 #[derive(Debug, Clone, Serialize)]
 pub struct FailureTimelineDocument {
@@ -57,6 +76,9 @@ pub struct FailureTimelineDocument {
     pub resource_snapshots: ResourceSnapshotsJson,
     /// Root-cause hints: infrastructure events that may explain the failure.
     pub hints: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Present when the failure was a load performance assertion (`load` feature).
+    pub performance_assertion_failure: Option<PerformanceAssertionFailureJson>,
 }
 
 /// Scenario section of [`FailureTimelineDocument`].
@@ -163,6 +185,8 @@ pub struct FailureTimelineOptions {
     /// `[scenario_start, scenario_start + timeout]`. When `None`, the observed span
     /// from first to last log timestamp is used.
     pub scenario_timeout_secs: Option<u64>,
+    /// When set, terminal render and JSON include a performance assertion section (US-008).
+    pub performance_assertion_failure: Option<PerformanceAssertionFailureJson>,
 }
 
 impl FailureTimelineOptions {
@@ -174,6 +198,7 @@ impl FailureTimelineOptions {
             use_color: io::stderr().is_terminal(),
             verdict: "failed".to_string(),
             scenario_timeout_secs: None,
+            performance_assertion_failure: None,
         }
     }
 
@@ -613,6 +638,7 @@ pub fn build_failure_timeline_document(
         events,
         resource_snapshots: ResourceSnapshotsJson { at_failure },
         hints,
+        performance_assertion_failure: options.performance_assertion_failure.clone(),
     }
 }
 
@@ -792,31 +818,63 @@ pub fn render_failure_timeline(event_log: &EventLog, options: &FailureTimelineOp
     let entries: Vec<(usize, &LogEntry)> = event_log.entries().iter().enumerate().collect();
     if entries.is_empty() {
         out.push_str("(no events recorded)\n");
-        return out;
-    }
-
-    let (baseline_secs, mut timeline_rows, samples) = collect_timeline_rows(&entries);
-
-    timeline_rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-
-    out.push_str("--- Events (chronological) ---\n");
-    for (_, _, row) in &timeline_rows {
-        out.push_str(&row.format_line(options.use_color));
-        out.push('\n');
-    }
-
-    out.push_str("\n--- RESOURCE SNAPSHOT at failure ---\n");
-    let snapshot = latest_resource_samples_by_container(&samples);
-    if snapshot.is_empty() {
-        out.push_str("(no resource samples recorded)\n");
     } else {
-        let mut names: Vec<_> = snapshot.keys().cloned().collect();
-        names.sort();
-        for name in names {
-            let Some(sample) = snapshot.get(&name) else {
-                continue;
-            };
-            let InfraEvent::ResourceSample {
+        let (baseline_secs, mut timeline_rows, samples) = collect_timeline_rows(&entries);
+
+        timeline_rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+        out.push_str("--- Events (chronological) ---\n");
+        for (_, _, row) in &timeline_rows {
+            out.push_str(&row.format_line(options.use_color));
+            out.push('\n');
+        }
+
+        out.push_str("\n--- RESOURCE SNAPSHOT at failure ---\n");
+        let snapshot = latest_resource_samples_by_container(&samples);
+        if snapshot.is_empty() {
+            out.push_str("(no resource samples recorded)\n");
+        } else {
+            let mut names: Vec<_> = snapshot.keys().cloned().collect();
+            names.sort();
+            for name in names {
+                let Some(sample) = snapshot.get(&name) else {
+                    continue;
+                };
+                let InfraEvent::ResourceSample {
+                    cpu_pct,
+                    mem_bytes,
+                    mem_limit,
+                    net_rx,
+                    net_tx,
+                    ..
+                } = sample
+                else {
+                    continue;
+                };
+                let mem_pct = if *mem_limit > 0 {
+                    (*mem_bytes as f64 / *mem_limit as f64) * 100.0
+                } else {
+                    0.0
+                };
+                let warn = *mem_limit > 0 && mem_pct >= 95.0;
+                let flag = if warn { " ⚠" } else { "" };
+                out.push_str(&format!(
+                    "  {name}  CPU: {:5.1}%  MEM: {}/{} ({:.0}%){flag}  NET rx: {} tx: {}\n",
+                    cpu_pct,
+                    format_bytes(*mem_bytes),
+                    format_bytes(*mem_limit),
+                    mem_pct,
+                    format_bytes(*net_rx),
+                    format_bytes(*net_tx),
+                ));
+            }
+        }
+
+        let (_, failure_secs) = log_timestamp_bounds(&entries);
+        let snapshot_map = latest_resource_samples_by_container(&samples);
+        let mut at_failure_for_hints: HashMap<String, ResourceSnapshotJson> = HashMap::new();
+        for (name, sample) in snapshot_map {
+            if let InfraEvent::ResourceSample {
                 cpu_pct,
                 mem_bytes,
                 mem_limit,
@@ -824,65 +882,46 @@ pub fn render_failure_timeline(event_log: &EventLog, options: &FailureTimelineOp
                 net_tx,
                 ..
             } = sample
-            else {
-                continue;
-            };
-            let mem_pct = if *mem_limit > 0 {
-                (*mem_bytes as f64 / *mem_limit as f64) * 100.0
-            } else {
-                0.0
-            };
-            let warn = *mem_limit > 0 && mem_pct >= 95.0;
-            let flag = if warn { " ⚠" } else { "" };
-            out.push_str(&format!(
-                "  {name}  CPU: {:5.1}%  MEM: {}/{} ({:.0}%){flag}  NET rx: {} tx: {}\n",
-                cpu_pct,
-                format_bytes(*mem_bytes),
-                format_bytes(*mem_limit),
-                mem_pct,
-                format_bytes(*net_rx),
-                format_bytes(*net_tx),
-            ));
+            {
+                at_failure_for_hints.insert(
+                    name,
+                    ResourceSnapshotJson {
+                        cpu_pct: *cpu_pct,
+                        mem_bytes: *mem_bytes,
+                        mem_limit: *mem_limit,
+                        net_rx: *net_rx,
+                        net_tx: *net_tx,
+                    },
+                );
+            }
+        }
+        let root_cause_hints = generate_root_cause_hints(
+            &entries,
+            baseline_secs,
+            failure_secs,
+            options,
+            &at_failure_for_hints,
+        );
+        if !root_cause_hints.is_empty() {
+            out.push_str("\n--- HINTS ---\n");
+            for hint in &root_cause_hints {
+                out.push_str("HINT: ");
+                out.push_str(&hint.message);
+                out.push('\n');
+            }
         }
     }
 
-    let (_, failure_secs) = log_timestamp_bounds(&entries);
-    let snapshot_map = latest_resource_samples_by_container(&samples);
-    let mut at_failure_for_hints: HashMap<String, ResourceSnapshotJson> = HashMap::new();
-    for (name, sample) in snapshot_map {
-        if let InfraEvent::ResourceSample {
-            cpu_pct,
-            mem_bytes,
-            mem_limit,
-            net_rx,
-            net_tx,
-            ..
-        } = sample
-        {
-            at_failure_for_hints.insert(
-                name,
-                ResourceSnapshotJson {
-                    cpu_pct: *cpu_pct,
-                    mem_bytes: *mem_bytes,
-                    mem_limit: *mem_limit,
-                    net_rx: *net_rx,
-                    net_tx: *net_tx,
-                },
-            );
-        }
-    }
-    let root_cause_hints = generate_root_cause_hints(
-        &entries,
-        baseline_secs,
-        failure_secs,
-        options,
-        &at_failure_for_hints,
-    );
-    if !root_cause_hints.is_empty() {
-        out.push_str("\n--- HINTS ---\n");
-        for hint in &root_cause_hints {
-            out.push_str("HINT: ");
-            out.push_str(&hint.message);
+    if let Some(perf) = &options.performance_assertion_failure {
+        out.push_str("\n--- PERFORMANCE ASSERTION ---\n");
+        out.push_str(&format!("  load .......... {}\n", perf.load_name));
+        out.push_str(&format!("  metric ........ {}\n", perf.metric));
+        out.push_str(&format!("  measured ...... {}\n", perf.measured));
+        out.push_str(&format!("  threshold ..... {}\n", perf.threshold));
+        out.push_str(&format!("  load phase .... {}\n", perf.load_phase));
+        if let Some(table) = &perf.comparison_table {
+            out.push('\n');
+            out.push_str(table);
             out.push('\n');
         }
     }
@@ -904,12 +943,80 @@ pub fn emit_failure_timeline_to_stderr(
         use_color: io::stderr().is_terminal(),
         verdict: "infrastructure_error".to_string(),
         scenario_timeout_secs: None,
+        performance_assertion_failure: None,
     };
     eprintln!("{}", render_failure_timeline(event_log, &options));
     if let Err(error) = write_failure_timeline_json(event_log, &options, scenario_id) {
         tracing::warn!(
             target: "shakedown::harness",
             error = %error,
+            "shakedown: could not write failure timeline JSON artifact"
+        );
+    }
+}
+
+fn scenario_failure_verdict(error: &ShakedownError) -> String {
+    match error {
+        #[cfg(feature = "load")]
+        ShakedownError::PerformanceAssertionFailed(_) => "performance_assertion_failed".to_string(),
+        ShakedownError::Infrastructure(_) => "infrastructure_error".to_string(),
+        ShakedownError::Scenario(_) => "scenario_error".to_string(),
+        ShakedownError::Internal(_) => "internal_error".to_string(),
+        ShakedownError::Outbox(_) => "outbox_error".to_string(),
+        ShakedownError::PayloadSerialisation(_) => "payload_serialisation_error".to_string(),
+        ShakedownError::ResourceAssertionFailed { .. } => "resource_assertion_failed".to_string(),
+        ShakedownError::HelperTimeout { .. } => "helper_timeout".to_string(),
+    }
+}
+
+fn performance_assertion_failure_from_error(
+    error: &ShakedownError,
+) -> Option<PerformanceAssertionFailureJson> {
+    #[cfg(feature = "load")]
+    {
+        match error {
+            ShakedownError::PerformanceAssertionFailed(details) => {
+                Some(PerformanceAssertionFailureJson {
+                    load_name: details.load_name.clone(),
+                    metric: details.metric.clone(),
+                    measured: details.measured.clone(),
+                    threshold: details.threshold.clone(),
+                    load_phase: format!("{:?}", details.phase),
+                    comparison_table: details.comparison_table.clone(),
+                })
+            }
+            _ => None,
+        }
+    }
+    #[cfg(not(feature = "load"))]
+    {
+        let _ = error;
+        None
+    }
+}
+
+/// Renders a failure timeline and writes JSON for a harness [`ShakedownError`] after scenario teardown (US-008).
+///
+/// When the error is [`ShakedownError::PerformanceAssertionFailed`] and the `load` feature is enabled,
+/// [`FailureTimelineDocument::performance_assertion_failure`] is populated for tooling.
+pub fn emit_failure_timeline_for_shakedown_error(
+    event_log: &EventLog,
+    scenario_id: &str,
+    error: &ShakedownError,
+) {
+    let options = FailureTimelineOptions {
+        scenario_name: scenario_id.to_string(),
+        failure_summary: Some(error.to_string()),
+        use_color: io::stderr().is_terminal(),
+        verdict: scenario_failure_verdict(error),
+        scenario_timeout_secs: None,
+        performance_assertion_failure: performance_assertion_failure_from_error(error),
+    };
+    eprintln!("{}", render_failure_timeline(event_log, &options));
+    if let Err(write_error) = write_failure_timeline_json(event_log, &options, scenario_id) {
+        tracing::warn!(
+            target: "shakedown::harness",
+            error = %write_error,
             "shakedown: could not write failure timeline JSON artifact"
         );
     }
@@ -1143,6 +1250,7 @@ mod tests {
             use_color: false,
             verdict: "failed".into(),
             scenario_timeout_secs: None,
+            performance_assertion_failure: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         let first = rendered.find("action=added").expect("added");
@@ -1181,6 +1289,7 @@ mod tests {
             use_color: false,
             verdict: "failed".into(),
             scenario_timeout_secs: None,
+            performance_assertion_failure: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         let early_pos = rendered.find("early").expect("early");
@@ -1231,6 +1340,7 @@ mod tests {
             use_color: false,
             verdict: "failed".into(),
             scenario_timeout_secs: None,
+            performance_assertion_failure: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         assert!(rendered.contains("FAILURE TIMELINE — my_scenario"));
@@ -1275,6 +1385,7 @@ mod tests {
             use_color: false,
             verdict: "failed".into(),
             scenario_timeout_secs: None,
+            performance_assertion_failure: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         assert!(rendered.contains("9.0%"));
@@ -1374,6 +1485,7 @@ mod tests {
             use_color: false,
             verdict: "infrastructure_error".into(),
             scenario_timeout_secs: None,
+            performance_assertion_failure: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         assert!(rendered.contains("--- HINTS ---"));
@@ -1429,6 +1541,7 @@ mod tests {
             use_color: false,
             verdict: "failed".into(),
             scenario_timeout_secs: None,
+            performance_assertion_failure: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         assert!(!rendered.contains("--- HINTS ---"));
@@ -1469,8 +1582,49 @@ mod tests {
             use_color: false,
             verdict: "timeout".into(),
             scenario_timeout_secs: None,
+            performance_assertion_failure: None,
         };
         let rendered = render_failure_timeline(&log, &options);
         assert!(rendered.contains("This may have caused the timeout."));
+    }
+
+    #[test]
+    fn performance_assertion_section_appears_in_render_and_json() {
+        let log = EventLog::new();
+        let options = FailureTimelineOptions {
+            scenario_name: "perf_case".into(),
+            failure_summary: Some("p99 too high".into()),
+            use_color: false,
+            verdict: "performance_assertion_failed".into(),
+            scenario_timeout_secs: None,
+            performance_assertion_failure: Some(PerformanceAssertionFailureJson {
+                load_name: "checkout".into(),
+                metric: "p99".into(),
+                measured: "120ms".into(),
+                threshold: "50ms".into(),
+                load_phase: "Constant { duration: 5s, rate: Rate(10.0) }".into(),
+                comparison_table: Some("| m | ok |\n|---|--|".into()),
+            }),
+        };
+        let rendered = render_failure_timeline(&log, &options);
+        assert!(rendered.contains("--- PERFORMANCE ASSERTION ---"));
+        assert!(rendered.contains("checkout"));
+        assert!(rendered.contains("p99"));
+        assert!(rendered.contains("| m | ok |"));
+
+        let document = build_failure_timeline_document(&log, &options);
+        assert_eq!(document.scenario.verdict, "performance_assertion_failed");
+        let perf = document
+            .performance_assertion_failure
+            .as_ref()
+            .expect("performance block");
+        assert_eq!(perf.load_name, "checkout");
+        let json = serde_json::to_value(&document).expect("json");
+        assert_eq!(
+            json.get("performance_assertion_failure")
+                .and_then(|v| v.get("metric"))
+                .and_then(|v| v.as_str()),
+            Some("p99")
+        );
     }
 }
