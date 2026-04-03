@@ -10,6 +10,33 @@ use super::{
     StepError,
 };
 
+/// Structured fields for [`ShakedownError::PerformanceAssertionFailed`] (`load` feature).
+#[cfg(feature = "load")]
+#[derive(Debug)]
+pub struct PerformanceAssertionDetails {
+    /// Load name from [`crate::load::LoadHandle::load_name`] or the author-supplied label.
+    pub load_name: String,
+    /// Which aggregate was checked (e.g. `p99`, `throughput`).
+    pub metric: String,
+    /// Observed value (human-readable).
+    pub measured: String,
+    /// Asserted bound (human-readable).
+    pub threshold: String,
+    /// Load profile phase used for correlation (not lifecycle phase).
+    pub phase: crate::load::Phase,
+}
+
+#[cfg(feature = "load")]
+impl std::fmt::Display for PerformanceAssertionDetails {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "performance assertion failed for load '{}', metric '{}': measured {}, threshold {} (load phase: {:?})",
+            self.load_name, self.metric, self.measured, self.threshold, self.phase
+        )
+    }
+}
+
 /// Top-level error type for all Shakedown errors.
 ///
 /// Errors are categorized into three main types:
@@ -72,6 +99,13 @@ pub enum ShakedownError {
         timeout: std::time::Duration,
         elapsed: std::time::Duration,
     },
+    /// {0}
+    ///
+    /// Cause: [`crate::load::LoadMetricsAssertBuilder`] SLO check did not pass (see [`crate::load::LoadMetrics::assert`] / [`crate::load::LoadMetrics::assert_with_phase`]).
+    /// Boxed so [`ShakedownError`] stays small for [`Result`] (`clippy::result_large_err`).
+    #[cfg(feature = "load")]
+    #[error("{0}")]
+    PerformanceAssertionFailed(Box<PerformanceAssertionDetails>),
 }
 
 impl From<ScenarioError> for ShakedownError {

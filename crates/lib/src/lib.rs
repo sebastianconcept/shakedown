@@ -172,6 +172,8 @@ pub mod resources;
 #[cfg(feature = "services")]
 pub mod service;
 
+#[cfg(feature = "load")]
+pub use crate::error::PerformanceAssertionDetails;
 #[doc(inline)]
 pub use crate::error::{
     AssertionError, InfrastructureError, InternalError, ResourceHandle, ResourceNotFoundError,
@@ -396,8 +398,9 @@ pub use crate::resources::ToxiproxyResource;
 
 #[cfg(feature = "load")]
 pub use crate::load::{
-    LoadError, LoadHandle, LoadMetrics, LoadProfile, LoadProfileBuilder, LoadRuntime, NamedPhase,
-    Phase as LoadPhase, Rate, RecoveryConfig, SaturationPolicy,
+    AssertionVerdict, LoadError, LoadHandle, LoadMetrics, LoadMetricsAssertBuilder, LoadProfile,
+    LoadProfileBuilder, LoadRuntime, NamedPhase, Phase as LoadPhase, Rate, RecoveryConfig,
+    SaturationPolicy,
 };
 
 #[cfg(feature = "rabbitmq")]

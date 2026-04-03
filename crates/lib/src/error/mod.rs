@@ -27,6 +27,8 @@ pub use resource_handle::ResourceHandle;
 pub use resource_not_found::ResourceNotFoundError;
 pub use scenario::ScenarioError;
 pub use scenario_id::ScenarioId;
+#[cfg(feature = "load")]
+pub use shakedown::PerformanceAssertionDetails;
 pub use shakedown::ShakedownError;
 pub use step::StepError;
 

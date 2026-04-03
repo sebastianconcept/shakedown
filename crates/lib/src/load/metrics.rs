@@ -126,7 +126,7 @@ impl LoadMetricsAccumulator {
     }
 
     #[cfg(test)]
-    fn new_with_epoch(epoch: Instant) -> Self {
+    pub(crate) fn new_with_epoch(epoch: Instant) -> Self {
         Self {
             epoch,
             warmup_end: Mutex::new(None),
