@@ -293,6 +293,27 @@ where
             .map_err(|_| LoadError::DriverStopped)?;
 
         match &named.phase {
+            Phase::Warmup { duration, rate } => {
+                run_open_model_constant(
+                    *duration,
+                    *rate,
+                    &load_name,
+                    &profile,
+                    &work,
+                    &metrics,
+                    &events,
+                    &semaphore,
+                    &shutdown_rx,
+                    &paused,
+                    phase_display.as_str(),
+                    &error_rate_alert_band,
+                    &recovery_defaults,
+                )
+                .await?;
+                if !*shutdown_rx.borrow() {
+                    metrics.set_warmup_end(StdInstant::now());
+                }
+            }
             Phase::Constant { duration, rate } => {
                 run_open_model_constant(
                     *duration,

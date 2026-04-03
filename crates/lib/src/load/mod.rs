@@ -3,6 +3,8 @@
 //! Load [`Phase`] values describe traffic shape (constant, ramp, spike, pause, and closed-model VU phases).
 //! [`LoadProfile`] is built with [`LoadProfile::open_model`] and validated by [`LoadProfileBuilder::build`].
 //! [`LoadHandle`](handle::LoadHandle) schedules work from [`crate::lifecycle::Context::start_load`] (US-007).
+//! [`Phase::warmup`](Phase::warmup) runs as open-model traffic before steady-state phases; the driver records
+//! `LoadMetricsAccumulator::set_warmup_end` when warmup completes (US-001).
 
 pub(crate) mod handle;
 mod metrics;
@@ -49,6 +51,8 @@ impl From<Phase> for NamedPhase {
 /// Traffic shape for a load profile (distinct from [`crate::lifecycle::Phase`] lifecycle labels).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Phase {
+    /// Open-model arrivals at `rate` for `duration` before steady-state phases; must be first and at most once in a profile.
+    Warmup { duration: Duration, rate: Rate },
     /// Fixed open-model rate for a duration.
     Constant { duration: Duration, rate: Rate },
     /// Linear ramp between two open-model rates.
@@ -72,6 +76,11 @@ pub enum Phase {
 }
 
 impl Phase {
+    /// Open model: warmup traffic at `rate` for `duration` (must be the first phase; at most one per profile).
+    pub fn warmup(duration: Duration, rate: Rate) -> Self {
+        Self::Warmup { duration, rate }
+    }
+
     /// Open model: hold `rate` for `duration`.
     pub fn constant(duration: Duration, rate: Rate) -> Self {
         Self::Constant { duration, rate }
@@ -119,6 +128,12 @@ impl Phase {
 
     fn validate(&self) -> Result<(), LoadError> {
         match self {
+            Phase::Warmup { duration, rate } => {
+                if duration.is_zero() {
+                    return Err(LoadError::WarmupDurationInvalid);
+                }
+                validate_rate(rate.as_f64())
+            }
             Phase::Constant { rate, .. } => validate_rate(rate.as_f64()),
             Phase::Ramp {
                 from_rate, to_rate, ..
@@ -290,6 +305,22 @@ impl LoadProfileBuilder {
                 max_workers: self.max_workers,
             });
         }
+        let mut warmup_phase_count = 0usize;
+        let mut first_warmup_index: Option<usize> = None;
+        for (index, named) in self.phases.iter().enumerate() {
+            if matches!(named.phase, Phase::Warmup { .. }) {
+                warmup_phase_count += 1;
+                if first_warmup_index.is_none() {
+                    first_warmup_index = Some(index);
+                }
+            }
+        }
+        if warmup_phase_count > 1 {
+            return Err(LoadError::MultipleWarmups);
+        }
+        if warmup_phase_count == 1 && first_warmup_index != Some(0) {
+            return Err(LoadError::WarmupNotFirst);
+        }
         for named in &self.phases {
             named.phase.validate()?;
         }
@@ -337,6 +368,12 @@ pub enum LoadError {
         /// Ramp end (virtual users).
         to: usize,
     },
+    /// warmup phase duration must be greater than zero
+    WarmupDurationInvalid,
+    /// load profile may contain at most one warmup phase
+    MultipleWarmups,
+    /// warmup phase must be the first phase in the profile
+    WarmupNotFirst,
     /// dedicated load runtime is not implemented yet (use LoadRuntime::Shared)
     UnsupportedRuntime,
     /// load phase is not implemented in this milestone: {description}
@@ -541,6 +578,63 @@ mod tests {
             vu_ramp_zero,
             LoadError::InvalidVuRamp { from: 0, to: 5 }
         ));
+    }
+
+    #[test]
+    fn warmup_first_then_constant_builds() {
+        let profile = LoadProfile::open_model()
+            .phase(Phase::warmup(Duration::from_secs(2), Rate::per_second(10.0)).named("warm"))
+            .phase(Phase::constant(
+                Duration::from_secs(1),
+                Rate::per_second(5.0),
+            ))
+            .build()
+            .expect("valid profile with warmup");
+
+        assert!(matches!(profile.phases()[0].phase, Phase::Warmup { .. }));
+        assert_eq!(profile.phases()[0].name.as_deref(), Some("warm"));
+        assert!(matches!(profile.phases()[1].phase, Phase::Constant { .. }));
+    }
+
+    #[test]
+    fn build_rejects_warmup_not_first() {
+        let error = LoadProfile::open_model()
+            .phase(Phase::constant(
+                Duration::from_secs(1),
+                Rate::per_second(1.0),
+            ))
+            .phase(Phase::warmup(Duration::from_secs(1), Rate::per_second(1.0)))
+            .build()
+            .expect_err("warmup must be first");
+        assert!(matches!(error, LoadError::WarmupNotFirst));
+    }
+
+    #[test]
+    fn build_rejects_multiple_warmups() {
+        let error = LoadProfile::open_model()
+            .phase(Phase::warmup(Duration::from_secs(1), Rate::per_second(1.0)))
+            .phase(Phase::warmup(Duration::from_secs(1), Rate::per_second(1.0)))
+            .build()
+            .expect_err("at most one warmup");
+        assert!(matches!(error, LoadError::MultipleWarmups));
+    }
+
+    #[test]
+    fn warmup_zero_duration_invalid() {
+        let error = LoadProfile::open_model()
+            .phase(Phase::warmup(Duration::ZERO, Rate::per_second(1.0)))
+            .build()
+            .expect_err("warmup duration must be positive");
+        assert!(matches!(error, LoadError::WarmupDurationInvalid));
+    }
+
+    #[test]
+    fn warmup_invalid_rate_rejected() {
+        let error = LoadProfile::open_model()
+            .phase(Phase::warmup(Duration::from_secs(1), Rate::per_second(0.0)))
+            .build()
+            .expect_err("invalid rate");
+        assert!(matches!(error, LoadError::InvalidRate { rate } if rate == 0.0));
     }
 
     #[test]
