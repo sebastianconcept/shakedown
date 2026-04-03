@@ -2,10 +2,13 @@
 //!
 //! Mock services act as controllable stand-ins for downstream HTTP or gRPC services. Each mock
 //! service runs as a local server, gets its URL injected into service containers via
-//! [`EnvMapping`](crate::service::EnvMapping), and records all calls for post-scenario assertions.
+//! [`EnvMapping`](crate::service::EnvMapping), answers requests with the behavior you register for
+//! that scenario (declarative routes or custom handlers), and records all calls for post-scenario
+//! assertions.
 //!
 //! Use [`HttpMockService`] / [`GrpcMockService`] for quick predefined responses, or implement
-//! [`HttpMockServiceTrait`] / [`GrpcMockServiceTrait`] for dynamic behavior.
+//! [`HttpMockServiceTrait`] / [`GrpcMockServiceTrait`] when you need per-request logic (state,
+//! branching on the request, and similar custom behavior).
 //!
 //! Enabled with the **`mock-services`** feature (default). Add **`grpc-mock-services`** for gRPC
 //! support (`tonic` + `prost`).

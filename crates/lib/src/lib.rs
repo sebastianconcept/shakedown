@@ -10,7 +10,7 @@
 //! - **Scenario orchestration** — lifecycle phases: provision → readiness → seed → run → assert → teardown
 //! - **Resource providers** — traits for integrating databases, message queues, and other infrastructure
 //! - **Error classification** — structured errors distinguishing scenario vs infrastructure failures
-//! - **Event logging hooks** — structured event collection for failure timelines
+//! - **Instrumentation** — structured events, failure timelines, and optional Docker diagnostics ([`instrumentation`])
 //!
 //! ## Async Resource Trait (D-6)
 //!
@@ -96,14 +96,13 @@
 
 mod docker_labels;
 
-/// HTTP helpers for Elasticsearch/OpenSearch (reqwest; `elasticsearch` / `opensearch` features).
-#[cfg(any(feature = "elasticsearch", feature = "opensearch"))]
-pub(crate) mod search_operations;
-
 /// Cluster topology — Docker networks and node control (`cluster` feature; US-001+).
 #[cfg(feature = "cluster")]
 pub mod cluster;
-/// Docker Engine diagnostics (bollard) when a Docker-backed resource or `services` is enabled.
+/// Events, timelines, and Docker-backed diagnostics — see submodule docs on [`instrumentation`].
+pub mod instrumentation;
+
+// Stable crate-root paths (`shakedown::event`, `shakedown::timeline`, `shakedown::diagnostics`).
 #[cfg(any(
     feature = "kafka",
     feature = "rabbitmq",
@@ -124,21 +123,23 @@ pub mod cluster;
     feature = "timescaledb",
     feature = "services",
 ))]
-pub mod diagnostics;
+#[doc(inline)]
+pub use instrumentation::diagnostics;
+#[doc(inline)]
+pub use instrumentation::event;
+#[doc(inline)]
+pub use instrumentation::timeline;
+
+/// Outbox row / publication / payload errors ([`ShakedownError::Outbox`](crate::error::ShakedownError::Outbox)).
+#[path = "outbox/error.rs"]
+mod outbox_error;
+pub use outbox_error::OutboxError;
 /// Structured errors: scenario vs infrastructure vs internal framework failures.
 pub mod error;
-/// Structured events and in-memory logs for timelines and diagnostics.
-pub mod event;
 /// Toxiproxy fault-injection control API (`fault-injection` feature).
 #[cfg(feature = "fault-injection")]
 pub mod fault_injection;
-/// Typed helpers on [`lifecycle::Context`] for Kafka, RabbitMQ, and relational resources (feature-gated submodules).
-pub mod helpers;
-#[cfg(feature = "kafka-cluster")]
-mod kafka_cluster_cluster_control;
-/// Multi-broker KRaft Kafka cluster (`kafka` + `cluster`; US-010+).
-#[cfg(feature = "kafka-cluster")]
-mod kafka_cluster_resource;
+mod helper_prelude;
 /// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
 /// Open-model load profiles (`load` feature; US-006+).
@@ -147,13 +148,6 @@ pub mod load;
 /// Service mock service types and traits (`mock-services` feature, default).
 #[cfg(feature = "mock-services")]
 pub mod mock_service;
-/// MongoDB replica set resource (`mongodb` + `cluster`; US-003+).
-#[cfg(feature = "mongodb-cluster")]
-mod mongo_replica_set_cluster_control;
-#[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
-mod mongo_replica_set_inter_node;
-#[cfg(feature = "mongodb-cluster")]
-mod mongo_replica_set_resource;
 /// Outbox table setup and assertions (`outbox` + at least one storage engine feature).
 #[cfg(all(
     feature = "outbox",
@@ -167,35 +161,16 @@ mod mongo_replica_set_resource;
     )
 ))]
 pub mod outbox;
-/// Lifecycle phase labels (shared with infrastructure event records).
-pub mod phase;
-#[cfg(feature = "postgres-cluster")]
-mod postgres_replica_set_cluster_control;
-/// PostgreSQL primary + streaming replica per scenario (`postgres` + `cluster`; US-014+).
-#[cfg(feature = "postgres-cluster")]
-mod postgres_replica_set_resource;
 /// Publication observation spec and [`publication::PublicationVerifier`] (`outbox` feature).
 ///
 /// Does not require `kafka` or `rabbitmq`; transport implementations are added by those features.
 #[cfg(feature = "outbox")]
 pub mod publication;
-#[cfg(feature = "rabbitmq-cluster")]
-mod rabbit_cluster_cluster_control;
-/// RabbitMQ Erlang cluster on a suite bridge (`rabbit` + `cluster`; US-016).
-#[cfg(feature = "rabbitmq-cluster")]
-mod rabbit_cluster_resource;
-#[cfg(feature = "redis-sentinel")]
-mod redis_sentinel_cluster_control;
-/// Redis replication + Sentinel (`redis` + `cluster`; US-012+).
-#[cfg(feature = "redis-sentinel")]
-mod redis_sentinel_resource;
 /// [`resources::Resource`] implementations, registration, and Kafka bindings.
 pub mod resources;
 /// Service-under-test Docker containers and bindings (`services` feature).
 #[cfg(feature = "services")]
 pub mod service;
-/// Failure timeline rendering (terminal) for [`EventLog`].
-pub mod timeline;
 
 #[doc(inline)]
 pub use crate::error::{
@@ -208,9 +183,9 @@ pub use crate::event::{
 };
 /// Public types and functions from the lifecycle module.
 pub use crate::lifecycle::{
-    run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, ScenarioKind,
+    run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, Phase,
+    ScenarioKind,
 };
-pub use crate::phase::Phase;
 
 #[cfg(feature = "mock-services")]
 pub use crate::mock_service::{
@@ -354,7 +329,7 @@ pub use crate::resources::PostgresBindings;
 pub use crate::resources::PostgresResource;
 
 #[cfg(feature = "postgres-cluster")]
-pub use crate::postgres_replica_set_resource::PostgresReplicaSetResource;
+pub use crate::cluster::postgres_replica_set::resource::PostgresReplicaSetResource;
 
 #[cfg(feature = "timescaledb")]
 pub use crate::resources::TimescaledbResource;
@@ -371,42 +346,42 @@ pub use crate::resources::{sqlite_named_memory_uri, SqliteBindings, SqliteResour
 #[cfg(feature = "duckdb")]
 pub use crate::resources::{duckdb_named_memory_database_path, DuckDbBindings, DuckDbResource};
 
-pub use crate::helpers::ConsumedMessage;
+pub use crate::helper_prelude::{ConsumedMessage, DEFAULT_HELPER_CONSUME_TIMEOUT};
 #[cfg(feature = "duckdb")]
-pub use crate::helpers::DuckDbHelpers;
+pub use crate::resources::duckdb::DuckDbHelpers;
 #[cfg(feature = "elasticsearch")]
-pub use crate::helpers::ElasticsearchHelpers;
-#[cfg(feature = "kafka")]
-pub use crate::helpers::KafkaHelpers;
-#[cfg(feature = "mariadb")]
-pub use crate::helpers::MariaDbHelpers;
-#[cfg(feature = "mongodb")]
-pub use crate::helpers::MongoHelpers;
-#[cfg(feature = "mysql")]
-pub use crate::helpers::MysqlHelpers;
-#[cfg(feature = "nats")]
-pub use crate::helpers::NatsHelpers;
-#[cfg(feature = "neo4j")]
-pub use crate::helpers::Neo4jHelpers;
-#[cfg(feature = "opensearch")]
-pub use crate::helpers::OpenSearchHelpers;
-#[cfg(feature = "postgres")]
-pub use crate::helpers::PostgresHelpers;
-#[cfg(feature = "qdrant")]
-pub use crate::helpers::QdrantHelpers;
-#[cfg(any(feature = "redis", feature = "valkey"))]
-pub use crate::helpers::RedisHelpers;
-#[cfg(feature = "sqlite")]
-pub use crate::helpers::SqliteHelpers;
-#[cfg(feature = "weaviate")]
-pub use crate::helpers::WeaviateHelpers;
-#[cfg(feature = "rabbitmq")]
-pub use crate::helpers::{ExchangeKind, RabbitHelpers};
+pub use crate::resources::elasticsearch::ElasticsearchHelpers;
 #[cfg(feature = "influxdb")]
-pub use crate::helpers::{InfluxDbHelpers, InfluxFieldValue};
+pub use crate::resources::influxdb::{InfluxDbHelpers, InfluxFieldValue};
+#[cfg(feature = "kafka")]
+pub use crate::resources::kafka::KafkaHelpers;
+#[cfg(feature = "mariadb")]
+pub use crate::resources::mariadb::MariaDbHelpers;
+#[cfg(feature = "mongodb")]
+pub use crate::resources::mongo::MongoHelpers;
+#[cfg(feature = "mysql")]
+pub use crate::resources::mysql::MysqlHelpers;
+#[cfg(feature = "nats")]
+pub use crate::resources::nats::NatsHelpers;
+#[cfg(feature = "neo4j")]
+pub use crate::resources::neo4j::Neo4jHelpers;
+#[cfg(feature = "opensearch")]
+pub use crate::resources::opensearch::OpenSearchHelpers;
+#[cfg(feature = "postgres")]
+pub use crate::resources::postgres::PostgresHelpers;
+#[cfg(feature = "qdrant")]
+pub use crate::resources::qdrant::QdrantHelpers;
+#[cfg(feature = "rabbitmq")]
+pub use crate::resources::rabbit::{ExchangeKind, RabbitHelpers};
+#[cfg(any(feature = "redis", feature = "valkey"))]
+pub use crate::resources::redis::RedisHelpers;
+#[cfg(feature = "sqlite")]
+pub use crate::resources::sqlite::SqliteHelpers;
+#[cfg(feature = "weaviate")]
+pub use crate::resources::weaviate::WeaviateHelpers;
 
 #[cfg(feature = "timescaledb")]
-pub use crate::helpers::TimescaledbHelpers;
+pub use crate::resources::timescaledb::TimescaledbHelpers;
 #[cfg(feature = "kafka")]
 pub use crate::resources::KafkaResource;
 
@@ -438,13 +413,13 @@ pub use crate::resources::RedisResource;
 pub use crate::resources::ValkeyResource;
 
 #[cfg(feature = "kafka-cluster")]
-pub use crate::kafka_cluster_resource::KafkaClusterResource;
+pub use crate::cluster::kafka_cluster::resource::KafkaClusterResource;
 #[cfg(feature = "mongodb-cluster")]
-pub use crate::mongo_replica_set_resource::MongoReplicaSetResource;
+pub use crate::cluster::mongo_replica_set::resource::MongoReplicaSetResource;
 #[cfg(feature = "rabbitmq-cluster")]
-pub use crate::rabbit_cluster_resource::RabbitClusterResource;
+pub use crate::cluster::rabbit_cluster::resource::RabbitClusterResource;
 #[cfg(feature = "redis-sentinel")]
-pub use crate::redis_sentinel_resource::RedisSentinelResource;
+pub use crate::cluster::redis_sentinel::resource::RedisSentinelResource;
 #[cfg(feature = "redis-sentinel")]
 pub use crate::resources::RedisSentinelBindings;
 #[cfg(feature = "mongodb")]

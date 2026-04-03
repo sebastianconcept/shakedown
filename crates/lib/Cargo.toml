@@ -557,6 +557,12 @@ name = "outbox_mongo"
 path = "tests/outbox_mongo.rs"
 required-features = ["outbox", "mongodb"]
 
+# DuckDB outbox DDL + state assertions (in-process, no Docker)
+[[test]]
+name = "outbox_duckdb"
+path = "tests/outbox_duckdb.rs"
+required-features = ["outbox", "duckdb"]
+
 # NATS suite + bindings (Docker); ignored unless --ignored
 [[test]]
 name = "nats_vertical"

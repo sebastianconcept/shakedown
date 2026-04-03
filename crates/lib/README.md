@@ -31,7 +31,7 @@ shakedown/
 
 | MVP milestone | Status |
 |---------------|--------|
-| `mvp-typed-helpers` | ✅ **Complete** (2026-03-29) — typed helpers on [`Context`](src/lifecycle/mod.rs) ([`KafkaHelpers`](src/helpers/kafka.rs), [`RabbitHelpers`](src/helpers/rabbit.rs), relational [`PostgresHelpers`](src/helpers/postgres.rs) / [`MariaDbHelpers`](src/helpers/mariadb.rs) / [`MysqlHelpers`](src/helpers/mysql.rs) / [`SqliteHelpers`](src/helpers/sqlite.rs)); see [Typed helpers](#typed-helpers) |
+| `mvp-typed-helpers` | ✅ **Complete** (2026-03-29) — typed helpers on [`Context`](src/lifecycle/mod.rs) ([`KafkaHelpers`](src/resources/kafka/helpers.rs), [`RabbitHelpers`](src/resources/rabbit/helpers.rs), relational [`PostgresHelpers`](src/resources/postgres/helpers.rs) / [`MariaDbHelpers`](src/resources/mariadb/helpers.rs) / [`MysqlHelpers`](src/resources/mysql/helpers.rs) / [`SqliteHelpers`](src/resources/sqlite/helpers.rs)); see [Typed helpers](#typed-helpers) |
 | `extra-infra` | ✅ **Complete** (2026-03-31) — twelve additional first-party resources (Redis, Valkey, MongoDB, NATS, Neo4j, DuckDB, Elasticsearch, OpenSearch, Qdrant, Weaviate, InfluxDB, TimescaleDB); see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) |
 | `mvp-examples` | **Next** — living `crates/examples` catalog ( **`MVP.md`** row 9 in adopted docs under `~/docs/shakedown/`) |
 
@@ -52,18 +52,18 @@ The following **Cargo features** add first-party [`Resource`](src/resources.rs) 
 
 | Feature | What it enables |
 |---------|-----------------|
-| `redis` | Suite-shared **Redis** (`redis:7`), RESP client, key-prefix isolation, [`RedisHelpers`](src/helpers/redis.rs) (`ctx.redis()`). |
+| `redis` | Suite-shared **Redis** (`redis:7`), RESP client, key-prefix isolation, [`RedisHelpers`](src/resources/redis/helpers.rs) (`ctx.redis()`). |
 | `valkey` | Same public types as Redis against **Valkey** (`valkey/valkey:8`); still `ctx.redis()`. |
-| `mongodb` | **MongoDB** `mongod`, per-scenario database, [`MongoHelpers`](src/helpers/mongo.rs). |
-| `nats` | **NATS** core pub/sub (not JetStream), subject-prefix isolation, [`NatsHelpers`](src/helpers/nats.rs). |
-| `neo4j` | **Neo4j 5.x** Bolt (Enterprise image default for multi-database isolation), [`Neo4jHelpers`](src/helpers/neo4j.rs). |
-| `duckdb` | **DuckDB** in-process (no Docker), named in-memory DB per scenario, [`DuckDbHelpers`](src/helpers/duckdb.rs). |
-| `elasticsearch` | **Elasticsearch 8** single-node, index-prefix isolation, [`ElasticsearchHelpers`](src/helpers/elasticsearch.rs); builds shared HTTP [`search_operations`](src/search_operations.rs). |
-| `opensearch` | **OpenSearch 2** single-node, same helper shape as ES with separate types, [`OpenSearchHelpers`](src/helpers/opensearch.rs). |
-| `qdrant` | **Qdrant** vector store, collection-prefix isolation, gRPC helpers [`QdrantHelpers`](src/helpers/qdrant.rs). |
-| `weaviate` | **Weaviate** REST API, class-prefix isolation, [`WeaviateHelpers`](src/helpers/weaviate.rs). |
-| `influxdb` | **InfluxDB 2.x** HTTP (line protocol + Flux), per-scenario bucket, [`InfluxDbHelpers`](src/helpers/influxdb.rs). |
-| `timescaledb` | **TimescaleDB** on Postgres wire protocol, [`PostgresBindings`](src/resources.rs)-shaped URLs, [`TimescaledbHelpers`](src/helpers/timescaledb.rs) (includes `assert_hypertable_exists`). |
+| `mongodb` | **MongoDB** `mongod`, per-scenario database, [`MongoHelpers`](src/resources/mongo/helpers.rs). |
+| `nats` | **NATS** core pub/sub (not JetStream), subject-prefix isolation, [`NatsHelpers`](src/resources/nats/helpers.rs). |
+| `neo4j` | **Neo4j 5.x** Bolt (Enterprise image default for multi-database isolation), [`Neo4jHelpers`](src/resources/neo4j/helpers.rs). |
+| `duckdb` | **DuckDB** in-process (no Docker), named in-memory DB per scenario, [`DuckDbHelpers`](src/resources/duckdb/helpers.rs). |
+| `elasticsearch` | **Elasticsearch 8** single-node, index-prefix isolation, [`ElasticsearchHelpers`](src/resources/elasticsearch/helpers.rs); builds shared HTTP [`search_operations`](src/resources/search_operations.rs). |
+| `opensearch` | **OpenSearch 2** single-node, same helper shape as ES with separate types, [`OpenSearchHelpers`](src/resources/opensearch/helpers.rs). |
+| `qdrant` | **Qdrant** vector store, collection-prefix isolation, gRPC helpers [`QdrantHelpers`](src/resources/qdrant/helpers.rs). |
+| `weaviate` | **Weaviate** REST API, class-prefix isolation, [`WeaviateHelpers`](src/resources/weaviate/helpers.rs). |
+| `influxdb` | **InfluxDB 2.x** HTTP (line protocol + Flux), per-scenario bucket, [`InfluxDbHelpers`](src/resources/influxdb/helpers.rs). |
+| `timescaledb` | **TimescaleDB** on Postgres wire protocol, [`PostgresBindings`](src/resources.rs)-shaped URLs, [`TimescaledbHelpers`](src/resources/timescaledb/helpers.rs) (includes `assert_hypertable_exists`). |
 
 ### Docker vs in-process
 
@@ -318,50 +318,50 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 
 **Redis (`redis` feature, `testcontainers-modules::redis`, default tag `7`):**
 
-- [`RedisResource`](src/resources.rs) uses a **suite-level** broker: first provision starts one container; refcounted teardown removes it when the last scenario ends. Each scenario gets a [`sanitize_redis_key_prefix`](src/resources.rs) (`shakedown:<scenario>:`) applied by [`RedisHelpers`](src/helpers/redis.rs) and removed with **SCAN + DEL** on teardown.
+- [`RedisResource`](src/resources.rs) uses a **suite-level** broker: first provision starts one container; refcounted teardown removes it when the last scenario ends. Each scenario gets a [`sanitize_redis_key_prefix`](src/resources.rs) (`shakedown:<scenario>:`) applied by [`RedisHelpers`](src/resources/redis/helpers.rs) and removed with **SCAN + DEL** on teardown.
 - **Image tag:** [`RedisResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_REDIS_IMAGE_TAG` via [`RedisResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`7`** (`redis:7`).
 - [`RedisBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: redis` in handle metadata). Use [`Context::redis()`](src/lifecycle/mod.rs) for helpers.
 
 **Valkey (`valkey` feature, `testcontainers-modules::valkey`, default tag `8`):**
 
-- [`ValkeyResource`](src/resources.rs) mirrors Redis: same suite/refcount model, same [`RedisBindings`](src/resources.rs) and [`RedisHelpers`](src/helpers/redis.rs) (`ctx.redis()`), handle metadata `engine: valkey`.
+- [`ValkeyResource`](src/resources.rs) mirrors Redis: same suite/refcount model, same [`RedisBindings`](src/resources.rs) and [`RedisHelpers`](src/resources/redis/helpers.rs) (`ctx.redis()`), handle metadata `engine: valkey`.
 - **Image tag:** [`ValkeyResource::with_image_tag`](src/resources.rs), or `SHAKEDOWN_VALKEY_IMAGE_TAG` via [`ValkeyResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`8`** (`valkey/valkey:8`).
 
 **MongoDB (`mongodb` feature, `testcontainers-modules::mongo`, default tag `7`):**
 
 - [`MongoResource`](src/resources.rs) uses a **suite-level** `mongod`: first provision starts one container; refcounted teardown **drops** the scenario database and removes the container when the last scenario ends. Isolation is a **per-scenario database** name derived from the scenario id (`sanitize_sql_database_name` → `shakedown_*`). Provision materializes the database with a sentinel insert into `_shakedown_init`.
 - **Image tag:** [`MongoResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_MONGO_IMAGE_TAG`** via [`MongoResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`7`** (`mongo:7`). The suite container sets **`MONGO_INITDB_ROOT_USERNAME`/`PASSWORD`** to fixed test credentials (`root` / `root`); connection URIs include **`authSource=admin`**.
-- [`MongoBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: mongodb` in handle metadata). Use [`Context::mongo()`](src/lifecycle/mod.rs) for [`MongoHelpers`](src/helpers/mongo.rs) (`insert_document`, `find_documents`, assertions).
+- [`MongoBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: mongodb` in handle metadata). Use [`Context::mongo()`](src/lifecycle/mod.rs) for [`MongoHelpers`](src/resources/mongo/helpers.rs) (`insert_document`, `find_documents`, assertions).
 
 **Neo4j (`neo4j` feature, `testcontainers-modules::neo4j`, default tag `5-enterprise`):**
 
 - **Enterprise default:** Per-scenario isolation uses **`CREATE DATABASE`** against the system catalog (Neo4j 5 **Enterprise**). The container sets **`NEO4J_ACCEPT_LICENSE_AGREEMENT=yes`** and **`NEO4J_AUTH=neo4j/shakedown`** (fixed test credentials).
 - **Image tag:** [`Neo4jResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_NEO4J_IMAGE_TAG`**. Community Edition does **not** support multiple databases — provisioning will fail unless you stay on Enterprise (or accept a non-isolated single-DB setup outside this resource’s contract).
-- [`Neo4jBindings`](src/resources.rs) (`bolt_url`, `http_url`, `database`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::neo4j()`](src/lifecycle/mod.rs) for [`Neo4jHelpers`](src/helpers/neo4j.rs): `execute_cypher`, `query_cypher`, `assert_node_exists`, `assert_relationship_exists`. Readiness runs **`RETURN 1`** on the **`system`** database over Bolt.
+- [`Neo4jBindings`](src/resources.rs) (`bolt_url`, `http_url`, `database`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::neo4j()`](src/lifecycle/mod.rs) for [`Neo4jHelpers`](src/resources/neo4j/helpers.rs): `execute_cypher`, `query_cypher`, `assert_node_exists`, `assert_relationship_exists`. Readiness runs **`RETURN 1`** on the **`system`** database over Bolt.
 
 **NATS (`nats` feature, `testcontainers-modules::nats`, default tag `2`):**
 
-- [`NatsResource`](src/resources.rs) uses a **suite-level** broker: first provision starts one container; refcounted teardown removes it when the last scenario ends. Each scenario gets a [`sanitize_nats_subject_prefix`](src/resources.rs) (`shakedown.<scenario>.`) applied by [`NatsHelpers`](src/helpers/nats.rs) to logical subjects. Core **pub/sub only** — JetStream is not enabled on the default server command.
+- [`NatsResource`](src/resources.rs) uses a **suite-level** broker: first provision starts one container; refcounted teardown removes it when the last scenario ends. Each scenario gets a [`sanitize_nats_subject_prefix`](src/resources.rs) (`shakedown.<scenario>.`) applied by [`NatsHelpers`](src/resources/nats/helpers.rs) to logical subjects. Core **pub/sub only** — JetStream is not enabled on the default server command.
 - **Image tag:** [`NatsResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_NATS_IMAGE_TAG`** via [`NatsResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`2`** (`nats:2`).
-- [`NatsBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: nats` in handle metadata). Use [`Context::nats()`](src/lifecycle/mod.rs) for [`NatsHelpers`](src/helpers/nats.rs) (`publish`, `subscribe_until` → [`ConsumedMessage`](src/helpers/mod.rs) list). Readiness uses **`async_nats`** connect + **`flush`** (client handshake to the broker).
+- [`NatsBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: nats` in handle metadata). Use [`Context::nats()`](src/lifecycle/mod.rs) for [`NatsHelpers`](src/resources/nats/helpers.rs) (`publish`, `subscribe_until` → [`ConsumedMessage`](src/helper_prelude.rs) list). Readiness uses **`async_nats`** connect + **`flush`** (client handshake to the broker).
 
 **Weaviate (`weaviate` feature, `semitechnologies/weaviate` via `GenericImage`, default tag `1.28.2` — aligned with `testcontainers-modules::weaviate`):**
 
 - [`WeaviateResource`](src/resources.rs) uses a **suite-level** node: first provision starts one container; refcounted teardown deletes schema classes matching the scenario class prefix, then may remove the container. A short container wait plus lifecycle **`GET /v1/.well-known/ready`** avoids flaky HTTP wait strategies on slow hosts. **`AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true`** is set for local tests.
 - **Image tag:** [`WeaviateResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_WEAVIATE_IMAGE_TAG`** via [`WeaviateResource::with_image_tag_from_env`](src/resources.rs).
-- [`WeaviateBindings`](src/resources.rs) (`rest_url`, `class_prefix`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::weaviate()`](src/lifecycle/mod.rs) for [`WeaviateHelpers`](src/helpers/weaviate.rs) (`create_class`, `create_object`, `get_object`, assertions). Readiness uses **`GET /v1/.well-known/ready`**.
+- [`WeaviateBindings`](src/resources.rs) (`rest_url`, `class_prefix`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::weaviate()`](src/lifecycle/mod.rs) for [`WeaviateHelpers`](src/resources/weaviate/helpers.rs) (`create_class`, `create_object`, `get_object`, assertions). Readiness uses **`GET /v1/.well-known/ready`**.
 
 **InfluxDB 2.x (`influxdb` feature, `influxdb:2` via `GenericImage`):**
 
 - [`InfluxDbResource`](src/resources.rs) uses a **suite-level** node: first provision starts one container with **`DOCKER_INFLUXDB_INIT_MODE=setup`**, fixed org **`shakedown`**, and admin token **`shakedown-admin-token`**; each scenario gets a **per-scenario bucket** via **`POST /api/v2/buckets`**; refcounted teardown **`DELETE`s** that bucket, then may remove the container. Helpers use **`reqwest`** only (no `influxdb2` client crate — OQ-6.1).
 - **Image tag:** [`InfluxDbResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_INFLUXDB_IMAGE_TAG`** via [`InfluxDbResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`2`** (`influxdb:2`).
-- [`InfluxDbBindings`](src/resources.rs) (`url`, `token`, `organization`, `bucket`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::influxdb()`](src/lifecycle/mod.rs) for [`InfluxDbHelpers`](src/helpers/influxdb.rs) (`write_point`, `query`, `assert_point_exists`). Readiness uses **`GET /health`** with JSON **`status: pass`**.
+- [`InfluxDbBindings`](src/resources.rs) (`url`, `token`, `organization`, `bucket`, …) on [`Context`](src/lifecycle/mod.rs). Use [`Context::influxdb()`](src/lifecycle/mod.rs) for [`InfluxDbHelpers`](src/resources/influxdb/helpers.rs) (`write_point`, `query`, `assert_point_exists`). Readiness uses **`GET /health`** with JSON **`status: pass`**.
 
 **TimescaleDB (`timescaledb` feature, `timescale/timescaledb:latest-pg16` via `GenericImage`):**
 
 - [`TimescaledbResource`](src/resources.rs) uses a **suite-level** Postgres-compatible server: first provision starts one container (`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` = **`postgres`**); each scenario gets **`CREATE DATABASE`** isolation like [`PostgresResource`](src/resources.rs); refcounted teardown drops the database and may remove the container. Bindings reuse **[`PostgresBindings`](src/resources.rs)** on [`Context::timescaledb_bindings`](src/lifecycle/mod.rs) (distinct from vanilla Postgres when both are registered).
 - **Image tag:** [`TimescaledbResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_TIMESCALEDB_IMAGE_TAG`** via [`TimescaledbResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`latest-pg16`** (`timescale/timescaledb:latest-pg16`).
-- Use [`Context::timescaledb()`](src/lifecycle/mod.rs) for [`TimescaledbHelpers`](src/helpers/timescaledb.rs): delegates SQL helpers to the same path as [`PostgresHelpers`](src/helpers/postgres.rs) and adds **`assert_hypertable_exists`**. Readiness uses **`SELECT 1`** via **`tokio-postgres`**.
+- Use [`Context::timescaledb()`](src/lifecycle/mod.rs) for [`TimescaledbHelpers`](src/resources/timescaledb/helpers.rs): delegates SQL helpers to the same path as [`PostgresHelpers`](src/resources/postgres/helpers.rs) and adds **`assert_hypertable_exists`**. Readiness uses **`SELECT 1`** via **`tokio-postgres`**.
 
 **Service injection:** with the **`services`** feature, [`EnvMapping::redis`](src/service/types.rs) and convention injection default to **`REDIS_URL`** for [`RedisBindings::connection_url`](src/resources.rs) (shared name for Redis and Valkey). [`EnvMapping::mongo`](src/service/types.rs) and convention injection default to **`MONGODB_URI`** for [`MongoBindings::connection_url`](src/resources.rs) (per-service URL partitioning matches relational DBs when multiple services are registered). [`EnvMapping::nats`](src/service/types.rs) and convention injection default to **`NATS_URL`** for [`NatsBindings::connection_url`](src/resources.rs). [`EnvMapping::neo4j`](src/service/types.rs) and convention injection default to **`NEO4J_URI`** for [`Neo4jBindings::bolt_url`](src/resources.rs). [`EnvMapping::weaviate`](src/service/types.rs) and convention injection default to **`WEAVIATE_URL`** for [`WeaviateBindings::rest_url`](src/resources.rs). [`EnvMapping::influxdb`](src/service/types.rs) and convention injection default to **`INFLUXDB_URL`** for [`InfluxDbBindings::url`](src/resources.rs); **`INFLUXDB_TOKEN`**, **`INFLUXDB_ORG`**, and **`INFLUXDB_BUCKET`** are also set for Influx 2.x clients. [`EnvMapping::timescaledb`](src/service/types.rs) and convention injection default to **`TIMESCALEDB_URL`** (distinct from Postgres **`DATABASE_URL`**).
 
@@ -421,7 +421,7 @@ There are **three patterns**; pick based on what you are proving:
 
 **When to use this:** You want the **happy path** for scenario steps: produce or consume messages with isolation baked in, or run SQL assertions against the scenario-scoped database without hand-rolling connection URLs. Helpers use the **same effective bindings** as raw accessors (including Toxiproxy-rewritten Kafka bootstrap when fault injection is active — see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
 
-Entry points: `ctx.kafka()` ([`KafkaHelpers`](src/helpers/kafka.rs)), `ctx.rabbit()` ([`RabbitHelpers`](src/helpers/rabbit.rs)), `ctx.postgres()` ([`PostgresHelpers`](src/helpers/postgres.rs)), `ctx.mariadb()` / `ctx.mysql()` / `ctx.sqlite()` ([`MariaDbHelpers`](src/helpers/mariadb.rs), [`MysqlHelpers`](src/helpers/mysql.rs), [`SqliteHelpers`](src/helpers/sqlite.rs)), `ctx.redis()` ([`RedisHelpers`](src/helpers/redis.rs)), `ctx.mongo()` ([`MongoHelpers`](src/helpers/mongo.rs)), `ctx.nats()` / `ctx.neo4j()` / `ctx.duckdb()` / `ctx.elasticsearch()` / `ctx.opensearch()` / `ctx.qdrant()` / `ctx.weaviate()` / `ctx.influxdb()` / `ctx.timescaledb()` — see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) and the [feature flags table](#feature-flags-helpers) below.
+Entry points: `ctx.kafka()` ([`KafkaHelpers`](src/resources/kafka/helpers.rs)), `ctx.rabbit()` ([`RabbitHelpers`](src/resources/rabbit/helpers.rs)), `ctx.postgres()` ([`PostgresHelpers`](src/resources/postgres/helpers.rs)), `ctx.mariadb()` / `ctx.mysql()` / `ctx.sqlite()` ([`MariaDbHelpers`](src/resources/mariadb/helpers.rs), [`MysqlHelpers`](src/resources/mysql/helpers.rs), [`SqliteHelpers`](src/resources/sqlite/helpers.rs)), `ctx.redis()` ([`RedisHelpers`](src/resources/redis/helpers.rs)), `ctx.mongo()` ([`MongoHelpers`](src/resources/mongo/helpers.rs)), `ctx.nats()` / `ctx.neo4j()` / `ctx.duckdb()` / `ctx.elasticsearch()` / `ctx.opensearch()` / `ctx.qdrant()` / `ctx.weaviate()` / `ctx.influxdb()` / `ctx.timescaledb()` — see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) and the [feature flags table](#feature-flags-helpers) below.
 
 ### Pattern 3: outbox rows + publication verifiers
 
@@ -433,24 +433,24 @@ Helpers are gated behind the **same** resource features as the underlying provid
 
 | Surface | Cargo feature | Module / types |
 |---------|----------------|------------------|
-| `ctx.kafka()` → [`KafkaHelpers`](src/helpers/kafka.rs) | `kafka` | `rdkafka` |
-| `ctx.rabbit()` → [`RabbitHelpers`](src/helpers/rabbit.rs), [`ExchangeKind`](src/helpers/rabbit.rs) | `rabbitmq` | `lapin` |
-| `ctx.postgres()` → [`PostgresHelpers`](src/helpers/postgres.rs) | `postgres` | `tokio-postgres` |
-| `ctx.mariadb()` → [`MariaDbHelpers`](src/helpers/mariadb.rs) | `mariadb` | `mysql_async` |
-| `ctx.mysql()` → [`MysqlHelpers`](src/helpers/mysql.rs) | `mysql` | `mysql_async` |
-| `ctx.sqlite()` → [`SqliteHelpers`](src/helpers/sqlite.rs) | `sqlite` | `rusqlite` (via `spawn_blocking` inside helpers) |
-| `ctx.redis()` → [`RedisHelpers`](src/helpers/redis.rs) | `redis` or `valkey` | `redis` crate (RESP) |
-| `ctx.mongo()` → [`MongoHelpers`](src/helpers/mongo.rs) | `mongodb` | `mongodb` official driver |
-| `ctx.nats()` → [`NatsHelpers`](src/helpers/nats.rs) | `nats` | `async-nats` |
-| `ctx.neo4j()` → [`Neo4jHelpers`](src/helpers/neo4j.rs) | `neo4j` | `neo4rs` |
-| `ctx.elasticsearch()` → [`ElasticsearchHelpers`](src/helpers/elasticsearch.rs) | `elasticsearch` | `reqwest` (HTTP) |
-| `ctx.opensearch()` → [`OpenSearchHelpers`](src/helpers/opensearch.rs) | `opensearch` | `reqwest` (HTTP) |
-| `ctx.qdrant()` → [`QdrantHelpers`](src/helpers/qdrant.rs) | `qdrant` | `qdrant-client` (gRPC) |
-| `ctx.weaviate()` → [`WeaviateHelpers`](src/helpers/weaviate.rs) | `weaviate` | `reqwest` (REST) |
-| `ctx.influxdb()` → [`InfluxDbHelpers`](src/helpers/influxdb.rs) | `influxdb` | `reqwest` (HTTP line protocol + Flux) |
-| `ctx.timescaledb()` → [`TimescaledbHelpers`](src/helpers/timescaledb.rs) | `timescaledb` | `tokio-postgres` (same bindings shape as Postgres) |
+| `ctx.kafka()` → [`KafkaHelpers`](src/resources/kafka/helpers.rs) | `kafka` | `rdkafka` |
+| `ctx.rabbit()` → [`RabbitHelpers`](src/resources/rabbit/helpers.rs), [`ExchangeKind`](src/resources/rabbit/helpers.rs) | `rabbitmq` | `lapin` |
+| `ctx.postgres()` → [`PostgresHelpers`](src/resources/postgres/helpers.rs) | `postgres` | `tokio-postgres` |
+| `ctx.mariadb()` → [`MariaDbHelpers`](src/resources/mariadb/helpers.rs) | `mariadb` | `mysql_async` |
+| `ctx.mysql()` → [`MysqlHelpers`](src/resources/mysql/helpers.rs) | `mysql` | `mysql_async` |
+| `ctx.sqlite()` → [`SqliteHelpers`](src/resources/sqlite/helpers.rs) | `sqlite` | `rusqlite` (via `spawn_blocking` inside helpers) |
+| `ctx.redis()` → [`RedisHelpers`](src/resources/redis/helpers.rs) | `redis` or `valkey` | `redis` crate (RESP) |
+| `ctx.mongo()` → [`MongoHelpers`](src/resources/mongo/helpers.rs) | `mongodb` | `mongodb` official driver |
+| `ctx.nats()` → [`NatsHelpers`](src/resources/nats/helpers.rs) | `nats` | `async-nats` |
+| `ctx.neo4j()` → [`Neo4jHelpers`](src/resources/neo4j/helpers.rs) | `neo4j` | `neo4rs` |
+| `ctx.elasticsearch()` → [`ElasticsearchHelpers`](src/resources/elasticsearch/helpers.rs) | `elasticsearch` | `reqwest` (HTTP) |
+| `ctx.opensearch()` → [`OpenSearchHelpers`](src/resources/opensearch/helpers.rs) | `opensearch` | `reqwest` (HTTP) |
+| `ctx.qdrant()` → [`QdrantHelpers`](src/resources/qdrant/helpers.rs) | `qdrant` | `qdrant-client` (gRPC) |
+| `ctx.weaviate()` → [`WeaviateHelpers`](src/resources/weaviate/helpers.rs) | `weaviate` | `reqwest` (REST) |
+| `ctx.influxdb()` → [`InfluxDbHelpers`](src/resources/influxdb/helpers.rs) | `influxdb` | `reqwest` (HTTP line protocol + Flux) |
+| `ctx.timescaledb()` → [`TimescaledbHelpers`](src/resources/timescaledb/helpers.rs) | `timescaledb` | `tokio-postgres` (same bindings shape as Postgres) |
 
-[`ConsumedMessage`](src/helpers/mod.rs) (key, payload, `source` namespaced topic, queue, or NATS subject) is re-exported from the crate root for Kafka, Rabbit, and NATS consume helpers.
+[`ConsumedMessage`](src/helper_prelude.rs) and [`DEFAULT_HELPER_CONSUME_TIMEOUT`](src/helper_prelude.rs) are re-exported from the crate root for Kafka, Rabbit, and NATS consume helpers.
 
 ### Example: Kafka (produce → consume)
 
@@ -479,7 +479,7 @@ Runnable Docker-backed coverage: [`tests/helpers_kafka.rs`](tests/helpers_kafka.
 
 ### Example: RabbitMQ (topology → publish → consume)
 
-Enable `rabbitmq`. Use [`declare_topology`](src/helpers/rabbit.rs) so exchange, queue, and bind are declared with scenario namespacing in one call.
+Enable `rabbitmq`. Use [`declare_topology`](src/resources/rabbit/helpers.rs) so exchange, queue, and bind are declared with scenario namespacing in one call.
 
 ```rust,ignore
 use shakedown::ExchangeKind;
@@ -507,7 +507,7 @@ Runnable Docker-backed coverage: [`tests/helpers_rabbit.rs`](tests/helpers_rabbi
 
 ### Example: Postgres (execute → assert)
 
-Enable `postgres`. Parameters use `tokio_postgres::types::ToSql` ([`PostgresHelpers`](src/helpers/postgres.rs)).
+Enable `postgres`. Parameters use `tokio_postgres::types::ToSql` ([`PostgresHelpers`](src/resources/postgres/helpers.rs)).
 
 ```rust,ignore
 #[shakedown::test(resources = [Postgres])]

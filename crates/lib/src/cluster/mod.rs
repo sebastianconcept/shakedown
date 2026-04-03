@@ -1,6 +1,10 @@
 //! Cluster topology support — shared Docker networks, node control, and engine-specific ops.
 //!
 //! Requires the **`cluster`** Cargo feature (pulls in [`bollard`] for Docker Engine API calls).
+//!
+//! **Layout:** each engine is a subdirectory (`kafka_cluster/`, `mongo_replica_set/`, …) with
+//! `resource` + `cluster_control` modules (and Mongo `inter_node` when `fault-injection` is on).
+//! The crate root re-exports resource types (`MongoReplicaSetResource`, …) for macros and ergonomics.
 
 pub mod network;
 

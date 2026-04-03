@@ -12,15 +12,16 @@ use lapin::options::{BasicAckOptions, BasicGetOptions, BasicNackOptions};
 use lapin::types::ShortString;
 use lapin::{Connection, ConnectionProperties};
 
-use crate::error::{InfrastructureError, ShakedownError};
+use crate::error::{IntoInfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
+use crate::OutboxError;
 
 use super::matching::message_matches_aggregate_id;
 use super::spec::PublicationObserveSpec;
 use super::PublicationVerifier;
 
 fn as_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> ShakedownError {
-    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
+    error.into_infrastructure_error().into()
 }
 
 /// Options for [`RabbitMqPublicationVerifier`].
@@ -123,11 +124,12 @@ impl PublicationVerifier for RabbitMqPublicationVerifier {
 
         let _ = connection.close(200, "shakedown_pub_timeout".into()).await;
 
-        Err(ShakedownError::OutboxPublicationNotFound {
+        Err(OutboxError::PublicationNotFound {
             transport: "rabbitmq",
             channel: channel_label,
             aggregate_id: spec.aggregate_id.clone(),
-        })
+        }
+        .into())
     }
 }
 

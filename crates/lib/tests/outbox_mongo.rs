@@ -7,7 +7,9 @@
 //! ```
 
 use serde::Deserialize;
-use shakedown::{run_scenario, BuiltinResource, Context, EventLog, MongoResource, ShakedownError};
+use shakedown::{
+    run_scenario, BuiltinResource, Context, EventLog, MongoResource, OutboxError, ShakedownError,
+};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -126,7 +128,7 @@ async fn mongo_outbox_setup_and_row_assertions() {
                     .expect_err("sent assert should fail for pending row");
                 assert!(matches!(
                     wrong_state,
-                    ShakedownError::OutboxWrongState { .. }
+                    ShakedownError::Outbox(OutboxError::WrongState { .. })
                 ));
 
                 let payload_assertion_failed = outbox
@@ -138,7 +140,7 @@ async fn mongo_outbox_setup_and_row_assertions() {
                     .expect_err("payload predicate should fail");
                 assert!(matches!(
                     payload_assertion_failed,
-                    ShakedownError::PayloadAssertionFailed { .. }
+                    ShakedownError::Outbox(OutboxError::PayloadAssertionFailed { .. })
                 ));
 
                 let payload_deserialisation_error = outbox
@@ -150,7 +152,7 @@ async fn mongo_outbox_setup_and_row_assertions() {
                     .expect_err("payload deserialisation should fail");
                 assert!(matches!(
                     payload_deserialisation_error,
-                    ShakedownError::PayloadDeserialisation(_)
+                    ShakedownError::Outbox(OutboxError::JsonPayload(_))
                 ));
             })
         },

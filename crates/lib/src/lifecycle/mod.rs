@@ -49,40 +49,6 @@ use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownErr
 #[cfg(feature = "mock-services")]
 use crate::event::Event;
 use crate::event::{EventLevel, EventLog};
-#[cfg(feature = "duckdb")]
-use crate::helpers::DuckDbHelpers;
-#[cfg(feature = "elasticsearch")]
-use crate::helpers::ElasticsearchHelpers;
-#[cfg(feature = "influxdb")]
-use crate::helpers::InfluxDbHelpers;
-#[cfg(feature = "kafka")]
-use crate::helpers::KafkaHelpers;
-#[cfg(feature = "mariadb")]
-use crate::helpers::MariaDbHelpers;
-#[cfg(feature = "mongodb")]
-use crate::helpers::MongoHelpers;
-#[cfg(feature = "mysql")]
-use crate::helpers::MysqlHelpers;
-#[cfg(feature = "nats")]
-use crate::helpers::NatsHelpers;
-#[cfg(feature = "neo4j")]
-use crate::helpers::Neo4jHelpers;
-#[cfg(feature = "opensearch")]
-use crate::helpers::OpenSearchHelpers;
-#[cfg(feature = "postgres")]
-use crate::helpers::PostgresHelpers;
-#[cfg(feature = "qdrant")]
-use crate::helpers::QdrantHelpers;
-#[cfg(feature = "rabbitmq")]
-use crate::helpers::RabbitHelpers;
-#[cfg(any(feature = "redis", feature = "valkey"))]
-use crate::helpers::RedisHelpers;
-#[cfg(feature = "sqlite")]
-use crate::helpers::SqliteHelpers;
-#[cfg(feature = "timescaledb")]
-use crate::helpers::TimescaledbHelpers;
-#[cfg(feature = "weaviate")]
-use crate::helpers::WeaviateHelpers;
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
 use crate::mock_service::grpc::server::{spawn_grpc_mock_service_server, GrpcMockServiceServer};
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
@@ -107,6 +73,40 @@ use crate::mock_service::types::MockServiceResources;
     )
 ))]
 use crate::outbox::Outbox;
+#[cfg(feature = "duckdb")]
+use crate::resources::duckdb::DuckDbHelpers;
+#[cfg(feature = "elasticsearch")]
+use crate::resources::elasticsearch::ElasticsearchHelpers;
+#[cfg(feature = "influxdb")]
+use crate::resources::influxdb::InfluxDbHelpers;
+#[cfg(feature = "kafka")]
+use crate::resources::kafka::KafkaHelpers;
+#[cfg(feature = "mariadb")]
+use crate::resources::mariadb::MariaDbHelpers;
+#[cfg(feature = "mongodb")]
+use crate::resources::mongo::MongoHelpers;
+#[cfg(feature = "mysql")]
+use crate::resources::mysql::MysqlHelpers;
+#[cfg(feature = "nats")]
+use crate::resources::nats::NatsHelpers;
+#[cfg(feature = "neo4j")]
+use crate::resources::neo4j::Neo4jHelpers;
+#[cfg(feature = "opensearch")]
+use crate::resources::opensearch::OpenSearchHelpers;
+#[cfg(feature = "postgres")]
+use crate::resources::postgres::PostgresHelpers;
+#[cfg(feature = "qdrant")]
+use crate::resources::qdrant::QdrantHelpers;
+#[cfg(feature = "rabbitmq")]
+use crate::resources::rabbit::{ExchangeKind, RabbitHelpers};
+#[cfg(any(feature = "redis", feature = "valkey"))]
+use crate::resources::redis::RedisHelpers;
+#[cfg(feature = "sqlite")]
+use crate::resources::sqlite::SqliteHelpers;
+#[cfg(feature = "timescaledb")]
+use crate::resources::timescaledb::TimescaledbHelpers;
+#[cfg(feature = "weaviate")]
+use crate::resources::weaviate::WeaviateHelpers;
 #[cfg(feature = "duckdb")]
 use crate::resources::DuckDbBindings;
 #[cfg(feature = "elasticsearch")]
@@ -150,7 +150,9 @@ use std::collections::HashMap;
 #[cfg(feature = "mock-services")]
 use std::sync::Arc;
 
-pub use crate::phase::Phase;
+mod phase;
+
+pub use phase::Phase;
 
 /// High-level state machine position for a scenario (reserved for richer orchestration).
 #[derive(Debug)]
@@ -374,27 +376,36 @@ pub struct Context {
     /// Shared MongoDB replica set cluster control ([`crate::cluster::mongo_replica_set::MongoClusterOps`]).
     #[cfg(feature = "mongodb-cluster")]
     mongo_replica_set_cluster: Option<
-        std::sync::Arc<crate::mongo_replica_set_cluster_control::MongoReplicaSetClusterControl>,
+        std::sync::Arc<
+            crate::cluster::mongo_replica_set::cluster_control::MongoReplicaSetClusterControl,
+        >,
     >,
     /// Shared KRaft Kafka cluster control ([`crate::cluster::kafka_cluster::KafkaClusterOps`]).
     #[cfg(feature = "kafka-cluster")]
-    kafka_cluster_control:
-        Option<std::sync::Arc<crate::kafka_cluster_cluster_control::KafkaClusterClusterControl>>,
+    kafka_cluster_control: Option<
+        std::sync::Arc<crate::cluster::kafka_cluster::cluster_control::KafkaClusterClusterControl>,
+    >,
     /// Shared Redis Sentinel cluster control ([`crate::cluster::redis_sentinel::RedisSentinelOps`]).
     #[cfg(feature = "redis-sentinel")]
-    redis_sentinel_cluster:
-        Option<std::sync::Arc<crate::redis_sentinel_cluster_control::RedisSentinelClusterControl>>,
+    redis_sentinel_cluster: Option<
+        std::sync::Arc<
+            crate::cluster::redis_sentinel::cluster_control::RedisSentinelClusterControl,
+        >,
+    >,
     /// Per-scenario PostgreSQL primary + replica control ([`crate::cluster::postgres_replica_set::PostgresReplicaSetOps`]).
     #[cfg(feature = "postgres-cluster")]
     postgres_replica_set_cluster: Option<
         std::sync::Arc<
-            crate::postgres_replica_set_cluster_control::PostgresReplicaSetClusterControl,
+            crate::cluster::postgres_replica_set::cluster_control::PostgresReplicaSetClusterControl,
         >,
     >,
     /// Shared RabbitMQ Erlang cluster control ([`crate::cluster::rabbit_cluster::RabbitClusterOps`]).
     #[cfg(feature = "rabbitmq-cluster")]
-    rabbit_cluster_control:
-        Option<std::sync::Arc<crate::rabbit_cluster_cluster_control::RabbitClusterClusterControl>>,
+    rabbit_cluster_control: Option<
+        std::sync::Arc<
+            crate::cluster::rabbit_cluster::cluster_control::RabbitClusterClusterControl,
+        >,
+    >,
     /// Merge point for [`crate::load::LoadHandle`] timeline rows (US-007+); set for the run phase only.
     #[cfg(feature = "load")]
     load_event_sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
@@ -792,7 +803,9 @@ impl Context {
     pub(crate) fn set_mongo_replica_set_cluster(
         &mut self,
         cluster: Option<
-            std::sync::Arc<crate::mongo_replica_set_cluster_control::MongoReplicaSetClusterControl>,
+            std::sync::Arc<
+                crate::cluster::mongo_replica_set::cluster_control::MongoReplicaSetClusterControl,
+            >,
         >,
     ) {
         self.mongo_replica_set_cluster = cluster;
@@ -812,7 +825,9 @@ impl Context {
     pub(crate) fn set_kafka_cluster_control(
         &mut self,
         cluster: Option<
-            std::sync::Arc<crate::kafka_cluster_cluster_control::KafkaClusterClusterControl>,
+            std::sync::Arc<
+                crate::cluster::kafka_cluster::cluster_control::KafkaClusterClusterControl,
+            >,
         >,
     ) {
         self.kafka_cluster_control = cluster;
@@ -830,7 +845,9 @@ impl Context {
     pub(crate) fn set_redis_sentinel_cluster(
         &mut self,
         cluster: Option<
-            std::sync::Arc<crate::redis_sentinel_cluster_control::RedisSentinelClusterControl>,
+            std::sync::Arc<
+                crate::cluster::redis_sentinel::cluster_control::RedisSentinelClusterControl,
+            >,
         >,
     ) {
         self.redis_sentinel_cluster = cluster;
@@ -851,7 +868,7 @@ impl Context {
         &mut self,
         cluster: Option<
             std::sync::Arc<
-                crate::postgres_replica_set_cluster_control::PostgresReplicaSetClusterControl,
+                crate::cluster::postgres_replica_set::cluster_control::PostgresReplicaSetClusterControl,
             >,
         >,
     ) {
@@ -872,7 +889,9 @@ impl Context {
     pub(crate) fn set_rabbit_cluster_control(
         &mut self,
         cluster: Option<
-            std::sync::Arc<crate::rabbit_cluster_cluster_control::RabbitClusterClusterControl>,
+            std::sync::Arc<
+                crate::cluster::rabbit_cluster::cluster_control::RabbitClusterClusterControl,
+            >,
         >,
     ) {
         self.rabbit_cluster_control = cluster;
@@ -2556,10 +2575,10 @@ fn prepare_mongo_replica_set_inter_node_defer(ctx: &mut Context) {
 async fn register_mongo_replica_set_cluster_control(ctx: &mut Context, handles: &[ResourceHandle]) {
     use std::sync::Arc;
 
+    use crate::cluster::mongo_replica_set::cluster_control::MongoReplicaSetClusterControl;
+    use crate::cluster::mongo_replica_set::resource::mongo_replica_set_suite_snapshot;
     use crate::cluster::mongo_replica_set::MongoReplicaSetMarker;
     use crate::cluster::ClusterHandle;
-    use crate::mongo_replica_set_cluster_control::MongoReplicaSetClusterControl;
-    use crate::mongo_replica_set_resource::mongo_replica_set_suite_snapshot;
 
     for handle in handles {
         let Some(meta) = &handle.metadata else {
@@ -2586,10 +2605,10 @@ async fn register_mongo_replica_set_cluster_control(ctx: &mut Context, handles: 
 async fn register_kafka_cluster_control(ctx: &mut Context, handles: &[ResourceHandle]) {
     use std::sync::Arc;
 
+    use crate::cluster::kafka_cluster::cluster_control::KafkaClusterClusterControl;
+    use crate::cluster::kafka_cluster::resource::kafka_cluster_suite_snapshot;
     use crate::cluster::kafka_cluster::KafkaClusterMarker;
     use crate::cluster::ClusterHandle;
-    use crate::kafka_cluster_cluster_control::KafkaClusterClusterControl;
-    use crate::kafka_cluster_resource::kafka_cluster_suite_snapshot;
 
     for handle in handles {
         let Some(meta) = &handle.metadata else {
@@ -2619,10 +2638,10 @@ async fn register_kafka_cluster_control(ctx: &mut Context, handles: &[ResourceHa
 async fn register_redis_sentinel_cluster_control(ctx: &mut Context, handles: &[ResourceHandle]) {
     use std::sync::Arc;
 
+    use crate::cluster::redis_sentinel::cluster_control::RedisSentinelClusterControl;
+    use crate::cluster::redis_sentinel::resource::redis_sentinel_suite_snapshot;
     use crate::cluster::redis_sentinel::RedisSentinelMarker;
     use crate::cluster::ClusterHandle;
-    use crate::redis_sentinel_cluster_control::RedisSentinelClusterControl;
-    use crate::redis_sentinel_resource::redis_sentinel_suite_snapshot;
 
     for handle in handles {
         let Some(meta) = &handle.metadata else {
@@ -2656,9 +2675,9 @@ async fn register_postgres_replica_set_cluster_control(
 ) {
     use std::sync::Arc;
 
+    use crate::cluster::postgres_replica_set::cluster_control::PostgresReplicaSetClusterControl;
     use crate::cluster::postgres_replica_set::PostgresReplicaSetMarker;
     use crate::cluster::ClusterHandle;
-    use crate::postgres_replica_set_cluster_control::PostgresReplicaSetClusterControl;
 
     for handle in handles {
         let Some(meta) = &handle.metadata else {
@@ -2682,10 +2701,10 @@ async fn register_postgres_replica_set_cluster_control(
 async fn register_rabbit_cluster_control(ctx: &mut Context, handles: &[ResourceHandle]) {
     use std::sync::Arc;
 
+    use crate::cluster::rabbit_cluster::cluster_control::RabbitClusterClusterControl;
+    use crate::cluster::rabbit_cluster::resource::rabbit_cluster_suite_snapshot;
     use crate::cluster::rabbit_cluster::RabbitClusterMarker;
     use crate::cluster::ClusterHandle;
-    use crate::rabbit_cluster_cluster_control::RabbitClusterClusterControl;
-    use crate::rabbit_cluster_resource::rabbit_cluster_suite_snapshot;
 
     for handle in handles {
         let Some(meta) = &handle.metadata else {
@@ -3374,7 +3393,7 @@ where
     #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
     {
         if let Err(error) =
-            crate::mongo_replica_set_inter_node::finalize_mongo_replica_set_inter_node_mesh(ctx)
+            crate::cluster::mongo_replica_set::inter_node::finalize_mongo_replica_set_inter_node_mesh(ctx)
                 .await
         {
             event_log.append_raw(

@@ -10,15 +10,16 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use futures_util::stream::StreamExt;
 
-use crate::error::{InfrastructureError, ShakedownError};
+use crate::error::{IntoInfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
+use crate::OutboxError;
 
 use super::matching::message_matches_aggregate_id;
 use super::spec::PublicationObserveSpec;
 use super::PublicationVerifier;
 
 fn as_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> ShakedownError {
-    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
+    error.into_infrastructure_error().into()
 }
 
 /// Options for [`NatsPublicationVerifier`].
@@ -83,10 +84,11 @@ impl PublicationVerifier for NatsPublicationVerifier {
 
         let _ = client.drain().await;
 
-        Err(ShakedownError::OutboxPublicationNotFound {
+        Err(OutboxError::PublicationNotFound {
             transport: "nats",
             channel: subject,
             aggregate_id: spec.aggregate_id.clone(),
-        })
+        }
+        .into())
     }
 }
