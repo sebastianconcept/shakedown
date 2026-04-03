@@ -1,6 +1,7 @@
 //! [`LoadHandle`] and [`Context::start_load`](crate::lifecycle::Context::start_load) driver (US-007, US-009).
 
 use std::future::Future;
+use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant as StdInstant};
@@ -149,7 +150,19 @@ impl LoadHandle {
         };
         let metrics_snapshot = LoadMetrics::new(self.metrics.clone());
         match join_result {
-            Ok(Ok(())) => Ok(metrics_snapshot),
+            Ok(Ok(())) => {
+                if super::summary::load_summary_print_enabled() {
+                    let use_color = std::io::stderr().is_terminal();
+                    let text = super::summary::render_summary_styled(
+                        &self.load_name,
+                        &metrics_snapshot,
+                        None,
+                        use_color,
+                    );
+                    eprintln!("{text}");
+                }
+                Ok(metrics_snapshot)
+            }
             Ok(Err(load_error)) => Err(load_error),
             Err(join_error) => Err(LoadError::DriverFailed {
                 source: Box::new(join_error),

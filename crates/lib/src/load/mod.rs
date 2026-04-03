@@ -6,13 +6,28 @@
 //! [`Phase::warmup`](Phase::warmup) runs as open-model traffic before steady-state phases; the driver records
 //! `LoadMetricsAccumulator::set_warmup_end` when warmup completes (US-001).
 
+/// One evaluated performance check for terminal summary / JSON report (US-003, US-004).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssertionVerdict {
+    /// Metric name (e.g. `p99`, `throughput`).
+    pub metric: String,
+    /// Observed value as displayed to the user.
+    pub measured: String,
+    /// Bound that was asserted.
+    pub threshold: String,
+    /// Whether the check passed.
+    pub passed: bool,
+}
+
 mod assertions;
 pub(crate) mod handle;
 mod metrics;
+mod summary;
 
-pub use assertions::{AssertionVerdict, LoadMetricsAssertBuilder};
+pub use assertions::LoadMetricsAssertBuilder;
 pub use handle::LoadHandle;
 pub use metrics::LoadMetrics;
+pub use summary::{render_summary, render_summary_with_verdicts};
 
 use std::time::Duration;
 
