@@ -7,8 +7,7 @@ use std::time::Duration;
 use crate::error::{PerformanceAssertionDetails, ShakedownError};
 
 use super::metrics::LoadMetrics;
-use super::AssertionVerdict;
-use super::Phase;
+use super::{AssertionVerdict, Phase};
 
 /// Chainable SLO-style checks on steady-state [`LoadMetrics`] (warmup excluded when configured).
 #[derive(Debug)]
@@ -56,6 +55,16 @@ impl<'a> LoadMetricsAssertBuilder<'a> {
     /// Clone of recorded verdicts (for summaries and reports).
     pub fn verdicts_snapshot(&self) -> Vec<AssertionVerdict> {
         self.verdicts.borrow().clone()
+    }
+
+    /// Copy verdicts onto the shared metrics accumulator so [`LoadMetrics::write_report`] includes an `assertions` array (US-005).
+    pub fn store_for_report(&self) {
+        let rows: Vec<super::ReportAssertion> = self
+            .verdicts_snapshot()
+            .iter()
+            .map(super::ReportAssertion::from)
+            .collect();
+        self.metrics.set_report_assertions(rows);
     }
 
     /// Print load summary including assertion verdict rows to stderr when `SHAKEDOWN_LOAD_SUMMARY` is not `0` (US-004).
