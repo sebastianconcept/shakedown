@@ -7,15 +7,16 @@ use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::message::Message;
 
-use crate::error::{InfrastructureError, ShakedownError};
+use crate::error::{IntoInfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
+use crate::OutboxError;
 
 use super::matching::message_matches_aggregate_id;
 use super::spec::PublicationObserveSpec;
 use super::PublicationVerifier;
 
 fn as_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> ShakedownError {
-    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
+    error.into_infrastructure_error().into()
 }
 
 /// First-party Kafka publication verifier using [`Context::kafka_bindings`] and topic namespacing.
@@ -71,10 +72,11 @@ impl PublicationVerifier for KafkaPublicationVerifier {
             }
         }
 
-        Err(ShakedownError::OutboxPublicationNotFound {
+        Err(OutboxError::PublicationNotFound {
             transport: "kafka",
             channel: topic,
             aggregate_id: spec.aggregate_id.clone(),
-        })
+        }
+        .into())
     }
 }

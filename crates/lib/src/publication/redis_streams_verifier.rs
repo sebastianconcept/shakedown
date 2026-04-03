@@ -11,9 +11,10 @@ use async_trait::async_trait;
 use redis::streams::{StreamId, StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
 
-use crate::error::{InfrastructureError, ShakedownError};
-use crate::helpers::map_backend_error;
+use crate::error::{IntoInfrastructureError, ShakedownError};
+use crate::helper_prelude::map_backend_error;
 use crate::lifecycle::Context;
+use crate::OutboxError;
 
 use super::matching::message_matches_aggregate_id;
 use super::spec::PublicationObserveSpec;
@@ -22,7 +23,7 @@ use super::PublicationVerifier;
 const REDIS_STREAMS_VERIFIER_CONSUMER: &str = "shakedown-verifier";
 
 fn as_backend_error(error: impl std::error::Error + Send + Sync + 'static) -> ShakedownError {
-    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(error)))
+    error.into_infrastructure_error().into()
 }
 
 fn payload_field_bytes(entry: &StreamId, field_name: &str) -> Option<Vec<u8>> {
@@ -188,11 +189,12 @@ impl PublicationVerifier for RedisStreamsPublicationVerifier {
             }
         }
 
-        Err(ShakedownError::OutboxPublicationNotFound {
+        Err(OutboxError::PublicationNotFound {
             transport: "redis_streams",
             channel: stream_key,
             aggregate_id: spec.aggregate_id.clone(),
-        })
+        }
+        .into())
     }
 }
 

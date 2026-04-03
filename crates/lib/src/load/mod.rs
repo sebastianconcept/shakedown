@@ -46,7 +46,7 @@ impl From<Phase> for NamedPhase {
     }
 }
 
-/// Traffic shape for a load profile (distinct from [`crate::phase::Phase`] lifecycle labels).
+/// Traffic shape for a load profile (distinct from [`crate::lifecycle::Phase`] lifecycle labels).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Phase {
     /// Fixed open-model rate for a duration.

@@ -4,6 +4,7 @@
 
 use rusqlite::{Connection, OpenFlags};
 use shakedown::error::ShakedownError;
+use shakedown::OutboxError;
 use shakedown::{run_scenario, BuiltinResource, Context, EventLog, SqliteResource};
 
 #[tokio::test]
@@ -184,7 +185,7 @@ async fn sqlite_outbox_setup_and_state_assertions_work_without_docker() {
                     .expect_err("malformed JSON payload must fail");
                 assert!(matches!(
                     malformed_payload_error,
-                    ShakedownError::PayloadDeserialisation(_)
+                    ShakedownError::Outbox(OutboxError::JsonPayload(_))
                 ));
 
                 let unknown_status_error = scenario_context
@@ -194,7 +195,7 @@ async fn sqlite_outbox_setup_and_state_assertions_work_without_docker() {
                     .expect_err("unknown status must fail explicitly");
                 assert!(matches!(
                     unknown_status_error,
-                    ShakedownError::OutboxUnknownState { .. }
+                    ShakedownError::Outbox(OutboxError::UnknownState { .. })
                 ));
             })
         },
