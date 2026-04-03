@@ -74,12 +74,17 @@ pub struct ReportComparisonMetric {
 }
 
 mod assertions;
+mod baseline;
 pub(crate) mod handle;
 mod metrics;
 mod report;
 mod summary;
 
 pub use assertions::LoadMetricsAssertBuilder;
+pub use baseline::{
+    read_load_baseline_from_path, resolve_load_baseline_path, save_baseline,
+    write_load_baseline_to_path, LoadBaseline, LOAD_BASELINE_SCHEMA_VERSION,
+};
 pub use handle::LoadHandle;
 pub use metrics::LoadMetrics;
 pub use report::{

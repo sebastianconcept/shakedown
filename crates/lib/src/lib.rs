@@ -398,12 +398,13 @@ pub use crate::resources::ToxiproxyResource;
 
 #[cfg(feature = "load")]
 pub use crate::load::{
-    read_load_run_report_from_path, render_summary, render_summary_with_verdicts,
-    resolve_load_report_path, write_load_run_report_to_path, AssertionVerdict, LoadError,
-    LoadHandle, LoadMetrics, LoadMetricsAssertBuilder, LoadProfile, LoadProfileBuilder,
-    LoadRunReport, LoadRuntime, NamedPhase, Phase as LoadPhase, Rate, RecoveryConfig,
-    ReportAssertion, ReportComparison, ReportComparisonMetric, ReportMetrics, SaturationPolicy,
-    LOAD_RUN_REPORT_SCHEMA_VERSION,
+    read_load_baseline_from_path, read_load_run_report_from_path, render_summary,
+    render_summary_with_verdicts, resolve_load_baseline_path, resolve_load_report_path,
+    save_baseline, write_load_baseline_to_path, write_load_run_report_to_path, AssertionVerdict,
+    LoadBaseline, LoadError, LoadHandle, LoadMetrics, LoadMetricsAssertBuilder, LoadProfile,
+    LoadProfileBuilder, LoadRunReport, LoadRuntime, NamedPhase, Phase as LoadPhase, Rate,
+    RecoveryConfig, ReportAssertion, ReportComparison, ReportComparisonMetric, ReportMetrics,
+    SaturationPolicy, LOAD_BASELINE_SCHEMA_VERSION, LOAD_RUN_REPORT_SCHEMA_VERSION,
 };
 
 #[cfg(feature = "rabbitmq")]
