@@ -186,7 +186,7 @@ pub use crate::event::{
 /// Public types and functions from the lifecycle module.
 pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, Phase,
-    ScenarioKind,
+    ScenarioKind, ScenarioRunOutcome,
 };
 
 #[cfg(feature = "mock-services")]
@@ -231,10 +231,11 @@ pub use crate::publication::{
     RedisStreamsPublicationVerifier, RedisStreamsPublicationVerifierOptions,
 };
 pub use crate::timeline::{
-    build_failure_timeline_document, emit_failure_timeline_to_stderr, render_failure_timeline,
-    resolve_target_dir, resolve_target_timelines_dir, sanitize_scenario_id_for_filename,
-    write_failure_timeline_json, write_failure_timeline_json_to_path, FailureTimelineDocument,
-    FailureTimelineOptions, ResourceSnapshotJson, ResourceSnapshotsJson, RootCauseHint,
+    build_failure_timeline_document, emit_failure_timeline_for_shakedown_error,
+    emit_failure_timeline_to_stderr, render_failure_timeline, resolve_target_dir,
+    resolve_target_timelines_dir, sanitize_scenario_id_for_filename, write_failure_timeline_json,
+    write_failure_timeline_json_to_path, FailureTimelineDocument, FailureTimelineOptions,
+    PerformanceAssertionFailureJson, ResourceSnapshotJson, ResourceSnapshotsJson, RootCauseHint,
     ScenarioMetadataJson, TimelineEventJson,
 };
 

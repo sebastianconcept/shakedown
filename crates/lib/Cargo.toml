@@ -323,6 +323,11 @@ name = "load_handle"
 path = "tests/load_handle.rs"
 required-features = ["load"]
 
+[[test]]
+name = "load_performance_us008"
+path = "tests/load_performance_us008.rs"
+required-features = ["load"]
+
 # Optional macro + Kafka Docker integration test; avoids compiling `resources = [Kafka]` without rdkafka
 [[test]]
 name = "macro_kafka"
