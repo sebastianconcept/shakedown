@@ -214,6 +214,26 @@ fn outbox_json_payload_error_chains_serde_source() {
     assert!(harness_err.source().is_some());
 }
 
+#[cfg(feature = "load")]
+#[test]
+fn performance_assertion_failed_display_includes_fields() {
+    use crate::error::PerformanceAssertionDetails;
+
+    let err = ShakedownError::PerformanceAssertionFailed(Box::new(PerformanceAssertionDetails {
+        load_name: "checkout".to_string(),
+        metric: "p99".to_string(),
+        measured: "12.00ms".to_string(),
+        threshold: "<= 10.00ms".to_string(),
+        phase: crate::load::Phase::pause(std::time::Duration::ZERO),
+    }));
+    let displayed = format!("{err}");
+    assert!(displayed.contains("checkout"));
+    assert!(displayed.contains("p99"));
+    assert!(displayed.contains("12.00ms"));
+    assert!(displayed.contains("10.00ms"));
+    assert!(displayed.contains("Pause"));
+}
+
 #[test]
 fn resource_handle_serialization() {
     use serde_json::to_value;

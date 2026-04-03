@@ -6,9 +6,11 @@
 //! [`Phase::warmup`](Phase::warmup) runs as open-model traffic before steady-state phases; the driver records
 //! `LoadMetricsAccumulator::set_warmup_end` when warmup completes (US-001).
 
+mod assertions;
 pub(crate) mod handle;
 mod metrics;
 
+pub use assertions::{AssertionVerdict, LoadMetricsAssertBuilder};
 pub use handle::LoadHandle;
 pub use metrics::LoadMetrics;
 
