@@ -1,25 +1,14 @@
 //! Fluent performance assertions on [`super::metrics::LoadMetrics`] (US-003).
 
 use std::cell::RefCell;
+use std::io::IsTerminal;
 use std::time::Duration;
 
 use crate::error::{PerformanceAssertionDetails, ShakedownError};
 
 use super::metrics::LoadMetrics;
+use super::AssertionVerdict;
 use super::Phase;
-
-/// One evaluated check for terminal summary / JSON report (US-004, US-005).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssertionVerdict {
-    /// Metric name (e.g. `p99`, `throughput`).
-    pub metric: String,
-    /// Observed value as displayed to the user.
-    pub measured: String,
-    /// Bound that was asserted.
-    pub threshold: String,
-    /// Whether the check passed.
-    pub passed: bool,
-}
 
 /// Chainable SLO-style checks on steady-state [`LoadMetrics`] (warmup excluded when configured).
 #[derive(Debug)]
@@ -67,6 +56,22 @@ impl<'a> LoadMetricsAssertBuilder<'a> {
     /// Clone of recorded verdicts (for summaries and reports).
     pub fn verdicts_snapshot(&self) -> Vec<AssertionVerdict> {
         self.verdicts.borrow().clone()
+    }
+
+    /// Print load summary including assertion verdict rows to stderr when `SHAKEDOWN_LOAD_SUMMARY` is not `0` (US-004).
+    pub fn print_summary_to_stderr(&self) {
+        if !super::summary::load_summary_print_enabled() {
+            return;
+        }
+        let use_color = std::io::stderr().is_terminal();
+        let verdicts = self.verdicts_snapshot();
+        let text = super::summary::render_summary_styled(
+            &self.load_name,
+            self.metrics,
+            Some(&verdicts),
+            use_color,
+        );
+        eprintln!("{text}");
     }
 
     fn fail(

@@ -398,9 +398,9 @@ pub use crate::resources::ToxiproxyResource;
 
 #[cfg(feature = "load")]
 pub use crate::load::{
-    AssertionVerdict, LoadError, LoadHandle, LoadMetrics, LoadMetricsAssertBuilder, LoadProfile,
-    LoadProfileBuilder, LoadRuntime, NamedPhase, Phase as LoadPhase, Rate, RecoveryConfig,
-    SaturationPolicy,
+    render_summary, render_summary_with_verdicts, AssertionVerdict, LoadError, LoadHandle,
+    LoadMetrics, LoadMetricsAssertBuilder, LoadProfile, LoadProfileBuilder, LoadRuntime,
+    NamedPhase, Phase as LoadPhase, Rate, RecoveryConfig, SaturationPolicy,
 };
 
 #[cfg(feature = "rabbitmq")]
