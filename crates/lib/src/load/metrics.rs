@@ -37,7 +37,7 @@ fn new_latency_histogram() -> Histogram<u64> {
 }
 
 /// Tracks longest failure burst and last recovery interval (topology / disruption metrics).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct BurstState {
     /// First failure in the current consecutive failure run.
     first_failure_in_burst: Option<Instant>,
@@ -45,17 +45,6 @@ struct BurstState {
     last_failure_in_burst: Option<Instant>,
     longest_burst: Option<Duration>,
     last_recovery: Option<Duration>,
-}
-
-impl Default for BurstState {
-    fn default() -> Self {
-        Self {
-            first_failure_in_burst: None,
-            last_failure_in_burst: None,
-            longest_burst: None,
-            last_recovery: None,
-        }
-    }
 }
 
 impl BurstState {
@@ -87,6 +76,8 @@ impl BurstState {
 #[derive(Debug)]
 pub struct LoadMetricsAccumulator {
     epoch: Instant,
+    /// Wall time after the warmup phase completes (`None` if no warmup or load stopped early).
+    warmup_end: Mutex<Option<Instant>>,
     successful_operations: AtomicU64,
     failed_operations: AtomicU64,
     dropped_iterations: AtomicU64,
@@ -111,6 +102,7 @@ impl LoadMetricsAccumulator {
     pub fn new() -> Self {
         Self {
             epoch: Instant::now(),
+            warmup_end: Mutex::new(None),
             successful_operations: AtomicU64::new(0),
             failed_operations: AtomicU64::new(0),
             dropped_iterations: AtomicU64::new(0),
@@ -127,6 +119,7 @@ impl LoadMetricsAccumulator {
     fn new_with_epoch(epoch: Instant) -> Self {
         Self {
             epoch,
+            warmup_end: Mutex::new(None),
             successful_operations: AtomicU64::new(0),
             failed_operations: AtomicU64::new(0),
             dropped_iterations: AtomicU64::new(0),
@@ -137,6 +130,17 @@ impl LoadMetricsAccumulator {
             buckets: RwLock::new(Vec::new()),
             burst: Mutex::new(BurstState::default()),
         }
+    }
+
+    /// Mark the end of the warmup phase for steady-state metric queries (US-001, US-002).
+    pub(crate) fn set_warmup_end(&self, instant: Instant) {
+        let mut guard = self.warmup_end.lock().expect("warmup_end");
+        *guard = Some(instant);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn warmup_end_snapshot(&self) -> Option<Instant> {
+        *self.warmup_end.lock().expect("warmup_end")
     }
 
     fn ensure_bucket(&self, index: usize) {
@@ -531,6 +535,14 @@ mod tests {
     use super::*;
     use std::sync::Barrier;
     use std::thread;
+
+    #[test]
+    fn set_warmup_end_records_wall_time() {
+        let accumulator = LoadMetricsAccumulator::default();
+        let instant = Instant::now();
+        accumulator.set_warmup_end(instant);
+        assert_eq!(accumulator.warmup_end_snapshot(), Some(instant));
+    }
 
     #[test]
     fn total_is_sum_of_outcomes() {
