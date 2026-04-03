@@ -36,6 +36,16 @@ fn new_latency_histogram() -> Histogram<u64> {
     Histogram::new_with_bounds(1, 60_000_000_000, 3).expect("latency histogram bounds")
 }
 
+/// Single read pass over buckets from `min_index`: merged histogram + outcome sums (US-002).
+#[derive(Debug)]
+struct MergedBucketsSnapshot {
+    histogram: Histogram<u64>,
+    histogram_non_empty: bool,
+    successful: u64,
+    failed: u64,
+    dropped: u64,
+}
+
 /// Tracks longest failure burst and last recovery interval (topology / disruption metrics).
 #[derive(Debug, Clone, Default)]
 struct BurstState {
@@ -150,7 +160,7 @@ impl LoadMetricsAccumulator {
         }
     }
 
-    fn bucket_index(&self, at: Instant) -> usize {
+    pub(crate) fn bucket_index(&self, at: Instant) -> usize {
         let millis = at.saturating_duration_since(self.epoch).as_millis();
         (millis / BUCKET_MS) as usize
     }
@@ -286,20 +296,68 @@ impl LoadMetricsAccumulator {
     }
 
     fn merge_from_bucket_index(&self, min_index: usize) -> Option<Histogram<u64>> {
+        let merged_counts = self.merge_histogram_and_counts_from_bucket_index(min_index);
+        if merged_counts.histogram_non_empty {
+            Some(merged_counts.histogram)
+        } else {
+            None
+        }
+    }
+
+    /// Merge latency histogram and sum outcome counters from `min_index` through the last bucket (US-002).
+    fn merge_histogram_and_counts_from_bucket_index(
+        &self,
+        min_index: usize,
+    ) -> MergedBucketsSnapshot {
         let buckets = self.buckets.read().expect("buckets read");
         let mut merged = new_latency_histogram();
-        let mut any = false;
+        let mut histogram_non_empty = false;
+        let mut successful = 0u64;
+        let mut failed = 0u64;
+        let mut dropped = 0u64;
         for bucket in buckets.iter().skip(min_index) {
+            successful += bucket.successful.load(Ordering::Relaxed);
+            failed += bucket.failed.load(Ordering::Relaxed);
+            dropped += bucket.dropped.load(Ordering::Relaxed);
             let guard = bucket.latency_ns.lock().expect("bucket hist");
             if !guard.is_empty() {
                 merged.add(&*guard).expect("merge histograms");
-                any = true;
+                histogram_non_empty = true;
             }
         }
-        if any {
-            Some(merged)
-        } else {
-            None
+        MergedBucketsSnapshot {
+            histogram: merged,
+            histogram_non_empty,
+            successful,
+            failed,
+            dropped,
+        }
+    }
+
+    /// First bucket index included in steady-state queries when warmup ended at `warmup_end` (US-002).
+    pub(crate) fn steady_bucket_start_index(&self, force_full_run: bool) -> usize {
+        if force_full_run {
+            return 0;
+        }
+        match *self.warmup_end.lock().expect("warmup_end") {
+            None => 0,
+            Some(warmup_end) => self.bucket_index(warmup_end),
+        }
+    }
+
+    /// `true` when aggregate queries should use global histogram + atomics (no warmup exclusion).
+    pub(crate) fn use_global_aggregate_path(&self, force_full_run: bool) -> bool {
+        force_full_run || self.warmup_end.lock().expect("warmup_end").is_none()
+    }
+
+    /// Wall-clock start of steady-state window for throughput (US-002).
+    pub(crate) fn steady_state_throughput_origin(&self, force_full_run: bool) -> Instant {
+        if force_full_run {
+            return self.epoch;
+        }
+        match *self.warmup_end.lock().expect("warmup_end") {
+            Some(warmup_end) => warmup_end,
+            None => self.epoch,
         }
     }
 
@@ -388,46 +446,100 @@ fn duration_from_histogram_quantile(histogram: &Histogram<u64>, quantile: f64) -
 #[derive(Debug, Clone)]
 pub struct LoadMetrics {
     inner: Arc<LoadMetricsAccumulator>,
+    /// When `true`, aggregate queries use the full run from [`LoadMetricsAccumulator::epoch`], ignoring warmup exclusion (US-002).
+    force_full_run: bool,
 }
 
 impl LoadMetrics {
     pub(crate) fn new(inner: Arc<LoadMetricsAccumulator>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            force_full_run: false,
+        }
+    }
+
+    /// Metrics view that includes warmup iterations in aggregates (same underlying run as `self`).
+    pub fn including_warmup(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            force_full_run: true,
+        }
+    }
+
+    fn merged_steady_buckets(&self) -> MergedBucketsSnapshot {
+        let min_index = self.inner.steady_bucket_start_index(self.force_full_run);
+        self.inner
+            .merge_histogram_and_counts_from_bucket_index(min_index)
     }
 
     /// All arrivals: successes, failures, and drops (before a worker ran the iteration).
     pub fn total_iterations(&self) -> u64 {
-        self.inner.total_iterations()
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            return self.inner.total_iterations();
+        }
+        let merged = self.merged_steady_buckets();
+        merged.successful + merged.failed + merged.dropped
     }
 
     pub fn successful_operations(&self) -> u64 {
-        self.inner.successful_operations()
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            return self.inner.successful_operations();
+        }
+        self.merged_steady_buckets().successful
     }
 
     pub fn failed_operations(&self) -> u64 {
-        self.inner.failed_operations()
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            return self.inner.failed_operations();
+        }
+        self.merged_steady_buckets().failed
     }
 
     pub fn dropped_iterations(&self) -> u64 {
-        self.inner.dropped_iterations()
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            return self.inner.dropped_iterations();
+        }
+        self.merged_steady_buckets().dropped
     }
 
     /// Failed completed iterations / completed iterations (success + failure). Excludes drops.
     pub fn error_rate(&self) -> f64 {
-        let completed = self.inner.completed_operations();
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            let completed = self.inner.completed_operations();
+            if completed == 0 {
+                return 0.0;
+            }
+            return self.inner.failed_operations() as f64 / completed as f64;
+        }
+        let merged = self.merged_steady_buckets();
+        let completed = merged.successful + merged.failed;
         if completed == 0 {
             return 0.0;
         }
-        self.inner.failed_operations() as f64 / completed as f64
+        merged.failed as f64 / completed as f64
     }
 
     /// Completed iterations per second since the load accumulator was created (wall clock).
+    ///
+    /// When a warmup phase completed, uses elapsed wall time since [`LoadMetricsAccumulator::set_warmup_end`] (US-002).
     pub fn throughput(&self) -> f64 {
-        let elapsed = self.inner.epoch().elapsed();
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            let elapsed = self.inner.epoch().elapsed();
+            if elapsed.is_zero() {
+                return 0.0;
+            }
+            return self.inner.completed_operations() as f64 / elapsed.as_secs_f64();
+        }
+        let merged = self.merged_steady_buckets();
+        let completed = merged.successful + merged.failed;
+        let origin = self
+            .inner
+            .steady_state_throughput_origin(self.force_full_run);
+        let elapsed = Instant::now().saturating_duration_since(origin);
         if elapsed.is_zero() {
             return 0.0;
         }
-        self.inner.completed_operations() as f64 / elapsed.as_secs_f64()
+        completed as f64 / elapsed.as_secs_f64()
     }
 
     pub fn p50(&self) -> Duration {
@@ -446,26 +558,47 @@ impl LoadMetrics {
         self.percentile(0.99)
     }
 
-    fn percentile(&self, q: f64) -> Duration {
-        let guard = self
-            .inner
-            .global_latency_ns
-            .lock()
-            .expect("global histogram");
-        duration_from_histogram_quantile(&guard, q)
+    fn percentile(&self, quantile: f64) -> Duration {
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            let guard = self
+                .inner
+                .global_latency_ns
+                .lock()
+                .expect("global histogram");
+            return duration_from_histogram_quantile(&guard, quantile);
+        }
+        let merged = self.merged_steady_buckets();
+        if !merged.histogram_non_empty {
+            return Duration::ZERO;
+        }
+        duration_from_histogram_quantile(&merged.histogram, quantile)
     }
 
     pub fn min_latency(&self) -> Duration {
-        let min_ns = self.inner.min_latency_ns.load(Ordering::Relaxed);
-        if min_ns == u64::MAX {
-            Duration::ZERO
-        } else {
-            Duration::from_nanos(min_ns)
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            let min_ns = self.inner.min_latency_ns.load(Ordering::Relaxed);
+            if min_ns == u64::MAX {
+                return Duration::ZERO;
+            }
+            return Duration::from_nanos(min_ns);
         }
+        let merged = self.merged_steady_buckets();
+        if !merged.histogram_non_empty {
+            return Duration::ZERO;
+        }
+        let min_ns = merged.histogram.min();
+        Duration::from_nanos(min_ns)
     }
 
     pub fn max_latency(&self) -> Duration {
-        Duration::from_nanos(self.inner.max_latency_ns.load(Ordering::Relaxed))
+        if self.inner.use_global_aggregate_path(self.force_full_run) {
+            return Duration::from_nanos(self.inner.max_latency_ns.load(Ordering::Relaxed));
+        }
+        let merged = self.merged_steady_buckets();
+        if !merged.histogram_non_empty {
+            return Duration::ZERO;
+        }
+        Duration::from_nanos(merged.histogram.max())
     }
 
     /// Failed / completed in the window (bucket-aligned overlap).
@@ -652,5 +785,135 @@ mod tests {
         let metrics = LoadMetrics::new(accumulator);
         assert_eq!(metrics.successful_operations(), 32_000);
         assert_eq!(metrics.total_iterations(), 32_000);
+    }
+
+    /// Warmup traffic in bucket 0; steady in bucket 1+; `warmup_end` at bucket boundary (US-002).
+    #[test]
+    fn warmup_exclusion_uses_post_warmup_buckets_only() {
+        let epoch = Instant::now();
+        let accumulator = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
+        // Bucket 0 (0..100ms): high latency "warmup" completions
+        for _ in 0..5 {
+            accumulator
+                .record_success(epoch + Duration::from_millis(10), Duration::from_millis(90));
+        }
+        // Bucket 1 (100..200ms): low latency steady state
+        for _ in 0..10 {
+            accumulator
+                .record_success(epoch + Duration::from_millis(150), Duration::from_millis(1));
+        }
+        let warmup_end = epoch + Duration::from_millis(100);
+        accumulator.set_warmup_end(warmup_end);
+        // Ensure wall `Instant::now()` is past `warmup_end` so steady-state throughput uses a positive window.
+        thread::sleep(Duration::from_millis(120));
+
+        let steady = LoadMetrics::new(accumulator.clone());
+        assert_eq!(steady.successful_operations(), 10);
+        assert_eq!(steady.failed_operations(), 0);
+        assert_eq!(steady.dropped_iterations(), 0);
+        assert_eq!(steady.total_iterations(), 10);
+        assert_eq!(steady.error_rate(), 0.0);
+        assert!(
+            steady.p99() < Duration::from_millis(50),
+            "steady p99 should reflect ~1ms samples, got {:?}",
+            steady.p99()
+        );
+        let upper = Duration::from_micros(1100);
+        assert!(
+            steady.min_latency() <= upper && steady.min_latency() >= Duration::from_micros(900),
+            "steady min_latency ~1ms, got {:?}",
+            steady.min_latency()
+        );
+        assert!(
+            steady.max_latency() <= upper && steady.max_latency() >= Duration::from_micros(900),
+            "steady max_latency ~1ms, got {:?}",
+            steady.max_latency()
+        );
+
+        let full = steady.including_warmup();
+        assert_eq!(full.successful_operations(), 15);
+        assert_eq!(full.total_iterations(), 15);
+        assert!(
+            full.p99() >= Duration::from_millis(80),
+            "including_warmup p99 should reflect 90ms samples, got {:?}",
+            full.p99()
+        );
+    }
+
+    #[test]
+    fn warmup_exclusion_error_rate_uses_post_warmup_completions_only() {
+        let epoch = Instant::now();
+        let accumulator = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
+        for _ in 0..4 {
+            accumulator.record_failure(epoch + Duration::from_millis(20), Duration::from_millis(1));
+        }
+        for _ in 0..6 {
+            accumulator
+                .record_success(epoch + Duration::from_millis(150), Duration::from_millis(1));
+        }
+        accumulator.set_warmup_end(epoch + Duration::from_millis(100));
+        let steady = LoadMetrics::new(accumulator);
+        assert_eq!(steady.error_rate(), 0.0);
+        assert_eq!(steady.including_warmup().error_rate(), 4.0 / 10.0);
+    }
+
+    #[test]
+    fn warmup_exclusion_counts_drops_in_steady_buckets_only() {
+        let epoch = Instant::now();
+        let accumulator = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
+        accumulator.record_dropped(epoch + Duration::from_millis(10));
+        accumulator.record_dropped(epoch + Duration::from_millis(20));
+        accumulator.record_success(
+            epoch + Duration::from_millis(150),
+            Duration::from_nanos(100),
+        );
+        accumulator.set_warmup_end(epoch + Duration::from_millis(100));
+        let steady = LoadMetrics::new(accumulator);
+        assert_eq!(steady.dropped_iterations(), 0);
+        assert_eq!(steady.total_iterations(), 1);
+        assert_eq!(steady.including_warmup().dropped_iterations(), 2);
+        assert_eq!(steady.including_warmup().total_iterations(), 3);
+    }
+
+    #[test]
+    fn without_warmup_end_aggregate_path_matches_global_histogram() {
+        let epoch = Instant::now();
+        let accumulator = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
+        accumulator.record_success(epoch + Duration::from_millis(10), Duration::from_millis(5));
+        accumulator.record_success(epoch + Duration::from_millis(20), Duration::from_millis(5));
+        let metrics = LoadMetrics::new(accumulator.clone());
+        let including = metrics.including_warmup();
+        assert_eq!(metrics.p50(), including.p50());
+        assert_eq!(
+            metrics.successful_operations(),
+            including.successful_operations()
+        );
+    }
+
+    #[test]
+    fn throughput_steady_matches_completed_over_elapsed_since_warmup_end() {
+        let epoch = Instant::now();
+        let accumulator = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
+        for _ in 0..10 {
+            accumulator
+                .record_success(epoch + Duration::from_millis(150), Duration::from_micros(1));
+        }
+        let warmup_end = epoch + Duration::from_millis(100);
+        accumulator.set_warmup_end(warmup_end);
+        thread::sleep(Duration::from_millis(150));
+        let metrics = LoadMetrics::new(accumulator);
+        let elapsed = Instant::now().saturating_duration_since(warmup_end);
+        assert!(
+            !elapsed.is_zero(),
+            "wall clock must be past warmup_end for throughput denominator"
+        );
+        let expected = 10.0 / elapsed.as_secs_f64();
+        assert!(
+            (metrics.throughput() - expected).abs() < expected * 0.35,
+            "throughput {:?} expected ~{} (elapsed {:?})",
+            metrics.throughput(),
+            expected,
+            elapsed
+        );
     }
 }
