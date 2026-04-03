@@ -4,10 +4,13 @@ use std::cell::RefCell;
 use std::io::IsTerminal;
 use std::time::Duration;
 
-use crate::error::{PerformanceAssertionDetails, ShakedownError};
+use crate::error::{InternalError, PerformanceAssertionDetails, ShakedownError};
 
+use super::baseline::{
+    compare_load_metrics_to_baseline, render_comparison_markdown, LoadBaseline, Tolerance,
+};
 use super::metrics::LoadMetrics;
-use super::{AssertionVerdict, Phase};
+use super::{AssertionVerdict, Phase, ReportComparison};
 
 /// Chainable SLO-style checks on steady-state [`LoadMetrics`] (warmup excluded when configured).
 #[derive(Debug)]
@@ -16,6 +19,7 @@ pub struct LoadMetricsAssertBuilder<'a> {
     load_name: String,
     correlation_phase: Phase,
     verdicts: RefCell<Vec<AssertionVerdict>>,
+    last_comparison: RefCell<Option<super::baseline::ComparisonResult>>,
 }
 
 impl LoadMetrics {
@@ -49,6 +53,7 @@ impl<'a> LoadMetricsAssertBuilder<'a> {
             load_name,
             correlation_phase,
             verdicts: RefCell::new(Vec::new()),
+            last_comparison: RefCell::new(None),
         }
     }
 
@@ -74,10 +79,12 @@ impl<'a> LoadMetricsAssertBuilder<'a> {
         }
         let use_color = std::io::stderr().is_terminal();
         let verdicts = self.verdicts_snapshot();
+        let comparison = self.last_comparison.borrow();
         let text = super::summary::render_summary_styled(
             &self.load_name,
             self.metrics,
             Some(&verdicts),
+            comparison.as_ref(),
             use_color,
         );
         eprintln!("{text}");
@@ -95,6 +102,7 @@ impl<'a> LoadMetricsAssertBuilder<'a> {
             measured,
             threshold,
             phase: self.correlation_phase.clone(),
+            comparison_table: None,
         }))
     }
 
@@ -270,6 +278,51 @@ impl<'a> LoadMetricsAssertBuilder<'a> {
             ok,
         )
     }
+
+    /// Load a named baseline for `scenario_id` and fail if steady-state metrics regressed beyond `tolerance` (US-007).
+    pub fn no_regression_from(
+        &self,
+        baseline_name: impl AsRef<str>,
+        scenario_id: impl AsRef<str>,
+        tolerance: Tolerance,
+    ) -> Result<&Self, ShakedownError> {
+        tolerance.validate().map_err(|message| {
+            ShakedownError::Internal(InternalError::Bug(format!("invalid tolerance: {message}")))
+        })?;
+        let baseline = LoadBaseline::load(scenario_id.as_ref(), baseline_name.as_ref())?;
+        let result = compare_load_metrics_to_baseline(self.metrics, &baseline, &tolerance);
+        let markdown = render_comparison_markdown(&result);
+        if !result.passed {
+            return Err(ShakedownError::PerformanceAssertionFailed(Box::new(
+                PerformanceAssertionDetails {
+                    load_name: self.load_name.clone(),
+                    metric: "baseline_regression".to_string(),
+                    measured: format!("vs baseline '{}'", baseline.baseline_name),
+                    threshold: format!(
+                        "latency ≤ baseline×(1+{:.3}); throughput ≥ baseline×(1−{:.3}); error_rate per tolerance (floor {:.2}%)",
+                        tolerance.percent,
+                        tolerance.percent,
+                        tolerance.error_rate_floor * 100.0
+                    ),
+                    phase: self.correlation_phase.clone(),
+                    comparison_table: Some(markdown),
+                },
+            )));
+        }
+        *self.last_comparison.borrow_mut() = Some(result.clone());
+        let report_comparison: ReportComparison = (&result).into();
+        self.metrics.set_report_comparison(report_comparison);
+        self.record_pass(
+            format!("regression vs {}", result.baseline_name),
+            "within tolerance".to_string(),
+            format!(
+                "±{:.1}% rel; err ceiling {:.2}% when baseline low",
+                tolerance.percent * 100.0,
+                tolerance.error_rate_floor * 100.0
+            ),
+        );
+        Ok(self)
+    }
 }
 
 fn tail_ratio(p50: Duration, p99: Duration) -> f64 {
@@ -303,9 +356,11 @@ fn format_rate_pct(rate: f64) -> String {
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use std::time::Duration;
 
+    use super::super::baseline::LoadBaseline;
     use super::super::metrics::LoadMetricsAccumulator;
-    use super::super::Rate;
+    use super::super::{resolve_load_baseline_path, write_load_baseline_to_path, Rate};
 
     fn sample_metrics() -> LoadMetrics {
         let epoch = std::time::Instant::now();
@@ -386,5 +441,83 @@ mod tests {
             error,
             ShakedownError::PerformanceAssertionFailed(details) if details.metric == "drops"
         ));
+    }
+
+    #[test]
+    fn no_regression_from_succeeds_against_saved_baseline() {
+        let epoch = std::time::Instant::now();
+        let accumulator = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
+        for index in 0..40u64 {
+            accumulator.record_success(
+                epoch + Duration::from_millis(index + 2),
+                Duration::from_micros(500 + index * 2),
+            );
+        }
+        let baseline_metrics = LoadMetrics::new(accumulator.clone());
+        let scenario_key = format!("noregr_ok_{}", std::process::id());
+        let mut baseline = LoadBaseline::from_load_metrics(&baseline_metrics, "v1", &scenario_key)
+            .expect("baseline");
+        // Wall-clock throughput differs between baseline capture and comparison; zero skips the row.
+        baseline.summary.throughput = 0.0;
+        let path = resolve_load_baseline_path(&scenario_key, "v1");
+        write_load_baseline_to_path(&baseline, &path).expect("write baseline");
+
+        let current = LoadMetrics::new(accumulator);
+        current
+            .assert("checkout")
+            .no_regression_from("v1", &scenario_key, Tolerance::percent(0.25))
+            .expect("within tolerance");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn no_regression_from_fails_with_comparison_table() {
+        let epoch = std::time::Instant::now();
+        let accumulator_fast = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
+        for index in 0..25u64 {
+            accumulator_fast.record_success(
+                epoch + Duration::from_millis(index + 1),
+                Duration::from_micros(80 + index),
+            );
+        }
+        let scenario_key = format!("noregr_fail_{}", std::process::id());
+        let mut baseline = LoadBaseline::from_load_metrics(
+            &LoadMetrics::new(accumulator_fast.clone()),
+            "fast",
+            &scenario_key,
+        )
+        .expect("baseline");
+        baseline.summary.throughput = 0.0;
+        let path = resolve_load_baseline_path(&scenario_key, "fast");
+        write_load_baseline_to_path(&baseline, &path).expect("write baseline");
+
+        let accumulator_slow = Arc::new(LoadMetricsAccumulator::new_with_epoch(epoch));
+        for index in 0..25u64 {
+            accumulator_slow.record_success(
+                epoch + Duration::from_millis(40 + index),
+                Duration::from_millis(8),
+            );
+        }
+        let current = LoadMetrics::new(accumulator_slow);
+        let error = current
+            .assert("slow")
+            .no_regression_from("fast", &scenario_key, Tolerance::percent(0.01))
+            .expect_err("regression expected");
+
+        match error {
+            ShakedownError::PerformanceAssertionFailed(details) => {
+                assert_eq!(details.metric, "baseline_regression");
+                let table = details
+                    .comparison_table
+                    .as_deref()
+                    .expect("comparison markdown");
+                assert!(table.contains('|'));
+                assert!(table.contains("p99") || table.contains("p50"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let _ = std::fs::remove_file(&path);
     }
 }

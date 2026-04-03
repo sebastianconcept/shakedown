@@ -1,5 +1,6 @@
 //! Terminal-friendly load run summaries (US-004).
 
+use super::baseline::ComparisonResult;
 use super::metrics::LoadMetrics;
 use super::AssertionVerdict;
 
@@ -23,7 +24,7 @@ pub(crate) fn load_summary_print_enabled() -> bool {
 
 /// Plain-text summary (no ANSI): load name, counts, error rate, throughput, percentiles, min/max.
 pub fn render_summary(load_name: &str, metrics: &LoadMetrics) -> String {
-    render_summary_styled(load_name, metrics, None, false)
+    render_summary_styled(load_name, metrics, None, None, false)
 }
 
 /// Plain-text summary including per-assertion verdict rows when `verdicts` is non-empty.
@@ -32,7 +33,17 @@ pub fn render_summary_with_verdicts(
     metrics: &LoadMetrics,
     verdicts: &[AssertionVerdict],
 ) -> String {
-    render_summary_styled(load_name, metrics, Some(verdicts), false)
+    render_summary_styled(load_name, metrics, Some(verdicts), None, false)
+}
+
+/// Summary with verdict rows and an optional baseline comparison block (US-007).
+pub fn render_summary_with_comparison(
+    load_name: &str,
+    metrics: &LoadMetrics,
+    verdicts: &[AssertionVerdict],
+    comparison: &ComparisonResult,
+) -> String {
+    render_summary_styled(load_name, metrics, Some(verdicts), Some(comparison), false)
 }
 
 /// Summary with optional ANSI styling (`use_color` should be `stderr.is_terminal()` at call sites).
@@ -40,6 +51,7 @@ pub(crate) fn render_summary_styled(
     load_name: &str,
     metrics: &LoadMetrics,
     verdicts: Option<&[AssertionVerdict]>,
+    comparison: Option<&ComparisonResult>,
     use_color: bool,
 ) -> String {
     let mut lines = Vec::new();
@@ -97,6 +109,25 @@ pub(crate) fn render_summary_styled(
                 };
                 lines.push(line);
             }
+        }
+    }
+
+    if let Some(result) = comparison {
+        lines.push(String::new());
+        lines.push(indent_line("Baseline comparison:", use_color, true));
+        lines.push(format!(
+            "    baseline '{}'  (tolerance ±{:.1}% rel; err floor {:.2}%)",
+            result.baseline_name,
+            result.tolerance.percent * 100.0,
+            result.tolerance.error_rate_floor * 100.0
+        ));
+        for row in &result.metrics {
+            let verdict = if row.passed { "✓" } else { "✗" };
+            let line = format!(
+                "    {verdict} {}  {} → {}  ({})",
+                row.name, row.baseline_value, row.current_value, row.limit_description
+            );
+            lines.push(line);
         }
     }
 
@@ -208,8 +239,34 @@ mod tests {
 
     #[test]
     fn render_summary_styled_with_color_has_escape_codes() {
-        let text = render_summary_styled("x", &sample_metrics(), None, true);
+        let text = render_summary_styled("x", &sample_metrics(), None, None, true);
         assert!(text.contains('\x1b'));
+    }
+
+    #[test]
+    fn render_summary_includes_baseline_comparison_section() {
+        use super::super::baseline::{ComparisonResult, MetricComparison, Tolerance};
+
+        let metrics = sample_metrics();
+        let comparison = ComparisonResult {
+            baseline_name: "main".to_string(),
+            tolerance: Tolerance::percent(0.05),
+            passed: true,
+            metrics: vec![MetricComparison {
+                name: "p99".to_string(),
+                baseline_value: "1.00ms".to_string(),
+                current_value: "1.05ms".to_string(),
+                change_pct: 0.05,
+                threshold_pct: 0.05,
+                passed: true,
+                limit_description: "≤ 1.10ms (+5.0% vs baseline)".to_string(),
+            }],
+        };
+        let text = render_summary_with_comparison("checkout", &metrics, &[], &comparison);
+        assert!(text.contains("Baseline comparison"));
+        assert!(text.contains("main"));
+        assert!(text.contains("p99"));
+        assert!(text.contains("✓"));
     }
 
     #[test]

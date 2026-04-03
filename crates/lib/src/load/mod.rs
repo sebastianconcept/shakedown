@@ -82,8 +82,9 @@ mod summary;
 
 pub use assertions::LoadMetricsAssertBuilder;
 pub use baseline::{
-    read_load_baseline_from_path, resolve_load_baseline_path, save_baseline,
-    write_load_baseline_to_path, LoadBaseline, LOAD_BASELINE_SCHEMA_VERSION,
+    compare_load_metrics_to_baseline, read_load_baseline_from_path, render_comparison_markdown,
+    resolve_load_baseline_path, save_baseline, write_load_baseline_to_path, ComparisonResult,
+    LoadBaseline, MetricComparison, Tolerance, LOAD_BASELINE_SCHEMA_VERSION,
 };
 pub use handle::LoadHandle;
 pub use metrics::LoadMetrics;
@@ -91,7 +92,7 @@ pub use report::{
     read_load_run_report_from_path, resolve_load_report_path, write_load_run_report_to_path,
     LoadRunReport, ReportMetrics, LOAD_RUN_REPORT_SCHEMA_VERSION,
 };
-pub use summary::{render_summary, render_summary_with_verdicts};
+pub use summary::{render_summary, render_summary_with_comparison, render_summary_with_verdicts};
 
 use std::time::Duration;
 
