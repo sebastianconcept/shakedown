@@ -1,4 +1,4 @@
-//! HTTP-based Elasticsearch/OpenSearch index operations (reqwest only; OQ-6.1).
+//! HTTP-based Elasticsearch/OpenSearch index operations (reqwest only; no bundled ES/OS client crate).
 //!
 //! Shared by [`crate::resources::elasticsearch::ElasticsearchHelpers`],
 //! [`crate::resources::opensearch::OpenSearchHelpers`], and Elasticsearch/OpenSearch resource

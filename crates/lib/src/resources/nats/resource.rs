@@ -8,7 +8,7 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use tokio::sync::Mutex;
 
 const NATS_CLIENT_PORT: u16 = 4222;
-/// Default `nats` image tag (Docker Hub `nats:2`; extra-infra PRD).
+/// Default `nats` image tag (Docker Hub `nats:2`).
 pub const DEFAULT_NATS_IMAGE_TAG: &str = "2";
 
 #[allow(clippy::large_enum_variant)]

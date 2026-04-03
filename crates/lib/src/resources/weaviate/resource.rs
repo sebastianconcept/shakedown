@@ -108,7 +108,7 @@ async fn delete_classes_with_prefix(rest_url: &str, class_prefix: &str) -> Resul
 /// `GET /v1/.well-known/ready` so flakes from container HTTP wait strategies are avoided.
 ///
 /// Default tag **`1.28.2`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_WEAVIATE_IMAGE_TAG`.
-/// The container enables anonymous access (`AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true`) per SPECS.
+/// The container enables anonymous access (`AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true`) for local test runs without auth setup.
 #[derive(Debug)]
 pub struct WeaviateResource {
     image_tag: Option<String>,

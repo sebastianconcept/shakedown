@@ -48,12 +48,11 @@
 //!
 //! - **Shipped:** `mvp-outbox` — first-party outbox helpers on relational + Kafka bindings (`ctx.outbox()`, row/payload/Kafka assertions).
 //! - **Prior:** `mvp-postgres-mariadb` — PostgreSQL, MariaDB, Oracle MySQL, and SQLite [`Resource`] types with suite-shared Docker containers and per-scenario isolation.
-//! - **Next:** `mvp-fault-injection` — Toxiproxy-backed fault scenarios on the [`#[shakedown::faulty_test]`](crate::faulty_test) path (see adopted docs `ideation/scoping-brief-mvp-fault-injection.md`).
+//! - **Next:** `mvp-fault-injection` — Toxiproxy-backed fault scenarios on the [`#[shakedown::faulty_test]`](crate::faulty_test) path: inject latency, loss, and partition behavior on proxied dependencies while scenarios run.
 //!
 //! ## See also
 //!
-//! Product docs (PRD, SPECS, TECH-STACK) live in the adopted documentation root; see the workspace
-//! [`docs/README.md`](../../docs/README.md).
+//! The workspace [`docs/README.md`](../../docs/README.md) points maintainers at product and architecture notes kept alongside this repo.
 //!
 //! ## Example
 //!
@@ -96,7 +95,7 @@
 
 mod docker_labels;
 
-/// Cluster topology — Docker networks and node control (`cluster` feature; US-001+).
+/// Cluster topology — Docker networks and node control (`cluster` feature).
 #[cfg(feature = "cluster")]
 pub mod cluster;
 /// Events, timelines, and Docker-backed diagnostics — see submodule docs on [`instrumentation`].
@@ -142,7 +141,7 @@ pub mod fault_injection;
 mod helper_prelude;
 /// Scenario [`lifecycle::Context`], lifecycle phases, and [`lifecycle::run_scenario`].
 pub mod lifecycle;
-/// Open-model load profiles (`load` feature; US-006+).
+/// Open-model load profiles (`load` feature).
 #[cfg(feature = "load")]
 pub mod load;
 /// Service mock service types and traits (`mock-services` feature, default).
@@ -399,15 +398,12 @@ pub use crate::resources::ToxiproxyResource;
 
 #[cfg(feature = "load")]
 pub use crate::load::{
-    compare_load_metrics_to_baseline, read_load_baseline_from_path, read_load_run_report_from_path,
-    render_comparison_markdown, render_summary, render_summary_with_comparison,
-    render_summary_with_verdicts, resolve_load_baseline_path, resolve_load_report_path,
-    save_baseline, write_load_baseline_to_path, write_load_run_report_to_path, AssertionVerdict,
+    compare_load_metrics_to_baseline, render_comparison_markdown, render_summary,
+    render_summary_with_comparison, render_summary_with_verdicts, AssertionVerdict,
     ComparisonResult, LoadBaseline, LoadError, LoadHandle, LoadMetrics, LoadMetricsAssertBuilder,
     LoadProfile, LoadProfileBuilder, LoadRunReport, LoadRuntime, MetricComparison, NamedPhase,
     Phase as LoadPhase, Rate, RecoveryConfig, ReportAssertion, ReportComparison,
     ReportComparisonMetric, ReportMetrics, SaturationPolicy, Tolerance,
-    LOAD_BASELINE_SCHEMA_VERSION, LOAD_RUN_REPORT_SCHEMA_VERSION,
 };
 
 #[cfg(feature = "rabbitmq")]

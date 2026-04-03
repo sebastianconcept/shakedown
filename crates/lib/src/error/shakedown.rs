@@ -24,7 +24,7 @@ pub struct PerformanceAssertionDetails {
     pub threshold: String,
     /// Load profile phase used for correlation (not lifecycle phase).
     pub phase: crate::load::Phase,
-    /// Per-metric baseline vs current table (US-007 regression checks).
+    /// Per-metric baseline vs current table when a regression check fails.
     pub comparison_table: Option<String>,
 }
 

@@ -167,4 +167,4 @@ From the repo root: `cargo test -p shakedown-macros` (unit tests + trybuild UI t
 ## Related docs
 
 - **Crate overview and resource details:** [`crates/lib/README.md`](../lib/README.md) — includes [Extra infrastructure features](../lib/README.md#extra-infrastructure-features-extra-infra) (`redis` … `timescaledb`) and [Typed helpers](../lib/README.md#typed-helpers).
-- **MVP sequence:** adopted [`MVP.md`](/Users/seb/docs/shakedown/MVP.md).
+- **MVP / feature sequencing:** follow the in-repo `feature/*/README.md` files when present, or your team’s external planning docs if you use them.

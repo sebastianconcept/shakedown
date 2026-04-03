@@ -1,4 +1,4 @@
-//! Integration tests for open-model [`shakedown::LoadHandle`] (US-007, US-009).
+//! Integration tests for open-model [`shakedown::LoadHandle`]: scheduling, metrics, phase events, and recovery waits.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

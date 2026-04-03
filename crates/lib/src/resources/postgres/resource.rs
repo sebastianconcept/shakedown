@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tokio_postgres::NoTls;
 
 const POSTGRES_PORT: u16 = 5432;
-/// Default `postgres` image tag (Debian-based, non-alpine; see `mvp-postgres-mariadb` SPECS).
+/// Default `postgres` image tag (Debian-based, non-alpine; matches common testcontainers defaults).
 pub const DEFAULT_POSTGRES_IMAGE_TAG: &str = "16";
 
 #[allow(clippy::large_enum_variant)]

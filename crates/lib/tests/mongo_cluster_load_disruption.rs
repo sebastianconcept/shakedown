@@ -1,4 +1,4 @@
-//! Capstone: MongoDB replica set + open-model load + primary step-down (US-019).
+//! MongoDB replica set under load while forcing a primary step-down (integration; Docker).
 //!
 //! Requires Docker. Run with:
 //!

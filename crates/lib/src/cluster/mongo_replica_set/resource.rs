@@ -98,7 +98,7 @@ pub(crate) struct MongoReplicaSetSuiteSnapshot {
     pub(crate) host_ports: Vec<u16>,
     pub(crate) container_ids: Vec<String>,
     pub(crate) node_count: usize,
-    /// `true` when inter-node Toxiproxy mesh is active (US-018).
+    /// `true` when inter-node Toxiproxy mesh is active.
     #[cfg_attr(
         not(all(feature = "fault-injection", feature = "mongodb-cluster")),
         allow(dead_code)
@@ -319,7 +319,7 @@ pub struct MongoReplicaSetResource {
     client_host: Option<String>,
     host_ports: Vec<u16>,
     database_name: String,
-    /// When true and Toxiproxy is registered, `replSetInitiate` runs after the mesh is created (US-018).
+    /// When true and Toxiproxy is registered, `replSetInitiate` runs after the mesh is created.
     #[cfg(all(feature = "fault-injection", feature = "mongodb-cluster"))]
     defer_repl_set_init: bool,
 }

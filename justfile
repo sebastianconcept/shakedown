@@ -66,8 +66,38 @@ test-macros:
 test-outbox-sqlite:
   cargo test -p shakedown --features outbox,sqlite --test outbox_sqlite
 
+# ----------------------------
+# `shakedown` — load / performance (`load` feature)
+# ----------------------------
+
+# Open-model load driver, HdrHistogram metrics, warmup, JSON reports, baselines, performance assertions,
+# and `run_scenario` + failure-timeline wiring. Runs `#[cfg(feature = "load")]` unit tests plus
+# `load_handle` and `load_performance_us008` integration binaries (no Docker).
+check-load:
+  cargo check -p shakedown --features load --all-targets
+
+clippy-load:
+  cargo clippy -p shakedown --features load --all-targets -- -D warnings
+
+# Full load feature test run; uses nextest when `cargo-nextest` is on PATH (same idea as `just test`).
+test-load:
+  if command -v cargo-nextest >/dev/null 2>&1; then \
+    cargo nextest run -p shakedown --features load; \
+  else \
+    echo "cargo-nextest not installed; falling back to cargo test." >&2; \
+    cargo test -p shakedown --features load; \
+  fi
+
+# Quick smoke: open-model scheduling + event log merge (`tests/load_handle.rs` only).
+test-load-handle:
+  cargo test -p shakedown --features load --test load_handle
+
+# Performance stack integration: SLO assertions, JSON reports, baselines, regression checks, and failure-timeline JSON.
+test-load-performance:
+  cargo test -p shakedown --features load --test load_performance_us008
+
 # Every integration feature, every test target, including `#[ignore]` (needs Docker for ignored tests). Does not enable `no-diagnostics`, so bollard diagnostics tests run. Uses nextest when installed (same idea as `just test`).
-test-shakedown-all-include-ignored:
+test-all-include-ignored:
   if command -v cargo-nextest >/dev/null 2>&1; then \
     cargo nextest run -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite,fault-injection" -- --include-ignored; \
   else \
@@ -106,3 +136,7 @@ test-toxiproxy-ignored:
 
 test-fault-injection-kafka-ignored:
   cargo test -p shakedown --features kafka,fault-injection --test fault_injection_kafka -- --ignored
+
+# MongoDB replica set under open-model load while forcing a primary step-down (Docker; `#[ignore]` by default).
+test-mongo-cluster-load-disruption-ignored:
+  cargo test -p shakedown --features mongodb-cluster,load --test mongo_cluster_load_disruption -- --ignored

@@ -229,7 +229,7 @@ pub trait Resource: Send + Sync {
 }
 
 /// First-party resources as a closed enum for efficient internal dispatch.
-#[allow(clippy::large_enum_variant)] // Kafka holds a container handle; boxing would diverge from SPECS §1a.
+#[allow(clippy::large_enum_variant)] // Kafka holds a container handle; boxing would diverge from the public BuiltinResource shape.
 #[derive(Debug)]
 pub enum BuiltinResource {
     /// Fake resource for non-Docker tests (unit test path)
@@ -248,7 +248,7 @@ pub enum BuiltinResource {
     Postgres(PostgresResource),
 
     #[cfg(feature = "postgres-cluster")]
-    /// Docker-backed PostgreSQL primary + streaming replica (per-scenario containers; US-014).
+    /// Docker-backed PostgreSQL primary + streaming replica (per-scenario containers).
     PostgresReplicaSet(crate::PostgresReplicaSetResource),
 
     #[cfg(feature = "mariadb")]
@@ -288,15 +288,15 @@ pub enum BuiltinResource {
     MongoReplicaSet(crate::MongoReplicaSetResource),
 
     #[cfg(feature = "kafka-cluster")]
-    /// Docker-backed multi-broker KRaft Kafka cluster (shared bridge network; US-010).
+    /// Docker-backed multi-broker KRaft Kafka cluster (shared bridge network).
     KafkaCluster(crate::KafkaClusterResource),
 
     #[cfg(feature = "rabbitmq-cluster")]
-    /// Docker-backed RabbitMQ Erlang cluster (shared bridge network; quorum default queue type; US-016).
+    /// Docker-backed RabbitMQ Erlang cluster (shared bridge network; quorum default queue type).
     RabbitCluster(crate::RabbitClusterResource),
 
     #[cfg(feature = "redis-sentinel")]
-    /// Docker-backed Redis primary/replicas + Sentinel quorum (shared bridge network; US-012).
+    /// Docker-backed Redis primary/replicas + Sentinel quorum (shared bridge network).
     RedisSentinel(crate::RedisSentinelResource),
 
     #[cfg(feature = "nats")]
@@ -892,7 +892,7 @@ pub struct MysqlBindings {
 #[cfg(feature = "sqlite")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SqliteBindings {
-    /// URI string for this scenario's database (named in-memory with shared cache; see feature SPECS).
+    /// URI string for this scenario's database (named in-memory with shared cache; matches the `sqlite` feature wiring).
     pub database_url: String,
 }
 

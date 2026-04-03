@@ -1,4 +1,4 @@
-//! Inter-node Toxiproxy mesh for MongoDB replica sets (US-018; `fault-injection` + `mongodb-cluster`).
+//! Inter-node Toxiproxy mesh for MongoDB replica sets (`fault-injection` + `mongodb-cluster` features).
 //!
 //! When both [`crate::resources::BuiltinResource::Toxiproxy`] and [`crate::MongoReplicaSetResource`]
 //! are registered, replica set initiation is deferred until after Toxiproxy provisions; the harness

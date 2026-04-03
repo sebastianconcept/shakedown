@@ -15,9 +15,9 @@ pub const DEFAULT_INFLUXDB_IMAGE_REPOSITORY: &str = "influxdb";
 /// Default image tag (`2` — InfluxDB 2.x).
 pub const DEFAULT_INFLUXDB_IMAGE_TAG: &str = "2";
 const INFLUX_HTTP_PORT: u16 = 8086;
-/// Fixed org name from container init (OQ-4.1 / SPECS).
+/// Fixed org name passed into container init (stable for tests and helpers).
 pub const SUITE_ORGANIZATION: &str = "shakedown";
-/// Fixed admin token from `DOCKER_INFLUXDB_INIT_ADMIN_TOKEN` (OQ-4.1).
+/// Fixed admin token from `DOCKER_INFLUXDB_INIT_ADMIN_TOKEN` (must match container env).
 pub const SUITE_ADMIN_TOKEN: &str = "shakedown-admin-token";
 
 #[allow(clippy::large_enum_variant)]

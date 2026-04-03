@@ -31,6 +31,13 @@ pub enum InternalError {
     ///
     /// Cause: explicit framework defect path; please report with a minimal repro.
     Bug(String),
+    /// Internal error: Load artifact I/O: {operation} — {detail}
+    ///
+    /// Cause: reading or writing load reports/baselines under `target/shakedown/` (missing file, permissions, disk full, etc.).
+    LoadArtifactIo {
+        operation: &'static str,
+        detail: String,
+    },
     /// Internal error: {msg}
     ///
     /// Cause: internal failure with captured backtrace (not shown in this message).
@@ -52,6 +59,7 @@ impl Error for InternalError {
             InternalError::InvalidConfiguration(_) => None,
             InternalError::UnexpectedState(_) => None,
             InternalError::Bug(_) => None,
+            InternalError::LoadArtifactIo { .. } => None,
             InternalError::WithBacktrace { .. } => None,
             InternalError::PoisonedMutex(_) => None,
         }
