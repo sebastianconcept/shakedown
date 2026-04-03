@@ -300,7 +300,7 @@ pub enum BuiltinResource {
     RedisSentinel(crate::RedisSentinelResource),
 
     #[cfg(feature = "nats")]
-    /// Docker-backed NATS (official image via testcontainers-modules; suite-shared server; core pub/sub only).
+    /// Docker-backed NATS (official image via testcontainers-modules; suite-shared server; JetStream enabled for publication verification).
     Nats(NatsResource),
 
     #[cfg(feature = "neo4j")]

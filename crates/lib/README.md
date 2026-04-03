@@ -35,7 +35,7 @@ shakedown/
 | `extra-infra` | ✅ **Complete** (2026-03-31) — twelve additional first-party resources (Redis, Valkey, MongoDB, NATS, Neo4j, DuckDB, Elasticsearch, OpenSearch, Qdrant, Weaviate, InfluxDB, TimescaleDB); see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) |
 | `mvp-examples` | **Next** — living `crates/examples` catalog ( **`MVP.md`** row 9 in adopted docs under `~/docs/shakedown/`) |
 
-- **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka**, **RabbitMQ**, **NATS** (core pub/sub), and **Redis Streams** publication proof (`assert_kafka_published`, `assert_rabbit_published`, `assert_nats_published`, `assert_redis_streams_published`) on top of relational, document, or in-process storage bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below). **Extended outbox** (2026-04): **MongoDB** and **DuckDB** storage paths match the same `Outbox` row APIs as SQL engines.
+- **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka**, **RabbitMQ**, **NATS** (JetStream), and **Redis Streams** publication proof (`assert_kafka_published`, `assert_rabbit_published`, `assert_nats_published`, `assert_redis_streams_published`) on top of relational, document, or in-process storage bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below). **Extended outbox** (2026-04): **MongoDB** and **DuckDB** storage paths match the same `Outbox` row APIs as SQL engines.
 - **Also shipped:** `mock-services` — mock upstream HTTP/gRPC servers bound on localhost so scenarios assert outbound calls at the **network** layer; see [Mock services](#mock-services).
 - **Also shipped:** **`services`** (service-under-test) — opt-in Cargo feature to run **application containers** via testcontainers during scenarios: [`ServiceUnderTest`](src/service/builder.rs) → [`ServiceSpec`](src/service/types.rs), convention-based **env injection** (Kafka, relational DBs, RabbitMQ, Redis/Valkey, MongoDB, Neo4j, mock services, `depends_on` peers), **convergence health checks**, [`Context::service_url`](src/lifecycle/mod.rs) / [`service_handle`](src/lifecycle/mod.rs) on the test host (`127.0.0.1`), and **bollard** diagnostics labels — see [Service under test](#service-under-test-services-feature).
 - **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle/mod.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
@@ -55,7 +55,7 @@ The following **Cargo features** add first-party [`Resource`](src/resources.rs) 
 | `redis` | Suite-shared **Redis** (`redis:7`), RESP client, key-prefix isolation, [`RedisHelpers`](src/resources/redis/helpers.rs) (`ctx.redis()`). |
 | `valkey` | Same public types as Redis against **Valkey** (`valkey/valkey:8`); still `ctx.redis()`. |
 | `mongodb` | **MongoDB** `mongod`, per-scenario database, [`MongoHelpers`](src/resources/mongo/helpers.rs). |
-| `nats` | **NATS** core pub/sub (not JetStream), subject-prefix isolation, [`NatsHelpers`](src/resources/nats/helpers.rs). |
+| `nats` | **NATS** with **JetStream** enabled in the suite container, subject-prefix isolation, [`NatsHelpers`](src/resources/nats/helpers.rs); publication proof uses JetStream streams. |
 | `neo4j` | **Neo4j 5.x** Bolt (Enterprise image default for multi-database isolation), [`Neo4jHelpers`](src/resources/neo4j/helpers.rs). |
 | `duckdb` | **DuckDB** in-process (no Docker), named in-memory DB per scenario, [`DuckDbHelpers`](src/resources/duckdb/helpers.rs). |
 | `elasticsearch` | **Elasticsearch 8** single-node, index-prefix isolation, [`ElasticsearchHelpers`](src/resources/elasticsearch/helpers.rs); builds shared HTTP [`search_operations`](src/resources/search_operations.rs). |
@@ -341,7 +341,7 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 
 **NATS (`nats` feature, `testcontainers-modules::nats`, default tag `2`):**
 
-- [`NatsResource`](src/resources.rs) uses a **suite-level** broker: first provision starts one container; refcounted teardown removes it when the last scenario ends. Each scenario gets a [`sanitize_nats_subject_prefix`](src/resources.rs) (`shakedown.<scenario>.`) applied by [`NatsHelpers`](src/resources/nats/helpers.rs) to logical subjects. Core **pub/sub only** — JetStream is not enabled on the default server command.
+- [`NatsResource`](src/resources.rs) uses a **suite-level** broker: first provision starts one container; refcounted teardown removes it when the last scenario ends. Each scenario gets a [`sanitize_nats_subject_prefix`](src/resources.rs) (`shakedown.<scenario>.`) applied by [`NatsHelpers`](src/resources/nats/helpers.rs) to logical subjects. The container starts with **JetStream** (`--jetstream`) so [`NatsPublicationVerifier`](src/publication/nats_verifier.rs) can assert persisted messages.
 - **Image tag:** [`NatsResource::with_image_tag`](src/resources.rs), or **`SHAKEDOWN_NATS_IMAGE_TAG`** via [`NatsResource::with_image_tag_from_env`](src/resources.rs). Default tag is **`2`** (`nats:2`).
 - [`NatsBindings`](src/resources.rs) on [`Context`](src/lifecycle/mod.rs) after provision (`engine: nats` in handle metadata). Use [`Context::nats()`](src/lifecycle/mod.rs) for [`NatsHelpers`](src/resources/nats/helpers.rs) (`publish`, `subscribe_until` → [`ConsumedMessage`](src/helper_prelude.rs) list). Readiness uses **`async_nats`** connect + **`flush`** (client handshake to the broker).
 
@@ -543,7 +543,7 @@ The outbox API has **two layers**. You can use row assertions **without** any me
 |---------------------|---------------|---------------------|
 | **Kafka** | `kafka` | [`KafkaPublicationVerifier`](src/publication/kafka_verifier.rs), [`Outbox::assert_kafka_published`](src/outbox.rs) |
 | **RabbitMQ** | `rabbitmq` | [`RabbitMqPublicationVerifier`](src/publication/rabbit_verifier.rs), [`Outbox::assert_rabbit_published`](src/outbox.rs) |
-| **NATS** (core pub/sub) | `nats` | [`NatsPublicationVerifier`](src/publication/nats_verifier.rs), [`Outbox::assert_nats_published`](src/outbox.rs) |
+| **NATS** (JetStream) | `nats` | [`NatsPublicationVerifier`](src/publication/nats_verifier.rs), [`Outbox::assert_nats_published`](src/outbox.rs) |
 | **Redis Streams** | `redis` (or `valkey` with the same verifier) | [`RedisStreamsPublicationVerifier`](src/publication/redis_streams_verifier.rs), [`Outbox::assert_redis_streams_published`](src/outbox.rs) |
 
 Enable the matching Cargo feature; `outbox` alone does **not** pull in transports.
@@ -576,9 +576,9 @@ Any first-party **storage** row can pair with any first-party **publication** ve
 | MongoDB | ✓ | ✓ | ✓ | ✓ |
 | DuckDB | ✓ | ✓ | ✓ | ✓ |
 
-### NATS core pub/sub (subscribe-first)
+### NATS JetStream (publish-then-verify)
 
-NATS **core** pub/sub does not persist messages. [`NatsPublicationVerifier`](src/publication/nats_verifier.rs) **subscribes first**, then waits for a matching payload. Your scenario must **call** `assert_nats_published` **before** the code under test publishes (or use a concurrent pattern where the verifier is already subscribed — see [`tests/outbox_nats_publication.rs`](tests/outbox_nats_publication.rs)). JetStream is not covered by this verifier.
+[`NatsPublicationVerifier`](src/publication/nats_verifier.rs) reads from a **JetStream** stream that captures the scenario-namespaced subject (ephemeral pull consumer, `DeliverPolicy::All`). Messages are persisted, so you can publish first — including from the service under test — and call [`Outbox::assert_nats_published`](src/outbox.rs) afterward. The suite [`NatsResource`](src/resources/nats/resource.rs) starts `nats-server` with `--jetstream`. Override the stream name with [`NatsPublicationVerifierOptions`](src/publication/nats_verifier.rs); when `stream_name` is empty, it defaults to `SD_` plus a sanitized form of the namespaced subject.
 
 ### Supported combinations (commands)
 
@@ -677,7 +677,7 @@ See [`tests/outbox_rabbit.rs`](tests/outbox_rabbit.rs) for a full Docker-backed 
 
 ### Implementing `PublicationVerifier`
 
-Use this when your team’s bus is **not** covered by a first-party verifier (first-party today: **Kafka**, **RabbitMQ**, **NATS** core pub/sub, **Redis Streams**). For example, **AWS SQS** is not implemented first-party, but the trait is shaped so you can add an impl without a breaking API change.
+Use this when your team’s bus is **not** covered by a first-party verifier (first-party today: **Kafka**, **RabbitMQ**, **NATS** JetStream, **Redis Streams**). For example, **AWS SQS** is not implemented first-party, but the trait is shaped so you can add an impl without a breaking API change.
 
 1. **Trait** — Implement [`PublicationVerifier`](src/publication/verifier.rs) for your type with an associated `Options` struct (exchange, queue URL, region, etc.).
 2. **`assert_observed`** — Take [`Context`](src/lifecycle/mod.rs), a [`PublicationObserveSpec`](src/publication/spec.rs) (`aggregate_id`, `logical_channel`, optional `timeout`), and `&Self::Options`. Poll or consume until [`message_matches_aggregate_id`](src/publication/matching.rs) succeeds or the resolved deadline is exceeded ([`DEFAULT_PUBLICATION_OBSERVE_TIMEOUT`](src/publication/spec.rs): 20s when `timeout` is `None`).

@@ -464,6 +464,7 @@ pub fn faulty_test(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Builds registration code for a single resource spec (bare identifier or with config).
+#[allow(clippy::needless_return)]
 fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<proc_macro2::TokenStream> {
     let name = spec.ident.to_string();
 

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use std::sync::OnceLock;
 use testcontainers::core::{Image, ImageExt};
 use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::nats::Nats;
+use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use tokio::sync::Mutex;
 
 const NATS_CLIENT_PORT: u16 = 4222;
@@ -37,8 +37,9 @@ fn image_fingerprint(image: &Nats, tag_override: &Option<String>) -> String {
 /// Docker-backed NATS using testcontainers-modules (`nats` image).
 ///
 /// **Suite lifecycle:** one server per process; refcounted teardown removes the container when
-/// the last scenario completes. Core pub/sub only — subjects are ephemeral; no per-scenario
-/// broker cleanup beyond releasing the suite reference.
+/// the last scenario completes. **JetStream is enabled** on the server so
+/// [`crate::publication::NatsPublicationVerifier`] / [`crate::outbox::Outbox::assert_nats_published`]
+/// can read persisted messages for scenario-namespaced subjects.
 ///
 /// Default image tag is **`2`** (`nats:2`). Override with [`Self::with_image_tag`] or
 /// `SHAKEDOWN_NATS_IMAGE_TAG`.
@@ -119,10 +120,12 @@ impl Resource for NatsResource {
         let (host, port) = match &mut *guard {
             SuiteNatsState::Idle => {
                 let tag = self.image_tag.as_deref().unwrap_or(DEFAULT_NATS_IMAGE_TAG);
+                let jetstream_cmd = NatsServerCmd::default().with_jetstream();
                 let node = self
                     .image
                     .clone()
                     .with_tag(tag.to_string())
+                    .with_cmd(&jetstream_cmd)
                     .with_label(
                         crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
                         crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,

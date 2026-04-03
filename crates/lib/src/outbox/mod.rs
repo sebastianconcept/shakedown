@@ -256,15 +256,15 @@ impl<'ctx> Outbox<'ctx> {
         PublicationVerifier::assert_observed(&verifier, self.context, &spec, &options).await
     }
 
-    /// Assert a NATS message for `aggregate_id` was observed on the scenario-namespaced subject.
+    /// Assert a NATS message for `aggregate_id` was persisted to JetStream on the scenario-namespaced
+    /// subject.
     ///
     /// Pass the **logical** subject name (without the per-scenario prefix); it is passed through
-    /// [`crate::resources::NatsBindings::subject_namespace`].
+    /// [`crate::resources::NatsBindings::subject_namespace`]. The built-in [`crate::resources::NatsResource`]
+    /// starts the server with JetStream enabled so core `publish` traffic is captured by the stream.
     ///
-    /// **Subscribe-first:** NATS core pub/sub does not retain messages. The verifier subscribes
-    /// before it waits; your code must publish **after** subscription is active — for example run
-    /// this assertion concurrently with (or await it after spawning) a task that publishes, or call
-    /// publish after a short yield so this future can subscribe first.
+    /// JetStream retains messages, so you may **publish (or run the service under test) first** and
+    /// call this helper afterward — no subscribe-first ordering requirement.
     #[cfg(feature = "nats")]
     pub async fn assert_nats_published(
         &self,
@@ -282,13 +282,8 @@ impl<'ctx> Outbox<'ctx> {
             logical_channel: base_subject.to_string(),
             timeout: None,
         };
-        PublicationVerifier::assert_observed(
-            &verifier,
-            self.context,
-            &spec,
-            &NatsPublicationVerifierOptions,
-        )
-        .await
+        let options = NatsPublicationVerifierOptions::default();
+        PublicationVerifier::assert_observed(&verifier, self.context, &spec, &options).await
     }
 
     /// Assert a Redis Stream entry for `aggregate_id` was observed on the scenario-namespaced stream.

@@ -1,4 +1,5 @@
-//! NATS typed helpers — [`NatsHelpers`] for scenario-scoped publish and subscribe (core pub/sub).
+//! NATS typed helpers — [`NatsHelpers`] for scenario-scoped publish and subscribe via the async client.
+//! The suite [`super::resource::NatsResource`](crate::resources::nats::NatsResource) enables JetStream on the server so outbox publication checks can read persisted messages.
 
 use std::time::{Duration, Instant};
 
