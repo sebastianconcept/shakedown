@@ -5077,11 +5077,14 @@ name = "shakedown-examples"
 version = "0.1.0"
 dependencies = [
  "http 1.4.0",
+ "lapin",
  "mongodb",
  "prost 0.14.3",
+ "rdkafka",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "serial_test",
  "shakedown",
  "tokio",
  "tonic 0.14.5",
