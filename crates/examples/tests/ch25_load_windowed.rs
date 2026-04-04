@@ -1,7 +1,7 @@
 //! Chapter 25: Named phases, wall-clock windows, and distribution shape
 //!
 //! **Resources:** Postgres, Redis, Kafka
-//! **Service:** `example-order-service`
+//! **Service:** `order-service`
 //! **Load API:** Multi-phase profile with [`shakedown::LoadPhase::named`] labels (`baseline`, `peak`),
 //!   [`shakedown::LoadHandle::await_phase`], then windowed [`shakedown::LoadMetrics::p99_during`],
 //!   [`shakedown::LoadMetrics::error_rate_during`], [`shakedown::LoadMetrics::throughput_during`],
@@ -25,14 +25,14 @@ use shakedown::{LoadPhase, LoadProfile, Rate, SaturationPolicy};
 use shakedown_examples::{sample_order, ORDERS_SCHEMA_SQL};
 
 #[shakedown::test(resources = [Postgres, Redis, Kafka])]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka,load --test ch25_load_windowed -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka,load --test ch25_load_windowed -- --ignored"]
 async fn order_service_windowed_metrics_and_tail_ratio(ctx: &mut shakedown::Context) {
     ctx.postgres()
         .execute(ORDERS_SCHEMA_SQL, &[])
         .await
         .expect("seed orders schema");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))

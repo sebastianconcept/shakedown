@@ -1,7 +1,7 @@
 //! Chapter 19: Fulfillment Service on a three-member MongoDB replica set
 //!
 //! **Resources:** `MongoReplicaSet`, Kafka, RabbitMQ (companion service contract)
-//! **Service:** `example-fulfillment-service`
+//! **Service:** `fulfillment-service`
 //! **Assertions:** `mongo().assert_document_exists`, `mongo_cluster().step_down_primary`,
 //!   `await_new_primary`, `current_primary`, `cluster_handle::reset_topology`
 //! **Concepts:** Same HTTP + Mongo path as Parts II–III with suite-level replica set;
@@ -20,7 +20,7 @@ use shakedown_examples::sample_fulfillment;
 
 #[shakedown::test(resources = [MongoReplicaSet, Kafka, Rabbit])]
 #[serial]
-#[ignore = "requires Docker + locally-built example-fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,mongodb-cluster,mongodb,kafka,rabbitmq --test ch19_mongo_replica_set -- --ignored"]
+#[ignore = "requires Docker + locally-built fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,mongodb-cluster,mongodb,kafka,rabbitmq --test ch19_mongo_replica_set -- --ignored"]
 async fn fulfillment_writes_survive_mongo_primary_election(ctx: &mut shakedown::Context) {
     ctx.rabbit()
         .declare_topology(
@@ -32,14 +32,13 @@ async fn fulfillment_writes_survive_mongo_primary_election(ctx: &mut shakedown::
         .await
         .expect("declare RabbitMQ topology before the service publishes");
 
-    let fulfillment_spec =
-        shakedown::ServiceUnderTest::docker("example-fulfillment-service:latest")
-            .name("fulfillment-service")
-            .port(3001)
-            .health_check(shakedown::HealthCheck::http("/health"))
-            .pull_policy(shakedown::PullPolicy::Never)
-            .build()
-            .expect("fulfillment service spec");
+    let fulfillment_spec = shakedown::ServiceUnderTest::docker("fulfillment-service:latest")
+        .name("fulfillment-service")
+        .port(3001)
+        .health_check(shakedown::HealthCheck::http("/health"))
+        .pull_policy(shakedown::PullPolicy::Never)
+        .build()
+        .expect("fulfillment service spec");
 
     ctx.register_service(fulfillment_spec)
         .expect("register fulfillment-service");

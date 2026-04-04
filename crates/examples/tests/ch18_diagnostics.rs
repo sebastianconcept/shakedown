@@ -1,7 +1,7 @@
 //! Chapter 18: Bollard diagnostics — resource budgets and failure timelines
 //!
 //! **Resources:** Postgres, Redis, Kafka, MongoDB
-//! **Services:** `example-order-service` + `example-fulfillment-service`
+//! **Services:** `order-service` + `fulfillment-service`
 //! **Assertions:** `Context::assert_resource(..).peak_memory_under`, `avg_cpu_under`,
 //!   `render_failure_timeline`, inspection of merged `LogEntry` / `InfraEvent` records
 //! **Concepts:** suite diagnostics (`SHAKEDOWN_STATS_INTERVAL_MS`), logical service names on
@@ -87,9 +87,12 @@ async fn await_avg_cpu_under(
 }
 
 #[tokio::test]
-#[ignore = "requires Docker + locally-built example-order-service:latest and example-fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,mongodb,kafka,redis,diagnostics --test ch18_diagnostics -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest and fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,mongodb,kafka,redis,diagnostics --test ch18_diagnostics -- --ignored"]
 async fn both_services_resource_budgets_and_failure_timeline_string() {
-    std::env::set_var("SHAKEDOWN_STATS_INTERVAL_MS", "150");
+    // `set_var` is unsafe in multi-threaded programs (Rust RFC 3312); tests run single-threaded.
+    unsafe {
+        std::env::set_var("SHAKEDOWN_STATS_INTERVAL_MS", "150");
+    }
 
     let mut context = Context::new();
     context.register_builtin(BuiltinResource::Postgres(PostgresResource::new()));
@@ -110,27 +113,28 @@ async fn both_services_resource_budgets_and_failure_timeline_string() {
                     .await
                     .expect("seed orders schema");
 
-                let fulfillment_spec =
-                    ServiceUnderTest::docker("example-fulfillment-service:latest")
-                        .name("fulfillment-service")
-                        .port(3001)
-                        .health_check(HealthCheck::http("/health"))
-                        .pull_policy(PullPolicy::Never)
-                        .build()
-                        .expect("fulfillment service spec");
+                let fulfillment_spec = ServiceUnderTest::docker("fulfillment-service:latest")
+                    .name("fulfillment-service")
+                    .port(3001)
+                    .port_named("grpc", 50051)
+                    .health_check(HealthCheck::http("/health"))
+                    .pull_policy(PullPolicy::Never)
+                    .build()
+                    .expect("fulfillment service spec");
 
                 scenario_context
                     .register_service(fulfillment_spec)
                     .expect("register fulfillment-service");
 
-                let order_spec = ServiceUnderTest::docker("example-order-service:latest")
+                let order_spec = ServiceUnderTest::docker("order-service:latest")
                     .name("order-service")
                     .port(3000)
                     .health_check(HealthCheck::http("/health"))
                     .depends_on("fulfillment-service")
-                    .env_mapping(EnvMapping::service(
+                    .env_mapping(EnvMapping::service_named_port(
                         "fulfillment-service",
-                        "FULFILLMENT_URL",
+                        "grpc",
+                        "FULFILLMENT_GRPC_URI",
                     ))
                     .pull_policy(PullPolicy::Never)
                     .build()

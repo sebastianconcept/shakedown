@@ -1,7 +1,7 @@
 //! Chapter 22: Order Service with PostgreSQL primary + streaming replica
 //!
 //! **Resources:** `PostgresReplicaSet`, Redis, Kafka
-//! **Service:** `example-order-service` (started against the initial primary)
+//! **Service:** `order-service` (started against the initial primary)
 //! **Assertions:** `postgres_replica_set_cluster().promote_replica`, `stop_node`,
 //!   `current_primary`, `set_postgres_bindings` + `postgres().execute` on the promoted primary
 //! **Concepts:** Streaming replica promotion + stopping the former primary; harness bindings must
@@ -18,14 +18,14 @@ use shakedown_examples::{sample_order, ORDERS_SCHEMA_SQL};
 
 #[shakedown::test(resources = [PostgresReplicaSet, Redis, Kafka])]
 #[serial]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres-cluster,redis,kafka --test ch22_postgres_replica_set -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres-cluster,redis,kafka --test ch22_postgres_replica_set -- --ignored"]
 async fn postgres_promotion_then_harness_writes_on_new_primary(ctx: &mut shakedown::Context) {
     ctx.postgres()
         .execute(ORDERS_SCHEMA_SQL, &[])
         .await
         .expect("seed orders schema on initial primary");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))

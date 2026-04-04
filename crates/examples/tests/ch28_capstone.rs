@@ -2,7 +2,7 @@
 //!
 //! **Resources:** `Toxiproxy` (register **before** [`shakedown::MongoReplicaSetResource`] for inter-node mesh),
 //!   Kafka, RabbitMQ
-//! **Service:** `example-fulfillment-service` (single service under test per DQ-9)
+//! **Service:** `fulfillment-service` (single service under test per DQ-9)
 //! **Cluster + mesh:** [`shakedown::MongoClusterOps::step_down_primary`] during load;
 //!   [`shakedown::ClusterHandle::partition_nodes`] across the Toxiproxy mesh, then
 //!   [`shakedown::ClusterHandle::reset_topology`] to heal.
@@ -93,9 +93,12 @@ fn capstone_load_profile() -> LoadProfile {
 
 #[tokio::test]
 #[serial]
-#[ignore = "requires Docker + locally-built example-fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,mongodb-cluster,kafka,rabbitmq,load,fault-injection,diagnostics --test ch28_capstone -- --ignored"]
+#[ignore = "requires Docker + locally-built fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,mongodb-cluster,kafka,rabbitmq,load,fault-injection,diagnostics --test ch28_capstone -- --ignored"]
 async fn fulfillment_capstone_load_cluster_mesh_and_baseline() {
-    std::env::set_var("SHAKEDOWN_STATS_INTERVAL_MS", "180");
+    // `set_var` is unsafe in multi-threaded programs (Rust RFC 3312); tests run single-threaded.
+    unsafe {
+        std::env::set_var("SHAKEDOWN_STATS_INTERVAL_MS", "180");
+    }
 
     let mut context = Context::new();
     context.register_builtin(BuiltinResource::Toxiproxy(ToxiproxyResource::new()));
@@ -123,14 +126,13 @@ async fn fulfillment_capstone_load_cluster_mesh_and_baseline() {
                     .await
                     .expect("rabbit topology");
 
-                let fulfillment_spec =
-                    ServiceUnderTest::docker("example-fulfillment-service:latest")
-                        .name("fulfillment-service")
-                        .port(3001)
-                        .health_check(HealthCheck::http("/health"))
-                        .pull_policy(PullPolicy::Never)
-                        .build()
-                        .expect("fulfillment spec");
+                let fulfillment_spec = ServiceUnderTest::docker("fulfillment-service:latest")
+                    .name("fulfillment-service")
+                    .port(3001)
+                    .health_check(HealthCheck::http("/health"))
+                    .pull_policy(PullPolicy::Never)
+                    .build()
+                    .expect("fulfillment spec");
 
                 scenario_context
                     .register_service(fulfillment_spec)

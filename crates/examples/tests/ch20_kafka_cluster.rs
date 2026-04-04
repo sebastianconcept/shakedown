@@ -1,7 +1,7 @@
 //! Chapter 20: Order Service against a three-broker KRaft Kafka cluster
 //!
 //! **Resources:** Postgres, Redis, `KafkaCluster`
-//! **Service:** `example-order-service`
+//! **Service:** `order-service`
 //! **Assertions:** `kafka_cluster().leader_for_partition`, `await_leader_election`,
 //!   `assert_row_exists` after HTTP create, `kafka().produce_json` / `consume_one` after broker loss
 //! **Concepts:** Multi-broker bootstrap via convention injection; partition leadership moves when
@@ -29,7 +29,7 @@ struct OrderCreatedEvent {
 
 #[shakedown::test(resources = [Postgres, Redis, KafkaCluster])]
 #[serial]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,kafka-cluster,postgres,redis --test ch20_kafka_cluster -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,kafka-cluster,postgres,redis --test ch20_kafka_cluster -- --ignored"]
 async fn order_service_kafka_cluster_survives_partition_leader_change(
     ctx: &mut shakedown::Context,
 ) {
@@ -70,7 +70,7 @@ async fn order_service_kafka_cluster_survives_partition_leader_change(
         }
     }
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))

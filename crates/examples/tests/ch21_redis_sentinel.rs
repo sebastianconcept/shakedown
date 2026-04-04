@@ -1,7 +1,7 @@
 //! Chapter 21: Order Service with Redis Sentinel (three Redis nodes + three Sentinels)
 //!
 //! **Resources:** Postgres, `RedisSentinel`, Kafka
-//! **Service:** `example-order-service`
+//! **Service:** `order-service`
 //! **Assertions:** `redis_sentinel_cluster().trigger_failover`, `await_failover_complete`,
 //!   `current_master`, `redis().assert_key_equals` after failover
 //! **Concepts:** Convention injection resolves the Sentinel-managed primary; cache reads through
@@ -17,14 +17,14 @@ use shakedown_examples::{sample_order, ORDERS_SCHEMA_SQL};
 
 #[shakedown::test(resources = [Postgres, RedisSentinel, Kafka])]
 #[serial]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,redis-sentinel,postgres,kafka --test ch21_redis_sentinel -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,redis-sentinel,postgres,kafka --test ch21_redis_sentinel -- --ignored"]
 async fn order_service_redis_cache_survives_sentinel_failover(ctx: &mut shakedown::Context) {
     ctx.postgres()
         .execute(ORDERS_SCHEMA_SQL, &[])
         .await
         .expect("seed orders schema");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))

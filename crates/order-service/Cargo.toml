@@ -1,20 +1,22 @@
 [package]
-name = "example-fulfillment-service"
+name = "order-service"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
 
 [dependencies]
+shared-grpc = { path = "../shared-grpc" }
 axum = "0.8"
+tonic = { version = "0.14", default-features = false, features = ["transport", "codegen"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-mongodb = "3.4"
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+redis = { version = "1.1", default-features = false, features = ["tokio-comp"] }
 rdkafka = { version = "=0.38", default-features = false, features = ["ssl-vendored", "tokio"] }
-lapin = "4.3"
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-futures-util = "0.3"
+thiserror = "1"
+displaydoc = "0.2"

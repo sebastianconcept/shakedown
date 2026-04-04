@@ -1,7 +1,7 @@
 //! Chapter 23: Fulfillment Service on a three-node RabbitMQ Erlang cluster
 //!
 //! **Resources:** MongoDB, Kafka, `RabbitCluster`
-//! **Service:** `example-fulfillment-service`
+//! **Service:** `fulfillment-service`
 //! **Assertions:** `rabbit_cluster().quorum_queue_leader`, `await_queue_leader_election`,
 //!   `cluster_handle::stop_node`, `rabbit().publish_json` / `consume_until` after leader change
 //! **Concepts:** Quorum queues use Raft; stopping the leader node forces a new queue leader while
@@ -28,7 +28,7 @@ struct FulfillmentPublished {
 
 #[shakedown::test(resources = [Mongo, Kafka, RabbitCluster])]
 #[serial]
-#[ignore = "requires Docker + locally-built example-fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,rabbitmq-cluster,mongodb,kafka --test ch23_rabbit_cluster -- --ignored"]
+#[ignore = "requires Docker + locally-built fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,rabbitmq-cluster,mongodb,kafka --test ch23_rabbit_cluster -- --ignored"]
 async fn fulfillment_rabbit_cluster_quorum_queue_survives_leader_loss(
     ctx: &mut shakedown::Context,
 ) {
@@ -72,14 +72,13 @@ async fn fulfillment_rabbit_cluster_quorum_queue_survives_leader_loss(
         .expect("declare quorum queue on the cluster");
     let _ = connection.close(200, "ch23_quorum_prep".into()).await;
 
-    let fulfillment_spec =
-        shakedown::ServiceUnderTest::docker("example-fulfillment-service:latest")
-            .name("fulfillment-service")
-            .port(3001)
-            .health_check(shakedown::HealthCheck::http("/health"))
-            .pull_policy(shakedown::PullPolicy::Never)
-            .build()
-            .expect("fulfillment service spec");
+    let fulfillment_spec = shakedown::ServiceUnderTest::docker("fulfillment-service:latest")
+        .name("fulfillment-service")
+        .port(3001)
+        .health_check(shakedown::HealthCheck::http("/health"))
+        .pull_policy(shakedown::PullPolicy::Never)
+        .build()
+        .expect("fulfillment service spec");
 
     ctx.register_service(fulfillment_spec)
         .expect("register fulfillment-service");

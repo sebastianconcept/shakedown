@@ -1,0 +1,15 @@
+[package]
+name = "shared-grpc"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Shared tonic + prost contracts for book example services (not limited to one domain)"
+
+[dependencies]
+prost = "0.14"
+tonic = { version = "0.14", default-features = false, features = ["transport", "codegen"] }
+tonic-prost = "0.14"
+
+[build-dependencies]
+tonic-prost-build = "0.14"

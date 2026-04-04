@@ -28,7 +28,60 @@ Progressive **book-style** scenarios for learning Shakedown: order and fulfillme
 | 📡 | Cluster topology resource |
 | ⚡ | Load framework (`load` feature) |
 
-**Docker:** Chapter 1 and DuckDB appendices run without Docker. Every other chapter and appendix is `#[ignore]` by default — run with `just test-examples-*` and `--ignored` after `just build-example-services` where Parts II–VI need local images (`example-order-service:latest`, `example-fulfillment-service:latest`).
+**Docker:** Chapter 1 and DuckDB appendices run without Docker. Every other chapter and appendix is `#[ignore]` by default — run with `just test-examples-*` and `--ignored` after `just build-example-services` where Parts II–VI need local images (`order-service:latest`, `fulfillment-service:latest`).
+
+### Shakedown mission (three modes)
+
+The book is organized around three questions; example tests and fixtures support them as **reviewable evidence**:
+
+1. **Transferring confidence** — Can the team accept this change? Scenarios assert real infrastructure side effects (rows, cache keys, messages) using helpers and fixtures from this crate.
+2. **Preserving confidence** — Can we show it will not happen again? Fault and outbox chapters use reproducible scenarios (e.g. outbox + publication proof).
+3. **Trusting the result** — Was it the service or the cluster? Load and diagnostics chapters combine metrics, timelines, and topology operations so results are explainable, not faith-based.
+
+### Companion services: HTTP and env contract (Parts II–III)
+
+These match [`order-service`](../order-service) and [`fulfillment-service`](../fulfillment-service). **Kafka topic** for order events is `orders` (JSON with `aggregate_id`, `items`); the Fulfillment consumer subscribes under the same name.
+
+| | Order Service | Fulfillment Service |
+|---|----------------|---------------------|
+| **Health** | `GET /health` | `GET /health` |
+| **Main write** | `POST /orders` | `POST /fulfill` (REST; debug/tools) |
+| **Sync handoff** | `POST /orders/:id/fulfill` → Fulfillment **gRPC** `Fulfill` (optional `FULFILLMENT_GRPC_URI`, e.g. `http://host:50051`) | Implements **gRPC** on `GRPC_PORT` (default **50051**) + same domain logic as Kafka |
+| **Read** | `GET /orders/:id` | `GET /fulfill/:id` |
+| **Downstream** | — | Calls optional `PAYMENT_GATEWAY_URL` |
+| **Cache key (tests)** | Redis `order:{id}:status` | — |
+| **Broker** | Kafka producer + optional Postgres outbox | Kafka consumer, RabbitMQ publisher |
+
+**Order env:** `DATABASE_URL`, `REDIS_URL`, `KAFKA_BOOTSTRAP_SERVERS`, `PORT` (default 3000), optional **`FULFILLMENT_GRPC_URI`** (tonic plaintext URI to Fulfillment’s gRPC listener), `OUTBOX_ENABLED=true` for transactional outbox path.
+
+**Fulfillment env:** `MONGODB_URI`, `RABBITMQ_URL`, `KAFKA_BOOTSTRAP_SERVERS`, `PORT` (default 3001), **`GRPC_PORT`** (default **50051**, gRPC `Fulfillment` service), optional `PAYMENT_GATEWAY_URL`.
+
+### Resilience design note: idempotent Kafka consumer
+
+The fulfillment service's Kafka consumer is a deliberate teaching example of **at-least-once processing without state loss**. Three pieces work together:
+
+1. **Kafka at-least-once delivery** — `auto.commit` is enabled, so if the consumer restarts before the periodic commit, the broker redelivers the same message.
+2. **Idempotent handler** — `create_fulfillment` checks whether a fulfillment for the given `order_id` already exists. Duplicate deliveries return `AlreadyExisted` instead of inserting twice.
+3. **Shared path** — the **gRPC `Fulfill` RPC**, the optional REST `POST /fulfill`, and the Kafka consumer all call the same `create_fulfillment` function, so every entry point inherits the same idempotency guarantee.
+
+This pattern separates the **delivery guarantee** (broker-level) from the **processing guarantee** (application-level). The book exercises it progressively:
+
+| Chapter | What it proves |
+|---------|---------------|
+| ch15 | Happy-path chain: Kafka event → Mongo document → Rabbit fanout |
+| ch17 | Fault injection: Kafka latency toxic — service stays correct under delay |
+| ch20 | Broker loss: consumer reconnects after leader election, processes backlog without duplicates |
+
+The combination means the service **never silently drops a successfully delivered event** and **never creates duplicate state** — exactly the property that chapters 17 and 20 put under stress.
+
+### Chapter → evidence (fixtures + assertions)
+
+| Chapter / area | What tests prove | Fixture / artifact |
+|----------------|------------------|----------------------|
+| ch11 | Cache after `POST /orders` | Redis key `order:{id}:status` from [`fixtures::schema`](src/fixtures/schema.rs) context |
+| ch12 | Outbox + Kafka / Rabbit publication | [`OUTBOX_SCHEMA_SQL`](src/fixtures/schema.rs), `Outbox::assert_*` |
+| ch15 | End-to-end bus chain | Postgres row + Kafka consume + Mongo document + Rabbit message |
+| Part V | Same app, cluster topology | Same env conventions; swap Shakedown resources for cluster variants |
 
 ---
 
@@ -55,13 +108,13 @@ Progressive **book-style** scenarios for learning Shakedown: order and fulfillme
 | 10 | `ch10_service_events` | Kafka events after `POST /orders` | 🖥️ 🐘 💾 📨 |
 | 11 | `ch11_service_cache` | Redis cache + `GET` path | 🖥️ 🐘 💾 📨 |
 | 12 | `ch12_service_outbox` | Outbox row + Kafka + Rabbit publication proof | 🖥️ 🐘 📨 🐰 + outbox |
-| 13 | `ch13_service_mock_upstream` | Fulfillment URL mocked; path assertions | 🖥️ 🐘 💾 📨 🧪 |
+| 13 | `ch13_service_mock_upstream` | Fulfillment **gRPC** mocked (`GrpcMockService`); protobuf assertions | 🖥️ 🐘 💾 📨 🧪 |
 
 ### Part III — Two services (Order + Fulfillment)
 
 | Ch | File | Summary | Resources |
 |----|------|---------|-----------|
-| 14 | `ch14_multi_service` | Inter-service flow, Postgres + Mongo | 🖥️ 🐘 🍃 📨 💾 |
+| 14 | `ch14_multi_service` | Inter-service **gRPC** + named-port `FULFILLMENT_GRPC_URI`, Postgres + Mongo | 🖥️ 🐘 🍃 📨 💾 |
 | 15 | `ch15_cross_service_events` | Full chain: Postgres → Kafka → Mongo → Rabbit | 🖥️ 🐘 🍃 📨 🐰 💾 |
 | 16 | `ch16_cross_service_mocks` | Payment mock + both databases | 🖥️ 🐘 🍃 📨 💾 🧪 |
 
@@ -195,7 +248,10 @@ Each row lists the **crate API** surface and **where** it appears. Publication p
 
 | Path | Role |
 |------|------|
-| `src/lib.rs` | Shared DDL, sample payloads, domain types |
+| `src/lib.rs` | Crate façade; re-exports the public fixture API |
+| `src/fixtures/schema.rs` | Shared DDL (Postgres, SQLite, outbox) |
+| `src/fixtures/domain.rs` | `Order`, `OrderItem`, `Fulfillment` types |
+| `src/fixtures/samples.rs` | `sample_order`, `sample_fulfillment` JSON builders |
 | `tests/ch*.rs` | Chapters (feature-gated integration tests) |
 | `tests/appendix_*.rs` | Reference cards per engine |
 
@@ -224,10 +280,11 @@ just test-examples-ignored
 
 ## Related workspace crates
 
-- **`example-order-service`** — Postgres, Redis, Kafka, optional outbox; HTTP API for orders.
-- **`example-fulfillment-service`** — MongoDB, RabbitMQ, Kafka consumer; HTTP API for fulfillments.
+- **`order-service`** — Postgres, Redis, Kafka, optional outbox; HTTP API for orders; optional **gRPC** client to Fulfillment for sync fulfill.
+- **`fulfillment-service`** — MongoDB, RabbitMQ, Kafka consumer; HTTP + **gRPC** APIs for fulfillments.
+- **`shared-grpc`** — tonic/prost contracts (`book.fulfillment.v1`, `book.demo.v1`, …) shared by any example service that needs them.
 
-Image names: `example-order-service:latest`, `example-fulfillment-service:latest`.
+Image names: `order-service:latest`, `fulfillment-service:latest`.
 
 ## Further reading
 
