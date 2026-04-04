@@ -58,9 +58,10 @@ fn parse_resource_spec_list(input: ParseStream) -> syn::Result<Vec<ResourceSpec>
     Ok(specs)
 }
 
-/// `#[shakedown::test]` attribute: optional `resources = [Fake, Kafka, ...]` only.
+/// `#[shakedown::test]` attribute: optional `resources = [Fake, Kafka, ...]` and `prelude = { ... }`.
 struct TestAttrArgs {
     resources: Option<Vec<ResourceSpec>>,
+    prelude: Option<syn::Block>,
 }
 
 /// A single resource specification that can include configuration.
@@ -105,32 +106,52 @@ impl Parse for ResourceSpec {
 
 impl Parse for TestAttrArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.is_empty() {
-            return Ok(Self { resources: None });
+        let mut resources = None;
+        let mut prelude = None;
+
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            if key == "resources" {
+                if resources.is_some() {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        "duplicate `resources` attribute argument",
+                    ));
+                }
+                resources = Some(parse_resource_spec_list_bracketed(input)?);
+            } else if key == "prelude" {
+                if prelude.is_some() {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        "duplicate `prelude` attribute argument",
+                    ));
+                }
+                prelude = Some(input.parse::<syn::Block>()?);
+            } else {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "unknown attribute argument (supported: `resources = [ ... ]`, `prelude = { ... }`)",
+                ));
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
         }
 
-        let key: Ident = input.parse()?;
-        if key != "resources" {
-            return Err(syn::Error::new(
-                key.span(),
-                "unknown attribute argument (only `resources = [ ... ]` is supported in this milestone)",
-            ));
-        }
-        input.parse::<Token![=]>()?;
-        let resources = parse_resource_spec_list_bracketed(input)?;
-        Ok(Self {
-            resources: Some(resources),
-        })
+        Ok(Self { resources, prelude })
     }
 }
 
-/// Parse `#[shakedown::test]` arguments; returns builtin resource specs when `resources = [..]` is present.
-fn parse_test_attr(attr: TokenStream) -> syn::Result<Option<Vec<ResourceSpec>>> {
+/// Parse `#[shakedown::test]` arguments.
+fn parse_test_attr(attr: TokenStream) -> syn::Result<TestAttrArgs> {
     if attr.is_empty() {
-        return Ok(None);
+        return Ok(TestAttrArgs {
+            resources: None,
+            prelude: None,
+        });
     }
-    let args: TestAttrArgs = syn::parse(attr)?;
-    Ok(args.resources)
+    syn::parse(attr)
 }
 
 /// Parsed `#[shakedown::faulty_test(...)]` arguments.
@@ -223,6 +244,9 @@ fn first_parameter_is_ctx_mut_context(func: &ItemFn) -> bool {
 /// - **`resources = [ ... ]`** — compile-time registration of builtins (`Fake`, `Kafka`, `Postgres`,
 ///   …) on `ctx` before your code runs; each name requires the matching feature on the `shakedown`
 ///   dependency (e.g. `kafka` for `Kafka`).
+/// - **`prelude = { ... }`** — statements run on `ctx` after resource registration and before
+///   [`run_scenario`] (e.g. register HTTP/gRPC mock services, which must complete before the harness
+///   starts mock listeners).
 /// - **Integration with the rest of the harness** — same path as manual `run_scenario` callers:
 ///   outbox assertions, Kafka/DB bindings, Docker diagnostics when features are on, etc.
 ///
@@ -234,16 +258,20 @@ fn first_parameter_is_ctx_mut_context(func: &ItemFn) -> bool {
 /// - `#[shakedown::test(resources = [Fake])]` — registers `shakedown::FakeResource`.
 /// - `#[shakedown::test(resources = [Fake, Kafka])]` — also registers Kafka when the `shakedown`
 ///   dependency enables the `kafka` feature.
+/// - `#[shakedown::test(prelude = { ctx.register_http_mock_service("api", stub).unwrap(); })]` —
+///   runs the block before the scenario lifecycle (after `resources` registration).
 ///
 /// # Panics
 ///
 /// Panics with the display string of `shakedown::ShakedownError` if the scenario fails.
 #[proc_macro_attribute]
 pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let resources_list = match parse_test_attr(attr) {
-        Ok(list) => list,
+    let test_attr = match parse_test_attr(attr) {
+        Ok(args) => args,
         Err(e) => return e.to_compile_error().into(),
     };
+    let resources_list = test_attr.resources;
+    let prelude_block = test_attr.prelude;
 
     let func = match syn::parse::<ItemFn>(item.clone()) {
         Ok(f) => f,
@@ -298,6 +326,11 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    let prelude_tokens = match &prelude_block {
+        Some(block) => quote! { #block },
+        None => quote! {},
+    };
+
     let fn_ident = &func.sig.ident;
     let forwarded_attrs = &func.attrs;
     // `quote!` parses `#func.block` as `#func` + literal `.block`; bind the block first.
@@ -311,6 +344,11 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             // Register resources if specified in attribute
             #resources_registration
+
+            // Optional prelude (mock registration, etc.) before lifecycle / mock listener startup
+            {
+                #prelude_tokens
+            }
 
             let result = ::shakedown::run_scenario(
                 &mut ctx,

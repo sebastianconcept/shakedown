@@ -4,6 +4,8 @@
 //! **Assertions:** `assert_row_exists`, `assert_row_count`
 //! **Concepts:** manual `run_scenario` lifecycle, `Context::new()`, `EventLog`,
 //!   provision → readiness → seed → run → assert → teardown
+//! **Teaching intent:** See the full lifecycle spelled out once; every later chapter uses the macro
+//!   to run the same phases with less boilerplate.
 //!
 //! This is the only chapter that uses `run_scenario` directly. Later chapters use
 //! `#[shakedown::test]`, which automates the same flow.
