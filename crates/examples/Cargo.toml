@@ -20,7 +20,9 @@ tonic-prost = { version = "0.14", optional = true }
 
 [dev-dependencies]
 lapin = "4.3"
+qdrant-client = { version = "1.17", default-features = false }
 rdkafka = { version = "=0.38", default-features = false, features = ["ssl-vendored", "tokio"] }
+redis = { version = "1.1", default-features = false, features = ["tokio-comp", "streams"] }
 serial_test = "3"
 
 [features]
