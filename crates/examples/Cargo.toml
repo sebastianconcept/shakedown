@@ -12,6 +12,11 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 uuid = { version = "1", features = ["v4"] }
+mongodb = { version = "3.4", optional = true }
+http = { version = "1", optional = true }
+prost = { version = "0.14", optional = true }
+tonic = { version = "0.14", optional = true, default-features = false, features = ["transport"] }
+tonic-prost = { version = "0.14", optional = true }
 
 [features]
 default = []
@@ -21,7 +26,7 @@ kafka = ["shakedown/kafka"]
 postgres = ["shakedown/postgres"]
 redis = ["shakedown/redis"]
 rabbitmq = ["shakedown/rabbitmq"]
-mongodb = ["shakedown/mongodb"]
+mongodb = ["shakedown/mongodb", "dep:mongodb"]
 nats = ["shakedown/nats"]
 neo4j = ["shakedown/neo4j"]
 elasticsearch = ["shakedown/elasticsearch"]
@@ -34,7 +39,13 @@ mariadb = ["shakedown/mariadb"]
 mysql = ["shakedown/mysql"]
 valkey = ["shakedown/valkey"]
 mock-services = ["shakedown/mock-services"]
-grpc-mock-services = ["shakedown/grpc-mock-services"]
+grpc-mock-services = [
+    "shakedown/grpc-mock-services",
+    "dep:http",
+    "dep:prost",
+    "dep:tonic",
+    "dep:tonic-prost",
+]
 services = ["shakedown/services"]
 outbox = ["shakedown/outbox"]
 fault-injection = ["shakedown/fault-injection"]
