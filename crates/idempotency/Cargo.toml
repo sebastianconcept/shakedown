@@ -1,0 +1,9 @@
+[package]
+name = "idempotency"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Small idempotency decision types for Shakedown book examples (Kafka + HTTP paths)."
+
+[dependencies]

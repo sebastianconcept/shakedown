@@ -1,4 +1,8 @@
-//! Pass: `fault_profile = "..."` expands to `ctx.set_fault_profile(...)`.
+//! Pass: `#[shakedown::faulty_test(fault_profile = "...")]`.
+//!
+//! **Given** a `fault_profile` string literal in the attribute
+//! **When** the macro expands `#[shakedown::faulty_test]`
+//! **Then** it calls `ctx.set_fault_profile(...)` and sets `ScenarioKind::Faulty` before the scenario runs.
 
 #[shakedown::faulty_test(fault_profile = "high_latency")]
 async fn with_fault_profile(ctx: &mut shakedown::Context) {

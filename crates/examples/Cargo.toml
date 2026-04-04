@@ -19,6 +19,7 @@ tonic = { version = "0.14", optional = true, default-features = false, features 
 tonic-prost = { version = "0.14", optional = true }
 
 [dev-dependencies]
+shared-grpc = { path = "../shared-grpc" }
 lapin = "4.3"
 qdrant-client = { version = "1.17", default-features = false }
 rdkafka = { version = "=0.38", default-features = false, features = ["ssl-vendored", "tokio"] }
@@ -132,7 +133,7 @@ required-features = ["services", "postgres", "redis", "kafka", "rabbitmq", "outb
 [[test]]
 name = "ch13_service_mock_upstream"
 path = "tests/ch13_service_mock_upstream.rs"
-required-features = ["services", "postgres", "redis", "kafka", "mock-services"]
+required-features = ["services", "postgres", "redis", "kafka", "mock-services", "grpc-mock-services"]
 
 # ─── Part III: Two services under test ───
 

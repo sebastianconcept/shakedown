@@ -1,7 +1,7 @@
 //! Chapter 10: Kafka events emitted by the Order Service
 //!
 //! **Resources:** Postgres, Redis, Kafka
-//! **Service:** `example-order-service`
+//! **Service:** `order-service`
 //! **Assertions:** `consume_until` on logical topic `orders`, payload contains `aggregate_id`
 //! **Concepts:** same `ServiceUnderTest` setup as Chapter 9; assert async messaging from a real
 //!   service using harness Kafka helpers (logical topic names, scenario namespacing)
@@ -12,14 +12,14 @@
 use shakedown_examples::{sample_order, ORDERS_SCHEMA_SQL};
 
 #[shakedown::test(resources = [Postgres, Redis, Kafka])]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka --test ch10_service_events -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka --test ch10_service_events -- --ignored"]
 async fn order_service_kafka_order_created_event(ctx: &mut shakedown::Context) {
     ctx.postgres()
         .execute(ORDERS_SCHEMA_SQL, &[])
         .await
         .expect("seed orders schema");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))

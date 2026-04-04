@@ -147,8 +147,8 @@ test-mongo-cluster-load-disruption-ignored:
 
 # Build example companion service Docker images (workspace root; uses root Dockerfiles).
 build-example-services:
-  docker build -f Dockerfile.example-order-service -t example-order-service:latest .
-  docker build -f Dockerfile.example-fulfillment-service -t example-fulfillment-service:latest .
+  docker build -f Dockerfile.order-service -t order-service:latest .
+  docker build -f Dockerfile.fulfillment-service -t fulfillment-service:latest .
 
 # Non-Docker examples only (ch01 + appendix_duckdb when un-ignored).
 test-examples:
@@ -165,7 +165,7 @@ test-examples-part1:
 
 # Part II: One service under test (Order Service image).
 test-examples-part2:
-  cargo test -p shakedown-examples --features services,postgres,redis,kafka,rabbitmq,outbox,mock-services -- --ignored \
+  cargo test -p shakedown-examples --features services,postgres,redis,kafka,rabbitmq,outbox,mock-services,grpc-mock-services -- --ignored \
     ch09 ch10 ch11 ch12 ch13
 
 # Part III: Two services under test (both images).

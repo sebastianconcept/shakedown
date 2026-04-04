@@ -1,5 +1,5 @@
 error: #[shakedown::test] requires an async function
- --> tests/trybuild/fail/sync_function.rs:6:4
+ --> tests/trybuild/fail/sync_function.rs:8:4
   |
-6 | fn sync_test(ctx: &mut shakedown::Context) {
+8 | fn sync_test(ctx: &mut shakedown::Context) {
   |    ^^^^^^^^^

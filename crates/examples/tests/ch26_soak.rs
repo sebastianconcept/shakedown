@@ -1,7 +1,7 @@
 //! Chapter 26: Soak-style profile, baselines, drift windows, and infra budgets
 //!
 //! **Resources:** Postgres, Redis, Kafka
-//! **Service:** `example-order-service`
+//! **Service:** `order-service`
 //! **Diagnostics:** `SHAKEDOWN_STATS_INTERVAL_MS` + [`shakedown::Context::assert_resource`] for
 //!   [`shakedown::ResourceAssertBuilder::peak_memory_under`] on the logical service container.
 //! **Load:** Warmup → ramp → sustained constant “soak” phase; two sequential runs — first seeds
@@ -71,16 +71,19 @@ fn soak_profile() -> LoadProfile {
 }
 
 #[shakedown::test(resources = [Postgres, Redis, Kafka])]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,kafka,redis,load,diagnostics --test ch26_soak -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,kafka,redis,load,diagnostics --test ch26_soak -- --ignored"]
 async fn order_service_soak_baseline_and_drift(ctx: &mut shakedown::Context) {
-    std::env::set_var("SHAKEDOWN_STATS_INTERVAL_MS", "200");
+    // `set_var` is unsafe in multi-threaded programs (Rust RFC 3312); tests run single-threaded.
+    unsafe {
+        std::env::set_var("SHAKEDOWN_STATS_INTERVAL_MS", "200");
+    }
 
     ctx.postgres()
         .execute(ORDERS_SCHEMA_SQL, &[])
         .await
         .expect("seed orders schema");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))

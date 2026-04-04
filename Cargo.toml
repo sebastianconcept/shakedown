@@ -3,8 +3,10 @@ members = [
     "crates/lib",
     "crates/macros",
     "crates/examples",
-    "crates/example-order-service",
-    "crates/example-fulfillment-service",
+    "crates/idempotency",
+    "crates/shared-grpc",
+    "crates/order-service",
+    "crates/fulfillment-service",
 ]
 resolver = "2"
 

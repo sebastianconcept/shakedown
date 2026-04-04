@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package book.fulfillment.v1;
+
+// Unary sync path from Order Service → Fulfillment Service (book examples).
+service Fulfillment {
+  rpc Fulfill(FulfillRequest) returns (FulfillResponse);
+}
+
+message FulfillRequest {
+  string order_id = 1;
+  repeated OrderItem items = 2;
+}
+
+message OrderItem {
+  string product_id = 1;
+  uint32 quantity = 2;
+}
+
+message FulfillResponse {
+  string fulfillment_id = 1;
+}

@@ -1,5 +1,5 @@
 error: #[shakedown::test] expected signature: async fn name(ctx: &mut Context)
- --> tests/trybuild/fail/wrong_signature.rs:6:7
+ --> tests/trybuild/fail/wrong_signature.rs:8:7
   |
-6 | async fn wrong_param(ctx: shakedown::Context) {
+8 | async fn wrong_param(ctx: shakedown::Context) {
   |       ^^

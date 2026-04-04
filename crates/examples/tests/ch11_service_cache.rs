@@ -1,7 +1,7 @@
 //! Chapter 11: Redis cache populated by the Order Service
 //!
 //! **Resources:** Postgres, Redis, Kafka
-//! **Service:** `example-order-service`
+//! **Service:** `order-service`
 //! **Assertions:** `assert_key_exists`, `assert_key_equals` after HTTP `GET`
 //! **Concepts:** status cache key shape `order:<id>:status`; `GET /orders/:id` prefers Redis then
 //!   falls back to Postgres — we assert the hot-cache path and value
@@ -12,14 +12,14 @@
 use shakedown_examples::{sample_order, ORDERS_SCHEMA_SQL};
 
 #[shakedown::test(resources = [Postgres, Redis, Kafka])]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka --test ch11_service_cache -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka --test ch11_service_cache -- --ignored"]
 async fn order_service_redis_cache_hit_on_get_order(ctx: &mut shakedown::Context) {
     ctx.postgres()
         .execute(ORDERS_SCHEMA_SQL, &[])
         .await
         .expect("seed orders schema");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))

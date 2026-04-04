@@ -99,6 +99,15 @@ pub enum EnvMapping {
         service_name: String,
         env_var: String,
     },
+    /// Registered service URL for a [`crate::service::ServiceUnderTest::port_named`] port → custom env var name.
+    ///
+    /// Resolved via [`crate::lifecycle::Context::service_handle`] after the dependency container is running
+    /// (same ordering rules as [`EnvMapping::service`]).
+    ServiceNamedPort {
+        service_name: String,
+        port_name: String,
+        env_var: String,
+    },
 }
 
 impl EnvMapping {
@@ -212,6 +221,19 @@ impl EnvMapping {
     ) -> Self {
         Self::Service {
             service_name: service_name.into(),
+            env_var: environment_variable_name.into(),
+        }
+    }
+
+    /// Map a named port on the service named `service_name` to `environment_variable_name`.
+    pub fn service_named_port(
+        service_name: impl Into<String>,
+        port_name: impl Into<String>,
+        environment_variable_name: impl Into<String>,
+    ) -> Self {
+        Self::ServiceNamedPort {
+            service_name: service_name.into(),
+            port_name: port_name.into(),
             env_var: environment_variable_name.into(),
         }
     }
@@ -372,6 +394,20 @@ mod tests {
             EnvMapping::Service {
                 service_name: "orders".to_string(),
                 env_var: "ORDERS_SERVICE_URL".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn env_mapping_service_named_port() {
+        let mapping =
+            EnvMapping::service_named_port("fulfillment-service", "grpc", "FULFILLMENT_GRPC_URI");
+        assert_eq!(
+            mapping,
+            EnvMapping::ServiceNamedPort {
+                service_name: "fulfillment-service".to_string(),
+                port_name: "grpc".to_string(),
+                env_var: "FULFILLMENT_GRPC_URI".to_string(),
             }
         );
     }

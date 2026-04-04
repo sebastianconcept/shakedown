@@ -4,7 +4,7 @@
 //! **Services:** Order Service, Fulfillment Service, `payment-mock` (HTTP)
 //! **Assertions:** `MockServiceHandle::assert_path_called_times`, Postgres row, MongoDB document
 //! **Concepts:** `prelude` registers the mock before listeners start; `EnvMapping::mock_service`
-//!   maps the stub to `PAYMENT_GATEWAY_URL`; same `FULFILLMENT_URL` ordering constraint as ch14
+//!   maps the stub to `PAYMENT_GATEWAY_URL`; same `FULFILLMENT_GRPC_URI` / named-port ordering as ch14
 //! **Prerequisites:** `just build-example-services`, Docker
 //!
 //! Run: `cargo test -p shakedown-examples --features services,postgres,mongodb,kafka,redis,mock-services --test ch16_cross_service_mocks -- --ignored`
@@ -32,30 +32,31 @@ async fn fulfillment_calls_payment_mock_during_multi_service_fulfill(ctx: &mut s
         .await
         .expect("seed orders schema");
 
-    let fulfillment_spec =
-        shakedown::ServiceUnderTest::docker("example-fulfillment-service:latest")
-            .name("fulfillment-service")
-            .port(3001)
-            .health_check(shakedown::HealthCheck::http("/health"))
-            .env_mapping(EnvMapping::mock_service(
-                "payment-mock",
-                "PAYMENT_GATEWAY_URL",
-            ))
-            .pull_policy(shakedown::PullPolicy::Never)
-            .build()
-            .expect("fulfillment service spec");
+    let fulfillment_spec = shakedown::ServiceUnderTest::docker("fulfillment-service:latest")
+        .name("fulfillment-service")
+        .port(3001)
+        .port_named("grpc", 50051)
+        .health_check(shakedown::HealthCheck::http("/health"))
+        .env_mapping(EnvMapping::mock_service(
+            "payment-mock",
+            "PAYMENT_GATEWAY_URL",
+        ))
+        .pull_policy(shakedown::PullPolicy::Never)
+        .build()
+        .expect("fulfillment service spec");
 
     ctx.register_service(fulfillment_spec)
         .expect("register fulfillment-service");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))
         .depends_on("fulfillment-service")
-        .env_mapping(EnvMapping::service(
+        .env_mapping(EnvMapping::service_named_port(
             "fulfillment-service",
-            "FULFILLMENT_URL",
+            "grpc",
+            "FULFILLMENT_GRPC_URI",
         ))
         .pull_policy(shakedown::PullPolicy::Never)
         .build()

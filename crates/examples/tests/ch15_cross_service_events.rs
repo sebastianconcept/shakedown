@@ -34,7 +34,7 @@ async fn order_kafka_event_triggers_fulfillment_mongo_and_rabbit_fanout(
         .await
         .expect("declare RabbitMQ topology for assertions");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))
@@ -42,15 +42,14 @@ async fn order_kafka_event_triggers_fulfillment_mongo_and_rabbit_fanout(
         .build()
         .expect("order service spec");
 
-    let fulfillment_spec =
-        shakedown::ServiceUnderTest::docker("example-fulfillment-service:latest")
-            .name("fulfillment-service")
-            .port(3001)
-            .health_check(shakedown::HealthCheck::http("/health"))
-            .depends_on("order-service")
-            .pull_policy(shakedown::PullPolicy::Never)
-            .build()
-            .expect("fulfillment service spec");
+    let fulfillment_spec = shakedown::ServiceUnderTest::docker("fulfillment-service:latest")
+        .name("fulfillment-service")
+        .port(3001)
+        .health_check(shakedown::HealthCheck::http("/health"))
+        .depends_on("order-service")
+        .pull_policy(shakedown::PullPolicy::Never)
+        .build()
+        .expect("fulfillment service spec");
 
     ctx.register_service(order_spec)
         .expect("register order-service");

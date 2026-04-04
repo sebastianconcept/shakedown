@@ -24,9 +24,10 @@ pub(crate) fn inject_service_env(
 
     if service_spec.auto_inject {
         inject_conventions(context, service_spec, &overrides, &mut environment);
-    } else {
-        inject_only_env_mappings(context, service_spec, &mut environment);
     }
+    // Apply explicit `env_mappings` (including [`EnvMapping::ServiceNamedPort`]) even when
+    // `auto_inject` is true — conventions alone do not resolve named service ports.
+    inject_only_env_mappings(context, service_spec, &mut environment);
 
     for (key, value) in &service_spec.env_vars {
         environment.insert(key.clone(), value.clone());
@@ -132,6 +133,7 @@ impl MappingOverrides {
                         .services
                         .insert(service_name.clone(), env_var.clone());
                 }
+                EnvMapping::ServiceNamedPort { .. } => {}
             }
         }
         overrides
@@ -539,6 +541,14 @@ fn resolve_env_mapping(
         } => context
             .service_url(service_name.as_str())
             .map(|url| (env_var.clone(), url)),
+        EnvMapping::ServiceNamedPort {
+            service_name,
+            port_name,
+            env_var,
+        } => context
+            .service_handle(service_name.as_str())
+            .and_then(|handle| handle.port_url(port_name.as_str()))
+            .map(|url| (env_var.clone(), url.to_string())),
     }
 }
 

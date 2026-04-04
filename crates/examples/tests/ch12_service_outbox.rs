@@ -1,7 +1,7 @@
 //! Chapter 12: Outbox row state + Kafka and RabbitMQ publication proof
 //!
 //! **Resources:** Postgres, Redis, Kafka, RabbitMQ
-//! **Service:** `example-order-service` with `OUTBOX_ENABLED=true` (writes outbox, no direct Kafka produce)
+//! **Service:** `order-service` with `OUTBOX_ENABLED=true` (writes outbox, no direct Kafka produce)
 //! **Assertions:** `outbox().assert_pending`, `with_payload`, `assert_kafka_published`,
 //!   `assert_rabbit_published`
 //! **Concepts:** transactional outbox in Postgres; declare Rabbit topology with a **per-order**
@@ -19,7 +19,7 @@ use shakedown::ExchangeKind;
 use shakedown_examples::{sample_order, ORDERS_SCHEMA_SQL, OUTBOX_SCHEMA_SQL};
 
 #[shakedown::test(resources = [Postgres, Redis, Kafka, Rabbit])]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka,rabbitmq,outbox --test ch12_service_outbox -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka,rabbitmq,outbox --test ch12_service_outbox -- --ignored"]
 async fn outbox_pending_then_publication_proof_kafka_and_rabbit(ctx: &mut shakedown::Context) {
     ctx.postgres()
         .execute(ORDERS_SCHEMA_SQL, &[])
@@ -35,7 +35,7 @@ async fn outbox_pending_then_publication_proof_kafka_and_rabbit(ctx: &mut shaked
         .await
         .expect("canonical outbox table (matches relational DDL)");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))

@@ -1,4 +1,9 @@
-//! Pass: reserved `key = <expr>` args (other than `resources` / `fault_profile`) are ignored; `resources` still works.
+//! Pass: `#[shakedown::faulty_test]` with unknown/deferred arguments.
+//!
+//! **Given** attribute arguments that are not `resources` or `fault_profile`
+//! **When** the macro parses the attribute
+//! **Then** unknown keys are ignored (no compile error) and the test still expands correctly,
+//! with `ScenarioKind::Faulty` set.
 
 #[shakedown::faulty_test(deferred_placeholder = 0, resources = [Fake])]
 async fn faulty_with_deferred_then_resources(ctx: &mut shakedown::Context) {

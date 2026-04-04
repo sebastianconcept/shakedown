@@ -1,7 +1,7 @@
 //! Chapter 9: Order Service under test — health, injection, Postgres proof
 //!
 //! **Resources:** Postgres, Redis, Kafka
-//! **Service:** `example-order-service` (Docker image `example-order-service:latest`)
+//! **Service:** `order-service` (Docker image `order-service:latest`)
 //! **Assertions:** `service_url`, `ServiceHandle::is_healthy`, `assert_row_exists`
 //! **Concepts:** `ServiceUnderTest::docker`, `HealthCheck::http`, convention env injection,
 //!   seed schema before `register_service`, HTTP act → database assert
@@ -12,14 +12,14 @@
 use shakedown_examples::{sample_order, ORDERS_SCHEMA_SQL};
 
 #[shakedown::test(resources = [Postgres, Redis, Kafka])]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka --test ch09_service_basics -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka --test ch09_service_basics -- --ignored"]
 async fn order_service_postgres_row_after_create_order(ctx: &mut shakedown::Context) {
     ctx.postgres()
         .execute(ORDERS_SCHEMA_SQL, &[])
         .await
         .expect("seed orders schema from shared fixture");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))

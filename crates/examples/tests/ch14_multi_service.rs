@@ -1,17 +1,16 @@
-//! Chapter 14: Two services under test — Order calls Fulfillment over HTTP
+//! Chapter 14: Two services under test — Order calls Fulfillment over **gRPC**
 //!
 //! **Resources:** Postgres, Redis, Kafka, MongoDB
-//! **Services:** `example-order-service` (3000) + `example-fulfillment-service` (3001)
+//! **Services:** `order-service` (3000 HTTP + gRPC client) + `fulfillment-service` (3001 HTTP + 50051 gRPC)
 //! **Assertions:** `assert_row_exists` (Postgres), `assert_document_exists` (MongoDB)
-//! **Concepts:** multi-service registration, inter-service URL injection for `FULFILLMENT_URL`
+//! **Concepts:** multi-service registration, `port_named("grpc", 50051)` + `EnvMapping::service_named_port` for `FULFILLMENT_GRPC_URI`
 //! **Prerequisites:** `just build-example-services`, Docker
 //!
-//! The Order Service reads `FULFILLMENT_URL` once at process start. The harness therefore starts
+//! The Order Service reads `FULFILLMENT_GRPC_URI` once at process start. The harness starts
 //! **fulfillment-service** before **order-service** by registering Fulfillment first and giving
 //! **order-service** `.depends_on("fulfillment-service")` plus
-//! `EnvMapping::service("fulfillment-service", "FULFILLMENT_URL")`
-//! so the URL exists when the Order container is configured. (A fulfillment → order `depends_on`
-//! alone would start Order first and leave `FULFILLMENT_URL` unset at Order startup.)
+//! `EnvMapping::service_named_port("fulfillment-service", "grpc", "FULFILLMENT_GRPC_URI")`
+//! so the gRPC URL exists when the Order container is configured.
 //!
 //! Run: `cargo test -p shakedown-examples --features services,postgres,mongodb,kafka,redis --test ch14_multi_service -- --ignored`
 
@@ -20,7 +19,7 @@ use shakedown::EnvMapping;
 use shakedown_examples::{sample_order, ORDERS_SCHEMA_SQL};
 
 #[shakedown::test(resources = [Postgres, Redis, Kafka, Mongo])]
-#[ignore = "requires Docker + locally-built example-order-service:latest and example-fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,mongodb,kafka,redis --test ch14_multi_service -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest and fulfillment-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,mongodb,kafka,redis --test ch14_multi_service -- --ignored"]
 async fn order_and_fulfillment_http_handshake_writes_postgres_and_mongo(
     ctx: &mut shakedown::Context,
 ) {
@@ -29,26 +28,27 @@ async fn order_and_fulfillment_http_handshake_writes_postgres_and_mongo(
         .await
         .expect("seed orders schema");
 
-    let fulfillment_spec =
-        shakedown::ServiceUnderTest::docker("example-fulfillment-service:latest")
-            .name("fulfillment-service")
-            .port(3001)
-            .health_check(shakedown::HealthCheck::http("/health"))
-            .pull_policy(shakedown::PullPolicy::Never)
-            .build()
-            .expect("fulfillment service spec");
+    let fulfillment_spec = shakedown::ServiceUnderTest::docker("fulfillment-service:latest")
+        .name("fulfillment-service")
+        .port(3001)
+        .port_named("grpc", 50051)
+        .health_check(shakedown::HealthCheck::http("/health"))
+        .pull_policy(shakedown::PullPolicy::Never)
+        .build()
+        .expect("fulfillment service spec");
 
     ctx.register_service(fulfillment_spec)
         .expect("register fulfillment-service");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))
         .depends_on("fulfillment-service")
-        .env_mapping(EnvMapping::service(
+        .env_mapping(EnvMapping::service_named_port(
             "fulfillment-service",
-            "FULFILLMENT_URL",
+            "grpc",
+            "FULFILLMENT_GRPC_URI",
         ))
         .pull_policy(shakedown::PullPolicy::Never)
         .build()
@@ -94,11 +94,11 @@ async fn order_and_fulfillment_http_handshake_writes_postgres_and_mongo(
     assert_eq!(
         fulfill_response.status(),
         reqwest::StatusCode::OK,
-        "order-service should reach fulfillment-service over injected FULFILLMENT_URL"
+        "order-service should reach fulfillment-service over injected FULFILLMENT_GRPC_URI"
     );
 
     ctx.mongo()
         .assert_document_exists("fulfillments", doc! { "order_id": order_id })
         .await
-        .expect("fulfillment document in MongoDB after HTTP fulfill handoff");
+        .expect("fulfillment document in MongoDB after gRPC fulfill handoff");
 }

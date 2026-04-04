@@ -1,7 +1,7 @@
 //! Chapter 17: Fault injection on the Kafka path (Toxiproxy)
 //!
 //! **Resources:** Postgres, Redis, Kafka, Toxiproxy
-//! **Service:** `example-order-service`
+//! **Service:** `order-service`
 //! **Assertions:** Postgres row after HTTP create; `consume_until` after proxy reset
 //! **Concepts:** `#[shakedown::faulty_test]`, `FaultHandle`, `add_toxic` (latency on `shakedown_kafka`),
 //!   graceful degradation (HTTP + DB succeed while Kafka produce times out), `reset_proxy`
@@ -18,7 +18,7 @@ use shakedown::{StreamDirection, Toxic, ToxicKind};
 use shakedown_examples::{sample_order, ORDERS_SCHEMA_SQL};
 
 #[shakedown::faulty_test(resources = [Postgres, Redis, Kafka, Toxiproxy])]
-#[ignore = "requires Docker + locally-built example-order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka,fault-injection --test ch17_fault_injection -- --ignored"]
+#[ignore = "requires Docker + locally-built order-service:latest; run: just build-example-services && cargo test -p shakedown-examples --features services,postgres,redis,kafka,fault-injection --test ch17_fault_injection -- --ignored"]
 async fn kafka_latency_toxic_order_api_still_created_then_path_recovers(
     ctx: &mut shakedown::Context,
 ) {
@@ -27,7 +27,7 @@ async fn kafka_latency_toxic_order_api_still_created_then_path_recovers(
         .await
         .expect("seed orders schema");
 
-    let order_spec = shakedown::ServiceUnderTest::docker("example-order-service:latest")
+    let order_spec = shakedown::ServiceUnderTest::docker("order-service:latest")
         .name("order-service")
         .port(3000)
         .health_check(shakedown::HealthCheck::http("/health"))
