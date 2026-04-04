@@ -139,14 +139,15 @@ async fn order_service_kafka_cluster_survives_partition_leader_change(
         .await
         .expect("produce_json after leader election");
 
+    let expected_aggregate_id = proof.aggregate_id.clone();
     let consumed = ctx
         .kafka()
         .consume_until(
             "orders",
-            |message| {
+            move |message| {
                 message
                     .payload_json::<OrderCreatedEvent>()
-                    .map(|event| event.aggregate_id == proof.aggregate_id)
+                    .map(|event| event.aggregate_id == expected_aggregate_id)
                     .unwrap_or(false)
             },
             None,
