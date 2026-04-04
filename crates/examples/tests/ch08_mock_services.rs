@@ -2,7 +2,7 @@
 //!
 //! **Resources:** none (localhost mocks only)
 //! **Assertions:** `assert_called_times`, `assert_called_with`, `assert_not_called`,
-//!   `assert_path_called_times`
+//!   `assert_path_called_times`, `assert_path_not_called`
 //! **Concepts:** `prelude = { ... }` registers mocks **before** `run_scenario` starts listeners;
 //!   payment gateway (HTTP) + warehouse allocation (gRPC) + unused webhook (never called)
 //! **Teaching intent:** Stub upstream payment and inventory dependencies with real wire traffic,
@@ -122,6 +122,10 @@ async fn http_and_grpc_mocks_assert_call_patterns(ctx: &mut shakedown::Context) 
             }
         })
         .expect("charge body mentions the order id");
+
+    payment_handle
+        .assert_path_not_called("POST", "/refund")
+        .expect("payment mock should not see refund path in this scenario");
 
     let unused_handle: &MockServiceHandle = ctx
         .mock_service("unused-settlement-webhook")
