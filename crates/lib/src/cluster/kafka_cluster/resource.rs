@@ -546,35 +546,61 @@ impl Resource for KafkaClusterResource {
         use rdkafka::config::ClientConfig;
         use rdkafka::types::RDKafkaErrorCode;
 
-        let admin: AdminClient<DefaultClientContext> = ClientConfig::new()
-            .set("bootstrap.servers", bootstrap)
-            .set("client.id", "shakedown_kafka_cluster_seed")
-            .create()
-            .map_err(|error| {
-                InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
-            })?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         let proof_topic = format!("{}shakedown.proof", self.topic_prefix);
-        let new_topics = [NewTopic::new(&proof_topic, 1, TopicReplication::Fixed(1))];
+        let new_topics = [NewTopic::new(
+            proof_topic.as_str(),
+            1,
+            TopicReplication::Fixed(1),
+        )];
 
-        let results = admin
-            .create_topics(&new_topics, &AdminOptions::new())
-            .await
-            .map_err(|error| {
-                InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
-            })?;
+        const ATTEMPTS: u32 = 8;
+        let mut last_err: Option<String> = None;
+        for attempt in 0..ATTEMPTS {
+            let admin: AdminClient<DefaultClientContext> = ClientConfig::new()
+                .set("bootstrap.servers", bootstrap)
+                .set(
+                    "client.id",
+                    format!("shakedown_kafka_cluster_seed_{attempt}").as_str(),
+                )
+                .set("socket.timeout.ms", "60000")
+                .set("request.timeout.ms", "60000")
+                .set("metadata.max.age.ms", "5000")
+                .create()
+                .map_err(|error| {
+                    InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
+                })?;
 
-        for result in results {
-            if let Err((_, code)) = result {
-                if code != RDKafkaErrorCode::TopicAlreadyExists {
-                    return Err(InfrastructureError::Backend(Box::new(
-                        std::io::Error::other(format!("create topic: {code:?}")),
-                    )));
+            match admin.create_topics(&new_topics, &AdminOptions::new()).await {
+                Ok(results) => {
+                    let mut ok = true;
+                    for result in results {
+                        if let Err((_, code)) = result {
+                            if code != RDKafkaErrorCode::TopicAlreadyExists {
+                                ok = false;
+                                last_err = Some(format!("create topic: {code:?}"));
+                                break;
+                            }
+                        }
+                    }
+                    if ok {
+                        return Ok(());
+                    }
+                }
+                Err(error) => {
+                    last_err = Some(error.to_string());
                 }
             }
+
+            tokio::time::sleep(Duration::from_millis(400 * (attempt as u64 + 1))).await;
         }
 
-        Ok(())
+        Err(InfrastructureError::Backend(Box::new(
+            std::io::Error::other(
+                last_err.unwrap_or_else(|| "create_topics failed after retries".to_string()),
+            ),
+        )))
     }
 
     async fn teardown(&mut self) -> Result<(), InfrastructureError> {

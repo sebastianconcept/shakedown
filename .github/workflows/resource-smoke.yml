@@ -1,0 +1,37 @@
+# Weekly (and on-demand) sweep of all crates/lib/tests/*_vertical.rs integration targets.
+# Heavy: pulls many Docker images. Not run on every PR (see .github/workflows/ci.yml).
+
+name: Resource smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  vertical-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/lib
+
+      - name: Check vertical [[test]] registrations
+        run: bash scripts/check-vertical-tests-registered.sh
+
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+
+      - name: All vertical integration tests (Docker + ignored)
+        run: >-
+          cargo nextest run -p shakedown --all-features
+          -E 'binary(/vertical/)'
+          --run-ignored all

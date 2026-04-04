@@ -120,8 +120,9 @@ Align automation with the same commands as in this section:
 
 1. **Fast gate (no Docker):** `cargo test --workspace` (or `just test-workspace` / `just qa-full` for Cargo-only parity).
 2. **Optional compile-all:** `cargo test --workspace --all-features` — remember this enables `no-diagnostics`, so it does **not** compile bollard diagnostics tests.
-3. **Docker runner:** `just test-shakedown-all-include-ignored` (or the equivalent `cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored`) with a working Docker socket — covers ignored integration tests and diagnostics. Uses **nextest** when installed, same as `just test`.
-4. **Macros only:** `cargo test -p shakedown-macros` when you need trybuild without rebuilding the workspace.
+3. **Docker runner:** `just test-all-include-ignored` (or the equivalent `cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored`) with a working Docker socket — covers ignored integration tests and diagnostics. Uses **nextest** when installed, same as `just test`.
+4. **Per-engine vertical smoke (Docker, heavy):** `just test-shakedown-resources-smoke` — all `tests/*_vertical.rs` binaries with `--all-features` and ignored tests enabled; see [Resource smoke coverage](#resource-smoke-coverage).
+5. **Macros only:** `cargo test -p shakedown-macros` when you need trybuild without rebuilding the workspace.
 
 ### `shakedown` library crate
 
@@ -135,9 +136,47 @@ Align automation with the same commands as in this section:
 | `cargo test -p shakedown --features services` | Service-under-test unit tests + integration **targets** (Docker cases still **`#[ignore]`** unless you pass `-- --ignored`) | Optional Docker for ignored targets |
 | `cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored` | **All** tests: normal + **`#[ignore]`** + doc tests; compiles diagnostics (bollard) | **Required** for ignored integration tests |
 | `just test-lib` | `cargo test -p shakedown` | Same as column above |
-| `just test-shakedown-all-include-ignored` | Same as the long `--include-ignored` row; uses **nextest** when installed, else `cargo test` | **Required** for ignored tests |
+| `just test-all-include-ignored` | Same as the long `--include-ignored` row; uses **nextest** when installed, else `cargo test` | **Required** for ignored tests |
+| `just test-shakedown-resources-smoke` | Runs **every** `tests/*_vertical.rs` integration binary with `--all-features` and `--run-ignored all` / `--include-ignored` (nextest when installed) | **Required** for Docker-backed verticals |
 
 `--include-ignored` runs both non-ignored and ignored tests in one pass. To run **only** ignored tests, use `-- --ignored` on a matching feature set (see per-target recipes below).
+
+### Resource smoke coverage
+
+Each first-party engine has a minimal **vertical** integration test under [`tests/`](tests/) named `*_vertical.rs`: provision the suite container (or in-process DB), assert bindings/helpers, teardown. Together they are the canonical **basic coverage** sweep for [`BuiltinResource`](src/resources/mod.rs).
+
+| Engine / [`BuiltinResource`](src/resources/mod.rs) | Primary smoke test binary | Cargo feature |
+|---------------------------------------------------|---------------------------|---------------|
+| Postgres | `postgres_vertical` | `postgres` |
+| Postgres replica set | `postgres_replica_set_vertical` | `postgres-cluster` |
+| MariaDB | `mariadb_vertical` | `mariadb` |
+| MySQL | `mysql_vertical` | `mysql` |
+| SQLite | `sqlite_vertical` | `sqlite` |
+| DuckDB | `duckdb_vertical` | `duckdb` |
+| Redis | `redis_vertical` | `redis` |
+| Valkey | `valkey_vertical` | `valkey` |
+| Redis Sentinel | `redis_sentinel_vertical` | `redis-sentinel` |
+| MongoDB | `mongo_vertical` | `mongodb` |
+| MongoDB replica set | `mongo_replica_set_vertical` | `mongodb-cluster` |
+| Kafka | `macro_kafka` (not `*_vertical`) | `kafka` |
+| Kafka cluster | `kafka_cluster_vertical` | `kafka-cluster` |
+| RabbitMQ | `helpers_rabbit` (not `*_vertical`) | `rabbitmq` |
+| RabbitMQ cluster | `rabbit_cluster_vertical` | `rabbitmq-cluster` |
+| NATS | `nats_vertical` | `nats` |
+| Neo4j | `neo4j_vertical` | `neo4j` |
+| Elasticsearch | `elasticsearch_vertical` | `elasticsearch` |
+| OpenSearch | `opensearch_vertical` | `opensearch` |
+| Qdrant | `qdrant_vertical` | `qdrant` |
+| Weaviate | `weaviate_vertical` | `weaviate` |
+| InfluxDB | `influxdb_vertical` | `influxdb` |
+| TimescaleDB | `timescaledb_vertical` | `timescaledb` |
+| Toxiproxy | `toxiproxy_vertical` | `fault-injection` |
+
+**One command:** [`just test-shakedown-resources-smoke`](../../justfile) runs all `*_vertical.rs` targets (see [`justfile`](../../justfile)). It does **not** include standalone Kafka/Rabbit smoke binaries (`macro_kafka`, `helpers_rabbit`); run those separately if needed.
+
+[`just check-vertical-tests-registered`](../../justfile) fails if a `tests/*_vertical.rs` file is missing a matching `[[test]]` name in `Cargo.toml` (the weekly **Resource smoke** workflow runs this before nextest).
+
+Filter for **nextest** (when using `cargo nextest list` / `run`): integration tests from `tests/*.rs` are marked `(skipped)` until you pass **`--run-ignored all`** — that is how Docker `#[ignore]` tests are included.
 
 ### `shakedown-macros` (incl. trybuild)
 
@@ -203,13 +242,13 @@ just test-workspace
 just test-workspace-all-features
 just test-lib
 just test-macros
-just test-shakedown-all-include-ignored
+just test-all-include-ignored
 just test-outbox-sqlite
 just test-toxiproxy-ignored
 just test-fault-injection-kafka-ignored
 ```
 
-`just test` and `just qa` use `cargo nextest run` when `cargo-nextest` is installed, and fall back to `cargo test` otherwise. `just test-workspace` and `just qa-full` always use plain `cargo test --workspace` for parity with Cargo-only CI. `just test-shakedown-all-include-ignored` uses nextest the same way when available.
+`just test` and `just qa` use `cargo nextest run` when `cargo-nextest` is installed, and fall back to `cargo test` otherwise. `just test-workspace` and `just qa-full` always use plain `cargo test --workspace` for parity with Cargo-only CI. `just test-all-include-ignored` uses nextest the same way when available.
 
 Docker-backed tests are opt-in; see [Running tests](#running-tests) for the full matrix and individual `just test-*-ignored` recipes.
 

@@ -72,11 +72,22 @@ fn flux_string_literal(value: &str) -> String {
     format!("\"{escaped}\"")
 }
 
-/// True when Influx annotated CSV contains at least one data row (`,,…` table rows).
+/// True when Influx annotated CSV contains at least one data row.
+///
+/// Newer InfluxDB versions may format table rows slightly differently; we treat any non-comment,
+/// non-empty line with enough comma-separated fields as data (after headers).
 fn csv_response_has_data_row(csv_body: &str) -> bool {
-    csv_body
-        .lines()
-        .any(|line| line.starts_with(",,") && line.len() > 3)
+    csv_body.lines().any(|line| {
+        let t = line.trim_start();
+        if t.is_empty() || t.starts_with('#') {
+            return false;
+        }
+        if t.starts_with(",result") {
+            return false;
+        }
+        let comma_count = t.matches(',').count();
+        comma_count >= 2 && (t.starts_with(',') || comma_count >= 4)
+    })
 }
 
 /// Facade for InfluxDB 2.x HTTP helpers bound to [`Context`] (`influxdb` feature).
@@ -223,16 +234,24 @@ impl<'ctx> InfluxDbHelpers<'ctx> {
             ));
         }
         flux.push_str(" |> first()");
-        let csv_body = self.query(flux.as_str()).await?;
-        if !csv_response_has_data_row(csv_body.as_str()) {
-            return Err(ShakedownError::Scenario(ScenarioError::Assertion(
-                AssertionError::Unspecified {
-                    detail: format!(
-                        "expected InfluxDB point measurement={measurement:?} tags={tag_filter:?}; Flux result had no data rows"
-                    ),
-                },
-            )));
+        const RETRIES: u32 = 15;
+        const SLEEP_MS: u64 = 200;
+        for attempt in 0..RETRIES {
+            let csv_body = self.query(flux.as_str()).await?;
+            if csv_response_has_data_row(csv_body.as_str()) {
+                return Ok(());
+            }
+            if attempt + 1 == RETRIES {
+                return Err(ShakedownError::Scenario(ScenarioError::Assertion(
+                    AssertionError::Unspecified {
+                        detail: format!(
+                            "expected InfluxDB point measurement={measurement:?} tags={tag_filter:?}; Flux result had no data rows"
+                        ),
+                    },
+                )));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(SLEEP_MS)).await;
         }
-        Ok(())
+        unreachable!()
     }
 }
