@@ -84,6 +84,9 @@ async fn kafka_cluster_leader_election_after_broker_stop(ctx: &mut shakedown::Co
         }
     }
 
+    // Metadata can lag briefly after create_topics; leader lookup needs the partition to exist.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     let cluster = ctx.kafka_cluster().expect("Kafka cluster control");
     let leader_idx = cluster
         .leader_for_partition(full_topic.as_str(), 0)
@@ -118,7 +121,7 @@ async fn kafka_cluster_leader_election_after_broker_stop(ctx: &mut shakedown::Co
 
     let got = ctx
         .kafka()
-        .consume_one("leader_election_vertical", None)
+        .consume_one("leader_election_vertical", Some(Duration::from_secs(90)))
         .await
         .expect("consume_one");
     let parsed: PingEvent = got.payload_json().expect("json");

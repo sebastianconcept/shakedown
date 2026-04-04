@@ -3,6 +3,7 @@ use crate::resources::search_operations::SearchOperations;
 use crate::resources::{sanitize_elasticsearch_index_prefix, Resource, ResourceHandle};
 use async_trait::async_trait;
 use std::sync::OnceLock;
+use std::time::Duration;
 use testcontainers::core::IntoContainerPort;
 use testcontainers::core::WaitFor;
 use testcontainers::runners::AsyncRunner;
@@ -17,7 +18,8 @@ pub const DEFAULT_OPENSEARCH_IMAGE_REPOSITORY: &str = "opensearchproject/opensea
 pub const DEFAULT_OPENSEARCH_IMAGE_TAG: &str = "2";
 const OPENSEARCH_HTTP_PORT: u16 = 9200;
 const SUITE_SECURITY_USER: &str = "admin";
-const SUITE_SECURITY_PASSWORD: &str = "shakedown";
+/// Meets OpenSearch 2.19+ `OPENSEARCH_INITIAL_ADMIN_PASSWORD` strength (zxcvbn + regex).
+const SUITE_SECURITY_PASSWORD: &str = "Shakedown#Integration2024!";
 
 #[allow(clippy::large_enum_variant)]
 enum SuiteOpenSearchState {
@@ -52,7 +54,7 @@ fn image_fingerprint(repository: &str, tag_override: &Option<String>) -> String 
 /// matching indices then may remove the container.
 ///
 /// Default tag **`2`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_OPENSEARCH_IMAGE_TAG`.
-/// Security is **off** by default (`plugins.security.disabled=true`). Use [`Self::with_security`] for HTTP basic auth (`admin` / `shakedown`).
+/// Security is **off** by default (`plugins.security.disabled=true`). Use [`Self::with_security`] for HTTP basic auth (`admin` / fixed test password matching `OPENSEARCH_INITIAL_ADMIN_PASSWORD` policy).
 #[derive(Debug)]
 pub struct OpenSearchResource {
     image_repository: String,
@@ -151,26 +153,28 @@ impl Resource for OpenSearchResource {
                     .map(str::trim)
                     .filter(|t| !t.is_empty())
                     .unwrap_or(DEFAULT_OPENSEARCH_IMAGE_TAG);
+                // OpenSearch 2.12+ requires `OPENSEARCH_INITIAL_ADMIN_PASSWORD` even when the
+                // security *plugin* is disabled; otherwise the entrypoint exits before binding :9200.
                 let mut start_image = GenericImage::new(repository, tag)
                     .with_exposed_port(OPENSEARCH_HTTP_PORT.tcp())
-                    .with_wait_for(WaitFor::healthcheck())
+                    .with_wait_for(WaitFor::message_on_either_std("publish_address"))
+                    .with_startup_timeout(Duration::from_secs(240))
                     .with_env_var("discovery.type", "single-node")
-                    .with_env_var("OPENSEARCH_JAVA_OPTS", "-Xms512m -Xmx512m")
+                    .with_env_var("OPENSEARCH_JAVA_OPTS", "-Xms256m -Xmx256m")
+                    .with_env_var("OPENSEARCH_INITIAL_ADMIN_PASSWORD", SUITE_SECURITY_PASSWORD)
                     .with_label(
                         crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
                         crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_VALUE,
                     );
                 if self.security_enabled {
-                    start_image = start_image
-                        .with_env_var("plugins.security.disabled", "false")
-                        .with_env_var("OPENSEARCH_INITIAL_ADMIN_PASSWORD", SUITE_SECURITY_PASSWORD);
+                    start_image = start_image.with_env_var("plugins.security.disabled", "false");
                 } else {
                     start_image = start_image.with_env_var("plugins.security.disabled", "true");
                 }
                 let node = start_image.start().await.map_err(Self::map_tc_err)?;
 
                 let mapped_port = node
-                    .get_host_port_ipv4(OPENSEARCH_HTTP_PORT)
+                    .get_host_port_ipv4(OPENSEARCH_HTTP_PORT.tcp())
                     .await
                     .map_err(Self::map_tc_err)?;
                 let host = "127.0.0.1".to_string();
@@ -247,28 +251,43 @@ impl Resource for OpenSearchResource {
             .port
             .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
 
-        let client = self.search_client();
-        let health =
-            client
-                .cluster_health()
-                .await
-                .map_err(|error| InfrastructureError::Readiness {
-                    resource: RESOURCE_NAME.into(),
-                    source: Box::new(std::io::Error::other(error.to_string())),
-                })?;
-        let status = health
-            .get("status")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        if status == "red" {
-            return Err(InfrastructureError::Readiness {
-                resource: RESOURCE_NAME.into(),
-                source: Box::new(std::io::Error::other(format!(
-                    "cluster health status is red: {health}"
-                ))),
-            });
+        const ATTEMPTS: u32 = 60;
+        for attempt in 0..ATTEMPTS {
+            let client = self.search_client();
+            match client.cluster_health().await {
+                Ok(health) => {
+                    let status = health
+                        .get("status")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    if status != "red" {
+                        return Ok(());
+                    }
+                    if attempt + 1 == ATTEMPTS {
+                        return Err(InfrastructureError::Readiness {
+                            resource: RESOURCE_NAME.into(),
+                            source: Box::new(std::io::Error::other(format!(
+                                "cluster health status is red: {health}"
+                            ))),
+                        });
+                    }
+                }
+                Err(error) if attempt + 1 == ATTEMPTS => {
+                    return Err(InfrastructureError::Readiness {
+                        resource: RESOURCE_NAME.into(),
+                        source: Box::new(std::io::Error::other(error.to_string())),
+                    });
+                }
+                Err(_) => {}
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        Ok(())
+        Err(InfrastructureError::Readiness {
+            resource: RESOURCE_NAME.into(),
+            source: Box::new(std::io::Error::other(
+                "OpenSearch readiness: cluster health attempts exhausted",
+            )),
+        })
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {

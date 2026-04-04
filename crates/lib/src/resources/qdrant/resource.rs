@@ -12,8 +12,8 @@ use tokio::sync::Mutex;
 const RESOURCE_NAME: &str = "qdrant";
 /// Default image repository (`qdrant/qdrant`).
 pub const DEFAULT_QDRANT_IMAGE_REPOSITORY: &str = "qdrant/qdrant";
-/// Default image tag (`qdrant/qdrant:1`).
-pub const DEFAULT_QDRANT_IMAGE_TAG: &str = "1";
+/// Default image tag (`qdrant/qdrant:latest`). (`:1` is not published on Docker Hub.)
+pub const DEFAULT_QDRANT_IMAGE_TAG: &str = "latest";
 const QDRANT_REST_PORT: u16 = 6333;
 const QDRANT_GRPC_PORT: u16 = 6334;
 
@@ -96,7 +96,7 @@ async fn delete_collections_with_prefix(rest_url: &str, prefix: &str) -> Result<
 /// **Suite lifecycle:** one node per process; per-scenario collection prefix; refcounted teardown
 /// deletes matching collections then may remove the container.
 ///
-/// Default tag **`1`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_QDRANT_IMAGE_TAG`.
+/// Default tag **`latest`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_QDRANT_IMAGE_TAG`.
 /// Readiness uses HTTP [`GET /readyz`](https://qdrant.tech/documentation/guides/installation/) on the REST port (D-12).
 #[derive(Debug)]
 pub struct QdrantResource {
@@ -139,7 +139,7 @@ impl QdrantResource {
         self
     }
 
-    /// Apply tag override from `SHAKEDOWN_QDRANT_IMAGE_TAG` when set (may be `qdrant/qdrant:1` or `1`).
+    /// Apply tag override from `SHAKEDOWN_QDRANT_IMAGE_TAG` when set (e.g. `v1.12.5` or `latest`).
     pub fn with_image_tag_from_env(mut self) -> Self {
         if let Ok(tag) = std::env::var("SHAKEDOWN_QDRANT_IMAGE_TAG") {
             let tag = tag.trim();

@@ -153,6 +153,50 @@ pub fn sanitize_sql_database_name(scenario_id: &str) -> String {
     out
 }
 
+/// Turn a scenario id into a safe Neo4j 5 **database** name (`shakedown-…`, max 63 bytes).
+///
+/// Neo4j allows only ASCII letters, digits, dots, and dashes in database names—no underscores.
+/// This prefixes `shakedown-` and maps non-alphanumerics to `-`, collapsing runs of `-`.
+#[cfg(feature = "neo4j")]
+pub fn sanitize_neo4j_database_name(scenario_id: &str) -> String {
+    const PREFIX: &str = "shakedown";
+    const MAX_LEN: usize = 63;
+    let mut rest = String::new();
+    for ch in scenario_id.chars().take(200) {
+        if ch.is_ascii_alphanumeric() {
+            rest.push(ch.to_ascii_lowercase());
+        } else {
+            rest.push('-');
+        }
+    }
+    if rest.is_empty() {
+        rest.push_str("scenario");
+    }
+    let mut collapsed = String::new();
+    for ch in rest.chars() {
+        if ch == '-' {
+            if collapsed.ends_with('-') {
+                continue;
+            }
+            collapsed.push('-');
+        } else {
+            collapsed.push(ch);
+        }
+    }
+    let mut rest = collapsed.trim_matches('-').to_string();
+    if rest.is_empty() {
+        rest.push_str("scenario");
+    }
+    let mut out = format!("{PREFIX}-{rest}");
+    if out.len() > MAX_LEN {
+        out.truncate(MAX_LEN);
+        while out.ends_with('-') && out.len() > PREFIX.len() + 1 {
+            out.pop();
+        }
+    }
+    out
+}
+
 /// Scenario-scoped Elasticsearch / OpenSearch index name prefix (`shakedown_<id>_`, same
 /// sanitization as [`sanitize_sql_database_name`] plus a trailing underscore for logical index names).
 #[cfg(any(
@@ -1425,6 +1469,19 @@ mod tests {
         assert!(sanitized.len() <= 63);
         assert!(sanitized.starts_with("shakedown_"));
         assert_eq!(sanitize_sql_database_name(""), "shakedown_scenario");
+    }
+
+    #[cfg(feature = "neo4j")]
+    #[test]
+    fn sanitize_neo4j_database_name_rules() {
+        assert_eq!(
+            super::sanitize_neo4j_database_name("neo4j_vertical_proof"),
+            "shakedown-neo4j-vertical-proof"
+        );
+        assert_eq!(
+            super::sanitize_neo4j_database_name(""),
+            "shakedown-scenario"
+        );
     }
 
     #[test]

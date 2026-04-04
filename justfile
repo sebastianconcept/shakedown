@@ -53,6 +53,32 @@ test-workspace:
 test-workspace-all-features:
   cargo test --workspace --all-features
 
+# Every `crates/lib/tests/*_vertical.rs` file must have `name = "<stem>"` under [[test]] in crates/lib/Cargo.toml.
+check-vertical-tests-registered:
+  bash scripts/check-vertical-tests-registered.sh
+
+# All `crates/lib/tests/*_vertical.rs` targets (Docker for most engines; nextest if installed). Kafka/Rabbit use `macro_kafka` / `helpers_rabbit`, not included here.
+test-shakedown-resources-smoke:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  vertical_tests=()
+  for f in crates/lib/tests/*_vertical.rs; do
+    [[ -e "$f" ]] || continue
+    vertical_tests+=(--test "$(basename "$f" .rs)")
+  done
+  if (( ${#vertical_tests[@]} == 0 )); then
+    echo "no crates/lib/tests/*_vertical.rs" >&2
+    exit 1
+  fi
+  if command -v cargo-nextest >/dev/null 2>&1; then
+    cargo nextest run -p shakedown --all-features \
+      -E 'binary(/vertical/)' \
+      --run-ignored all
+  else
+    echo "cargo-nextest not installed; run 'just install-nextest'. Falling back to cargo test." >&2
+    cargo test -p shakedown --all-features "${vertical_tests[@]}" -- --include-ignored
+  fi
+
 # ----------------------------
 # `shakedown` library — fast local loop
 # ----------------------------

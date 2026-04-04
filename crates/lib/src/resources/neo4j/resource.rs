@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_sql_database_name, Resource, ResourceHandle};
+use crate::resources::{sanitize_neo4j_database_name, Resource, ResourceHandle};
 use async_trait::async_trait;
 use neo4rs::{query, ConfigBuilder, Graph};
 use std::sync::OnceLock;
@@ -70,8 +70,9 @@ async fn graph_system(host: &str, bolt_port: u16) -> Result<Graph, Infrastructur
     graph_for_database(host, bolt_port, "system").await
 }
 
-async fn run_return_one_system(host: &str, bolt_port: u16) -> Result<(), InfrastructureError> {
-    let graph = graph_system(host, bolt_port).await?;
+/// Ready when the default user database accepts `RETURN 1` (Neo4j 5+ restricts arbitrary Cypher on `system`).
+async fn run_return_one_default_db(host: &str, bolt_port: u16) -> Result<(), InfrastructureError> {
+    let graph = graph_for_database(host, bolt_port, "neo4j").await?;
     let mut rows = graph
         .execute(query("RETURN 1 AS n"))
         .await
@@ -167,7 +168,7 @@ impl Resource for Neo4jResource {
             return Err(InfrastructureError::AlreadyProvisioned("neo4j".into()));
         }
 
-        let database_name = sanitize_sql_database_name(scenario_id.as_str());
+        let database_name = sanitize_neo4j_database_name(scenario_id.as_str());
         let want_key = image_fingerprint(&self.image_tag);
 
         let mut guard = suite_neo4j_mutex().lock().await;
@@ -290,7 +291,7 @@ impl Resource for Neo4jResource {
 
         const ATTEMPTS: u32 = 30;
         for attempt in 0..ATTEMPTS {
-            match run_return_one_system(host, bolt_port).await {
+            match run_return_one_default_db(host, bolt_port).await {
                 Ok(()) => return Ok(()),
                 Err(error) if attempt + 1 == ATTEMPTS => return Err(error),
                 Err(_) => {

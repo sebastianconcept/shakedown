@@ -33,8 +33,8 @@ async fn neo4j_provisions_and_sets_bindings() {
                 assert!(bindings.port > 0);
                 assert!(bindings.http_port > 0);
                 assert!(
-                    bindings.database.starts_with("shakedown_"),
-                    "expected scenario database prefix"
+                    bindings.database.starts_with("shakedown-"),
+                    "expected scenario database prefix (Neo4j names disallow underscores)"
                 );
                 assert!(bindings.bolt_url.contains("bolt://"));
                 assert!(bindings.bolt_url.contains(&bindings.host));
