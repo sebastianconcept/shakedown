@@ -18,6 +18,11 @@ prost = { version = "0.14", optional = true }
 tonic = { version = "0.14", optional = true, default-features = false, features = ["transport"] }
 tonic-prost = { version = "0.14", optional = true }
 
+[dev-dependencies]
+lapin = "4.3"
+rdkafka = { version = "=0.38", default-features = false, features = ["ssl-vendored", "tokio"] }
+serial_test = "3"
+
 [features]
 default = []
 sqlite = ["shakedown/sqlite"]
@@ -161,27 +166,27 @@ required-features = ["services", "postgres", "mongodb", "kafka", "redis", "diagn
 [[test]]
 name = "ch19_mongo_replica_set"
 path = "tests/ch19_mongo_replica_set.rs"
-required-features = ["services", "mongodb-cluster"]
+required-features = ["services", "mongodb-cluster", "mongodb", "kafka", "rabbitmq"]
 
 [[test]]
 name = "ch20_kafka_cluster"
 path = "tests/ch20_kafka_cluster.rs"
-required-features = ["services", "kafka-cluster"]
+required-features = ["services", "kafka-cluster", "postgres", "redis"]
 
 [[test]]
 name = "ch21_redis_sentinel"
 path = "tests/ch21_redis_sentinel.rs"
-required-features = ["services", "redis-sentinel"]
+required-features = ["services", "redis-sentinel", "postgres", "kafka"]
 
 [[test]]
 name = "ch22_postgres_replica_set"
 path = "tests/ch22_postgres_replica_set.rs"
-required-features = ["services", "postgres-cluster"]
+required-features = ["services", "postgres-cluster", "redis", "kafka"]
 
 [[test]]
 name = "ch23_rabbit_cluster"
 path = "tests/ch23_rabbit_cluster.rs"
-required-features = ["services", "rabbitmq-cluster"]
+required-features = ["services", "rabbitmq-cluster", "mongodb", "kafka"]
 
 # ─── Part VI: Load, soak + resilience ───
 

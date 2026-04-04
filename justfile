@@ -180,7 +180,7 @@ test-examples-part4:
 
 # Part V: Cluster topologies.
 test-examples-part5:
-  cargo test -p shakedown-examples --features services,mongodb-cluster,kafka-cluster,redis-sentinel,postgres-cluster,rabbitmq-cluster -- --ignored \
+  cargo test -p shakedown-examples --features services,mongodb-cluster,mongodb,kafka,rabbitmq,kafka-cluster,postgres,redis,redis-sentinel,postgres-cluster,rabbitmq-cluster -- --ignored \
     ch19 ch20 ch21 ch22 ch23
 
 # Part VI: Load, soak + resilience.
