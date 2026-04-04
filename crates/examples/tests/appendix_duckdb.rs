@@ -2,7 +2,7 @@
 //!
 //! **Resources:** DuckDB (no Docker)
 //! **Assertions:** `execute`, `assert_row_exists`, `assert_row_count`, `outbox().setup`,
-//!   `outbox().assert_pending`, `with_payload::<T>()`
+//!   `outbox().assert_pending`, `assert_sent`, `assert_failed`, `assert_retry`, `with_payload::<T>()`
 //! **Teaching intent:** Run analytical SQL beside SQLite-style scenarios and store canonical outbox
 //!   rows in DuckDB when you want zero-container publication workflows.
 //!
@@ -87,4 +87,55 @@ async fn duckdb_outbox_storage_pending_row_with_payload_predicate(ctx: &mut shak
         })
         .await
         .expect("payload predicate matches DuckDB JSON");
+}
+
+#[shakedown::test(resources = [DuckDb])]
+async fn duckdb_outbox_sent_failed_and_retry_rows(ctx: &mut shakedown::Context) {
+    let outbox = ctx.outbox();
+    outbox
+        .setup()
+        .await
+        .expect("setup creates outbox_event in DuckDB");
+
+    ctx.duckdb()
+        .execute(
+            "INSERT INTO outbox_event (aggregate_type, aggregate_id, type, payload, status, attempts) \
+             VALUES ('order', 'order-duck-sent-1', 'OrderShipped', '{}', 'sent', 0)",
+            (),
+        )
+        .await
+        .expect("insert sent row");
+
+    outbox
+        .assert_sent("order-duck-sent-1", "OrderShipped")
+        .await
+        .expect("row is sent");
+
+    ctx.duckdb()
+        .execute(
+            "INSERT INTO outbox_event (aggregate_type, aggregate_id, type, payload, status, attempts) \
+             VALUES ('order', 'order-duck-fail-1', 'CaptureFailed', '{}', 'failed', 0)",
+            (),
+        )
+        .await
+        .expect("insert failed row");
+
+    outbox
+        .assert_failed("order-duck-fail-1", "CaptureFailed")
+        .await
+        .expect("row is failed");
+
+    ctx.duckdb()
+        .execute(
+            "INSERT INTO outbox_event (aggregate_type, aggregate_id, type, payload, status, attempts) \
+             VALUES ('order', 'order-duck-retry-1', 'OrderRetried', '{}', 'pending', 4)",
+            (),
+        )
+        .await
+        .expect("insert high-attempt pending row");
+
+    outbox
+        .assert_retry("order-duck-retry-1", "OrderRetried", 3)
+        .await
+        .expect("retry attempts meet minimum");
 }

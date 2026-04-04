@@ -8,7 +8,7 @@
 //!   snapshots, then final [`shakedown::LoadMetrics`] after [`shakedown::LoadHandle::stop`].
 //! **Assertions:** [`shakedown::LoadMetrics::total_iterations`], [`shakedown::LoadMetrics::successful_operations`],
 //!   [`shakedown::LoadMetrics::p50`], [`shakedown::LoadMetrics::p99`], [`shakedown::LoadMetrics::error_rate`],
-//!   [`shakedown::LoadMetrics::throughput`], [`shakedown::LoadMetricsAssertBuilder`] (`p99_under`, `p50_under`,
+//!   [`shakedown::LoadMetrics::throughput`], [`shakedown::LoadMetricsAssertBuilder`] (`p99_under`, `p95_under`, `p50_under`,
 //!   `error_rate_under`, `no_drops`), [`shakedown::LoadMetricsAssertBuilder::print_summary_to_stderr`],
 //!   [`shakedown::LoadMetricsAssertBuilder::store_for_report`] + [`shakedown::LoadMetrics::write_report`]
 //!   → `target/shakedown/reports/`.
@@ -133,6 +133,9 @@ async fn order_service_load_warmup_ramp_and_slo_report(ctx: &mut shakedown::Cont
     order_assertions
         .p99_under(Duration::from_secs(45))
         .expect("p99 SLO");
+    order_assertions
+        .p95_under(Duration::from_secs(42))
+        .expect("p95 SLO");
     order_assertions
         .p50_under(Duration::from_secs(30))
         .expect("p50 SLO");

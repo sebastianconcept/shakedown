@@ -7,7 +7,7 @@
 //!   [`shakedown::LoadMetrics::error_rate_during`], [`shakedown::LoadMetrics::throughput_during`],
 //!   [`shakedown::LoadMetrics::p99_after`].
 //! **Assertions:** [`shakedown::LoadMetricsAssertBuilder::tail_ratio_under`],
-//!   [`shakedown::LoadMetricsAssertBuilder::throughput_above`] (steady-state gate),
+//!   [`shakedown::LoadMetricsAssertBuilder::throughput_above`], [`shakedown::LoadMetricsAssertBuilder::drops_under`],
 //!   [`shakedown::LoadMetrics::assert_with_phase`] for phase-correlated failure metadata on SLO breaks.
 //! **Saturation:** [`shakedown::SaturationPolicy::Drop`] vs [`shakedown::SaturationPolicy::Queue`] —
 //!   `Drop` sheds arrivals when every worker is busy (open-model realism); `Queue` buffers until the harness
@@ -138,6 +138,9 @@ async fn order_service_windowed_metrics_and_tail_ratio(ctx: &mut shakedown::Cont
     let windowed = metrics.assert_with_phase("orders-windowed", phase_for_messages);
     windowed.tail_ratio_under(80.0).expect("tail ratio");
     windowed.throughput_above(0.5).expect("throughput floor");
+    windowed
+        .drops_under(500)
+        .expect("Queue saturation should not shed many arrivals on this profile");
     windowed
         .error_rate_under(0.12)
         .expect("steady-state error rate");
