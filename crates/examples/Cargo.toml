@@ -149,7 +149,7 @@ required-features = ["services", "postgres", "mongodb", "kafka", "redis", "mock-
 [[test]]
 name = "ch17_fault_injection"
 path = "tests/ch17_fault_injection.rs"
-required-features = ["services", "postgres", "kafka", "fault-injection"]
+required-features = ["services", "postgres", "redis", "kafka", "fault-injection"]
 
 [[test]]
 name = "ch18_diagnostics"
