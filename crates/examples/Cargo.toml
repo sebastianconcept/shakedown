@@ -193,27 +193,41 @@ required-features = ["services", "rabbitmq-cluster", "mongodb", "kafka"]
 [[test]]
 name = "ch24_load_basics"
 path = "tests/ch24_load_basics.rs"
-required-features = ["services", "postgres", "kafka", "load"]
+required-features = ["services", "postgres", "redis", "kafka", "load"]
 
 [[test]]
 name = "ch25_load_windowed"
 path = "tests/ch25_load_windowed.rs"
-required-features = ["services", "postgres", "kafka", "load"]
+required-features = ["services", "postgres", "redis", "kafka", "load"]
 
 [[test]]
 name = "ch26_soak"
 path = "tests/ch26_soak.rs"
-required-features = ["services", "postgres", "kafka", "redis", "load"]
+required-features = ["services", "postgres", "kafka", "redis", "load", "diagnostics"]
 
 [[test]]
 name = "ch27_disruption_under_load"
 path = "tests/ch27_disruption_under_load.rs"
-required-features = ["services", "mongodb-cluster", "kafka", "load"]
+required-features = [
+    "services",
+    "mongodb-cluster",
+    "kafka",
+    "rabbitmq",
+    "load",
+]
 
 [[test]]
 name = "ch28_capstone"
 path = "tests/ch28_capstone.rs"
-required-features = ["services", "mongodb-cluster", "kafka", "load", "fault-injection"]
+required-features = [
+    "services",
+    "mongodb-cluster",
+    "kafka",
+    "rabbitmq",
+    "load",
+    "fault-injection",
+    "diagnostics",
+]
 
 # ─── Appendices ───
 

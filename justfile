@@ -185,7 +185,7 @@ test-examples-part5:
 
 # Part VI: Load, soak + resilience.
 test-examples-part6:
-  cargo test -p shakedown-examples --features services,postgres,kafka,redis,mongodb-cluster,load,fault-injection -- --ignored \
+  cargo test -p shakedown-examples --features services,postgres,kafka,redis,mongodb,mongodb-cluster,rabbitmq,load,fault-injection,diagnostics -- --ignored \
     ch24 ch25 ch26 ch27 ch28
 
 # Full suite (all chapters + appendices).
