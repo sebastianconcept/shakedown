@@ -3,7 +3,8 @@ use crate::resources::search_operations::SearchOperations;
 use crate::resources::{sanitize_elasticsearch_index_prefix, Resource, ResourceHandle};
 use async_trait::async_trait;
 use std::sync::OnceLock;
-use testcontainers::core::{Image, ImageExt};
+use std::time::Duration;
+use testcontainers::core::{Image, ImageExt, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::elastic_search::{ElasticSearch, ELASTICSEARCH_API_PORT};
 use tokio::sync::Mutex;
@@ -153,6 +154,13 @@ impl Resource for ElasticsearchResource {
                 } else {
                     start_image = start_image.with_env_var("xpack.security.enabled", "false");
                 }
+                // `testcontainers-modules` waits for ES 7's "[YELLOW] to [GREEN]" stdout line; ES 8+ uses
+                // JSON logs and never prints that, so the default wait hits the 60s startup timeout.
+                let start_image = start_image
+                    .with_ready_conditions(vec![WaitFor::message_on_either_std(
+                        "recovered [0] indices into cluster_state",
+                    )])
+                    .with_startup_timeout(Duration::from_secs(180));
                 let node = start_image
                     .with_label(
                         crate::docker_labels::SHAKEDOWN_DOCKER_LABEL_KEY,
