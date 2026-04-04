@@ -9,8 +9,9 @@ use testcontainers_modules::elastic_search::{ElasticSearch, ELASTICSEARCH_API_PO
 use tokio::sync::Mutex;
 
 const RESOURCE_NAME: &str = "elasticsearch";
-/// Default Elasticsearch image tag (`docker.elastic.co/elasticsearch/elasticsearch:8`).
-pub const DEFAULT_ELASTICSEARCH_IMAGE_TAG: &str = "8";
+/// Default Elasticsearch image tag (`docker.elastic.co/elasticsearch/elasticsearch:8.15.0`).
+/// (Floating `8` is not published on the Elastic registry; pin a concrete 8.x patch.)
+pub const DEFAULT_ELASTICSEARCH_IMAGE_TAG: &str = "8.15.0";
 const SUITE_SECURITY_USER: &str = "elastic";
 const SUITE_SECURITY_PASSWORD: &str = "shakedown";
 
@@ -44,7 +45,7 @@ fn image_fingerprint(image: &ElasticSearch, tag_override: &Option<String>) -> St
 /// **Suite lifecycle:** one node per process; per-scenario index prefix; refcounted teardown deletes
 /// matching indices then may remove the container.
 ///
-/// Default tag **`8`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_ELASTICSEARCH_IMAGE_TAG`.
+/// Default tag **`8.15.0`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_ELASTICSEARCH_IMAGE_TAG`.
 /// Security is **off** by default (`xpack.security.enabled=false`). Use [`Self::with_security`] for HTTP basic auth (`elastic` / `shakedown`).
 #[derive(Debug)]
 pub struct ElasticsearchResource {
