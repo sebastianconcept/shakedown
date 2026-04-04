@@ -110,7 +110,7 @@ required-features = ["services", "postgres", "redis", "kafka"]
 [[test]]
 name = "ch10_service_events"
 path = "tests/ch10_service_events.rs"
-required-features = ["services", "postgres", "kafka"]
+required-features = ["services", "postgres", "redis", "kafka"]
 
 [[test]]
 name = "ch11_service_cache"
@@ -120,12 +120,12 @@ required-features = ["services", "postgres", "redis", "kafka"]
 [[test]]
 name = "ch12_service_outbox"
 path = "tests/ch12_service_outbox.rs"
-required-features = ["services", "postgres", "kafka", "rabbitmq", "outbox"]
+required-features = ["services", "postgres", "redis", "kafka", "rabbitmq", "outbox"]
 
 [[test]]
 name = "ch13_service_mock_upstream"
 path = "tests/ch13_service_mock_upstream.rs"
-required-features = ["services", "postgres", "kafka", "mock-services"]
+required-features = ["services", "postgres", "redis", "kafka", "mock-services"]
 
 # ─── Part III: Two services under test ───
 
