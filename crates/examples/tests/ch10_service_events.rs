@@ -48,18 +48,19 @@ async fn order_service_kafka_order_created_event(ctx: &mut shakedown::Context) {
     let body: serde_json::Value = response.json().await.expect("response JSON");
     let order_id = body["id"].as_str().expect("order id").to_string();
 
+    let order_id_for_consume = order_id.clone();
     let consumed = ctx
         .kafka()
         .consume_until(
             "orders",
-            |message| {
+            move |message| {
                 message
                     .payload_json::<serde_json::Value>()
                     .map(|value| {
                         value
                             .get("aggregate_id")
                             .and_then(|id| id.as_str())
-                            .is_some_and(|id| id == order_id.as_str())
+                            .is_some_and(|candidate| candidate == order_id_for_consume.as_str())
                     })
                     .unwrap_or(false)
             },
