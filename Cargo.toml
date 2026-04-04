@@ -2,11 +2,6 @@
 members = [
     "crates/lib",
     "crates/macros",
-    "crates/examples",
-    "crates/idempotency",
-    "crates/shared-grpc",
-    "crates/order-service",
-    "crates/fulfillment-service",
 ]
 resolver = "2"
 
