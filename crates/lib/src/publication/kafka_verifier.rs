@@ -7,7 +7,7 @@ use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::message::Message;
 
-use crate::error::{IntoInfrastructureError, ShakedownError};
+use crate::error::{InfrastructureError, IntoInfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
 use crate::OutboxError;
 

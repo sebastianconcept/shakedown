@@ -1,0 +1,262 @@
+[package]
+name = "shakedown-examples"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+shakedown = { path = "../lib", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4"] }
+
+[features]
+default = []
+sqlite = ["shakedown/sqlite"]
+duckdb = ["shakedown/duckdb"]
+kafka = ["shakedown/kafka"]
+postgres = ["shakedown/postgres"]
+redis = ["shakedown/redis"]
+rabbitmq = ["shakedown/rabbitmq"]
+mongodb = ["shakedown/mongodb"]
+nats = ["shakedown/nats"]
+neo4j = ["shakedown/neo4j"]
+elasticsearch = ["shakedown/elasticsearch"]
+opensearch = ["shakedown/opensearch"]
+qdrant = ["shakedown/qdrant"]
+weaviate = ["shakedown/weaviate"]
+influxdb = ["shakedown/influxdb"]
+timescaledb = ["shakedown/timescaledb"]
+mariadb = ["shakedown/mariadb"]
+mysql = ["shakedown/mysql"]
+valkey = ["shakedown/valkey"]
+mock-services = ["shakedown/mock-services"]
+grpc-mock-services = ["shakedown/grpc-mock-services"]
+services = ["shakedown/services"]
+outbox = ["shakedown/outbox"]
+fault-injection = ["shakedown/fault-injection"]
+diagnostics = ["shakedown/diagnostics"]
+load = ["shakedown/load"]
+cluster = ["shakedown/cluster"]
+mongodb-cluster = ["shakedown/mongodb-cluster"]
+kafka-cluster = ["shakedown/kafka-cluster"]
+redis-sentinel = ["shakedown/redis-sentinel"]
+postgres-cluster = ["shakedown/postgres-cluster"]
+rabbitmq-cluster = ["shakedown/rabbitmq-cluster"]
+
+# ─── Part I: Foundations ───
+
+[[test]]
+name = "ch01_first_scenario"
+path = "tests/ch01_first_scenario.rs"
+required-features = ["sqlite"]
+
+[[test]]
+name = "ch02_kafka"
+path = "tests/ch02_kafka.rs"
+required-features = ["kafka"]
+
+[[test]]
+name = "ch03_postgres"
+path = "tests/ch03_postgres.rs"
+required-features = ["postgres"]
+
+[[test]]
+name = "ch04_redis"
+path = "tests/ch04_redis.rs"
+required-features = ["redis"]
+
+[[test]]
+name = "ch05_messaging_rabbit"
+path = "tests/ch05_messaging_rabbit.rs"
+required-features = ["rabbitmq"]
+
+[[test]]
+name = "ch06_documents_mongo"
+path = "tests/ch06_documents_mongo.rs"
+required-features = ["mongodb"]
+
+[[test]]
+name = "ch07_multi_resource"
+path = "tests/ch07_multi_resource.rs"
+required-features = ["kafka", "postgres", "redis"]
+
+[[test]]
+name = "ch08_mock_services"
+path = "tests/ch08_mock_services.rs"
+required-features = ["mock-services", "grpc-mock-services"]
+
+# ─── Part II: One service under test ───
+
+[[test]]
+name = "ch09_service_basics"
+path = "tests/ch09_service_basics.rs"
+required-features = ["services", "postgres", "redis", "kafka"]
+
+[[test]]
+name = "ch10_service_events"
+path = "tests/ch10_service_events.rs"
+required-features = ["services", "postgres", "kafka"]
+
+[[test]]
+name = "ch11_service_cache"
+path = "tests/ch11_service_cache.rs"
+required-features = ["services", "postgres", "redis", "kafka"]
+
+[[test]]
+name = "ch12_service_outbox"
+path = "tests/ch12_service_outbox.rs"
+required-features = ["services", "postgres", "kafka", "rabbitmq", "outbox"]
+
+[[test]]
+name = "ch13_service_mock_upstream"
+path = "tests/ch13_service_mock_upstream.rs"
+required-features = ["services", "postgres", "kafka", "mock-services"]
+
+# ─── Part III: Two services under test ───
+
+[[test]]
+name = "ch14_multi_service"
+path = "tests/ch14_multi_service.rs"
+required-features = ["services", "postgres", "mongodb", "kafka", "redis"]
+
+[[test]]
+name = "ch15_cross_service_events"
+path = "tests/ch15_cross_service_events.rs"
+required-features = ["services", "postgres", "mongodb", "kafka", "rabbitmq", "redis"]
+
+[[test]]
+name = "ch16_cross_service_mocks"
+path = "tests/ch16_cross_service_mocks.rs"
+required-features = ["services", "postgres", "mongodb", "kafka", "redis", "mock-services"]
+
+# ─── Part IV: Fault injection + diagnostics ───
+
+[[test]]
+name = "ch17_fault_injection"
+path = "tests/ch17_fault_injection.rs"
+required-features = ["services", "postgres", "kafka", "fault-injection"]
+
+[[test]]
+name = "ch18_diagnostics"
+path = "tests/ch18_diagnostics.rs"
+required-features = ["services", "postgres", "mongodb", "kafka", "redis", "diagnostics"]
+
+# ─── Part V: Cluster topologies ───
+
+[[test]]
+name = "ch19_mongo_replica_set"
+path = "tests/ch19_mongo_replica_set.rs"
+required-features = ["services", "mongodb-cluster"]
+
+[[test]]
+name = "ch20_kafka_cluster"
+path = "tests/ch20_kafka_cluster.rs"
+required-features = ["services", "kafka-cluster"]
+
+[[test]]
+name = "ch21_redis_sentinel"
+path = "tests/ch21_redis_sentinel.rs"
+required-features = ["services", "redis-sentinel"]
+
+[[test]]
+name = "ch22_postgres_replica_set"
+path = "tests/ch22_postgres_replica_set.rs"
+required-features = ["services", "postgres-cluster"]
+
+[[test]]
+name = "ch23_rabbit_cluster"
+path = "tests/ch23_rabbit_cluster.rs"
+required-features = ["services", "rabbitmq-cluster"]
+
+# ─── Part VI: Load, soak + resilience ───
+
+[[test]]
+name = "ch24_load_basics"
+path = "tests/ch24_load_basics.rs"
+required-features = ["services", "postgres", "kafka", "load"]
+
+[[test]]
+name = "ch25_load_windowed"
+path = "tests/ch25_load_windowed.rs"
+required-features = ["services", "postgres", "kafka", "load"]
+
+[[test]]
+name = "ch26_soak"
+path = "tests/ch26_soak.rs"
+required-features = ["services", "postgres", "kafka", "redis", "load"]
+
+[[test]]
+name = "ch27_disruption_under_load"
+path = "tests/ch27_disruption_under_load.rs"
+required-features = ["services", "mongodb-cluster", "kafka", "load"]
+
+[[test]]
+name = "ch28_capstone"
+path = "tests/ch28_capstone.rs"
+required-features = ["services", "mongodb-cluster", "kafka", "load", "fault-injection"]
+
+# ─── Appendices ───
+
+[[test]]
+name = "appendix_nats"
+path = "tests/appendix_nats.rs"
+required-features = ["nats", "outbox", "sqlite"]
+
+[[test]]
+name = "appendix_neo4j"
+path = "tests/appendix_neo4j.rs"
+required-features = ["neo4j"]
+
+[[test]]
+name = "appendix_elasticsearch"
+path = "tests/appendix_elasticsearch.rs"
+required-features = ["elasticsearch"]
+
+[[test]]
+name = "appendix_opensearch"
+path = "tests/appendix_opensearch.rs"
+required-features = ["opensearch"]
+
+[[test]]
+name = "appendix_qdrant"
+path = "tests/appendix_qdrant.rs"
+required-features = ["qdrant"]
+
+[[test]]
+name = "appendix_weaviate"
+path = "tests/appendix_weaviate.rs"
+required-features = ["weaviate"]
+
+[[test]]
+name = "appendix_influxdb"
+path = "tests/appendix_influxdb.rs"
+required-features = ["influxdb"]
+
+[[test]]
+name = "appendix_timescaledb"
+path = "tests/appendix_timescaledb.rs"
+required-features = ["timescaledb"]
+
+[[test]]
+name = "appendix_duckdb"
+path = "tests/appendix_duckdb.rs"
+required-features = ["duckdb", "outbox"]
+
+[[test]]
+name = "appendix_mariadb"
+path = "tests/appendix_mariadb.rs"
+required-features = ["mariadb"]
+
+[[test]]
+name = "appendix_mysql"
+path = "tests/appendix_mysql.rs"
+required-features = ["mysql"]
+
+[[test]]
+name = "appendix_valkey"
+path = "tests/appendix_valkey.rs"
+required-features = ["valkey", "outbox", "sqlite"]

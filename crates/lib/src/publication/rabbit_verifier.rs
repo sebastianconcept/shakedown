@@ -12,7 +12,7 @@ use lapin::options::{BasicAckOptions, BasicGetOptions, BasicNackOptions};
 use lapin::types::ShortString;
 use lapin::{Connection, ConnectionProperties};
 
-use crate::error::{IntoInfrastructureError, ShakedownError};
+use crate::error::{InfrastructureError, IntoInfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
 use crate::OutboxError;
 

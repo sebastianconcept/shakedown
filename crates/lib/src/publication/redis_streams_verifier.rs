@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use redis::streams::{StreamId, StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
 
-use crate::error::{IntoInfrastructureError, ShakedownError};
+use crate::error::{InfrastructureError, IntoInfrastructureError, ShakedownError};
 use crate::helper_prelude::map_backend_error;
 use crate::lifecycle::Context;
 use crate::OutboxError;
