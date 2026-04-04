@@ -140,3 +140,54 @@ test-fault-injection-kafka-ignored:
 # MongoDB replica set under open-model load while forcing a primary step-down (Docker; `#[ignore]` by default).
 test-mongo-cluster-load-disruption-ignored:
   cargo test -p shakedown --features mongodb-cluster,load --test mongo_cluster_load_disruption -- --ignored
+
+# ----------------------------
+# Example companion services + `shakedown-examples` crate
+# ----------------------------
+
+# Build example companion service Docker images (workspace root; uses root Dockerfiles).
+build-example-services:
+  docker build -f Dockerfile.example-order-service -t example-order-service:latest .
+  docker build -f Dockerfile.example-fulfillment-service -t example-fulfillment-service:latest .
+
+# Non-Docker examples only (ch01 + appendix_duckdb when un-ignored).
+test-examples:
+  cargo test -p shakedown-examples --features sqlite,duckdb,outbox
+
+# All Docker-backed examples (`#[ignore]` targets).
+test-examples-ignored:
+  cargo test -p shakedown-examples --all-features -- --ignored
+
+# Part I: Foundations (Docker infra only, no service images).
+test-examples-part1:
+  cargo test -p shakedown-examples --features sqlite,kafka,postgres,redis,rabbitmq,mongodb,mock-services,grpc-mock-services -- --ignored \
+    ch01 ch02 ch03 ch04 ch05 ch06 ch07 ch08
+
+# Part II: One service under test (Order Service image).
+test-examples-part2:
+  cargo test -p shakedown-examples --features services,postgres,redis,kafka,rabbitmq,outbox,mock-services -- --ignored \
+    ch09 ch10 ch11 ch12 ch13
+
+# Part III: Two services under test (both images).
+test-examples-part3:
+  cargo test -p shakedown-examples --features services,postgres,mongodb,kafka,rabbitmq,redis,mock-services -- --ignored \
+    ch14 ch15 ch16
+
+# Part IV: Fault injection + diagnostics.
+test-examples-part4:
+  cargo test -p shakedown-examples --features services,postgres,mongodb,kafka,redis,fault-injection,diagnostics -- --ignored \
+    ch17 ch18
+
+# Part V: Cluster topologies.
+test-examples-part5:
+  cargo test -p shakedown-examples --features services,mongodb-cluster,kafka-cluster,redis-sentinel,postgres-cluster,rabbitmq-cluster -- --ignored \
+    ch19 ch20 ch21 ch22 ch23
+
+# Part VI: Load, soak + resilience.
+test-examples-part6:
+  cargo test -p shakedown-examples --features services,postgres,kafka,redis,mongodb-cluster,load,fault-injection -- --ignored \
+    ch24 ch25 ch26 ch27 ch28
+
+# Full suite (all chapters + appendices).
+test-examples-full:
+  cargo test -p shakedown-examples --all-features -- --ignored

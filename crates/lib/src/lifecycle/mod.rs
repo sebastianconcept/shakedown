@@ -98,7 +98,7 @@ use crate::resources::postgres::PostgresHelpers;
 #[cfg(feature = "qdrant")]
 use crate::resources::qdrant::QdrantHelpers;
 #[cfg(feature = "rabbitmq")]
-use crate::resources::rabbit::{ExchangeKind, RabbitHelpers};
+use crate::resources::rabbit::RabbitHelpers;
 #[cfg(any(feature = "redis", feature = "valkey"))]
 use crate::resources::redis::RedisHelpers;
 #[cfg(feature = "sqlite")]
