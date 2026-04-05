@@ -32,6 +32,7 @@ pub struct RootCauseHint {
     /// Machine hint class (`oom_before_failure`, `exit_before_failure`, `health_before_failure`).
     #[serde(rename = "type")]
     pub hint_type: String,
+    /// Container name or ID associated with the infrastructure signal.
     pub container: String,
     /// Milliseconds since the first log timestamp when the infrastructure event occurred.
     pub event_offset_ms: u64,

@@ -9,6 +9,7 @@ use thiserror::Error;
 /// use [`ResourceNotFoundError::Unspecified`] only when no dedicated variant exists yet.
 #[derive(Debug, Display, Error)]
 #[ignore_extra_doc_attributes]
+#[allow(missing_docs)]
 pub enum ResourceNotFoundError {
     /// {resource_name}
     ///

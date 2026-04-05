@@ -8,6 +8,7 @@ use thiserror::Error;
 pub enum MockServiceError {
     /// JSON deserialization failed: {source}
     Deserialization {
+        /// Underlying serde_json error.
         #[source]
         source: serde_json::Error,
     },

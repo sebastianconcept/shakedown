@@ -72,7 +72,9 @@ pub(crate) fn map_backend_error(
 /// key/payload bytes plus the fully qualified Kafka topic, AMQP queue name, or NATS subject.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsumedMessage {
+    /// Message key bytes, if the broker/transport included one.
     pub key: Option<Vec<u8>>,
+    /// Message payload bytes, if non-null.
     pub payload: Option<Vec<u8>>,
     /// Full Kafka topic, AMQP queue name, or NATS subject (namespaced).
     pub source: String,

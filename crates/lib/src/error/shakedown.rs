@@ -89,10 +89,15 @@ pub enum ShakedownError {
     /// Cause: diagnostics resource sample (CPU, memory, …) crossed the bound declared in the scenario (see [`crate::event::InfraEvent::ResourceSample`]).
     #[error("Resource assertion failed for container '{container}', metric '{metric}': measured {measured} exceeds threshold {threshold} (phase: {phase:?})")]
     ResourceAssertionFailed {
+        /// Container name or ID for the failing resource sample.
         container: String,
+        /// Metric name (e.g. `cpu_percent`, `mem_bytes`).
         metric: String,
+        /// Measured value as a human-readable string.
         measured: String,
+        /// Asserted ceiling as a human-readable string.
         threshold: String,
+        /// Lifecycle phase at which the sample was recorded.
         phase: Phase,
     },
     /// Helper timed out: resource '{resource}', operation '{operation}', waited {elapsed:?} (limit {timeout:?})
@@ -100,9 +105,13 @@ pub enum ShakedownError {
     /// Cause: a typed helper (Kafka consume, RabbitMQ consume, …) did not observe a matching message within the wall-clock window.
     #[error("Helper timed out: resource '{resource}', operation '{operation}', waited {elapsed:?} (limit {timeout:?})")]
     HelperTimeout {
+        /// Resource name or type that triggered the timeout.
         resource: String,
+        /// Operation label (e.g. `consume`, `await_message`).
         operation: &'static str,
+        /// Maximum wait configured for this operation.
         timeout: std::time::Duration,
+        /// Actual wall-clock time spent before the timeout fired.
         elapsed: std::time::Duration,
     },
     /// {0}

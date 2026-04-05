@@ -15,6 +15,7 @@ pub struct HttpMockServiceRequest {
     pub query: Option<String>,
     /// Header names are lowercased; values are lossy UTF-8 from the wire.
     pub headers: Vec<(String, String)>,
+    /// Raw request body bytes.
     pub body: Bytes,
 }
 

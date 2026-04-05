@@ -30,12 +30,17 @@ pub(crate) const LOAD_BASELINE_SCHEMA_VERSION: u32 = 1;
 /// Serializable performance snapshot for regression comparison.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoadBaseline {
+    /// Format version; bump when the JSON shape changes incompatibly.
     pub schema_version: u32,
+    /// Scenario identifier this baseline was captured under.
     pub scenario_id: String,
+    /// Author-supplied name used to load this baseline for regression comparison.
     pub baseline_name: String,
     /// When the baseline was captured (RFC 3339, UTC).
     pub created_at: String,
+    /// Human-readable description of the load profile phases.
     pub load_profile_summary: String,
+    /// Scalar metric snapshot at baseline capture time.
     pub summary: ReportMetrics,
     /// HdrHistogram V2 payload, base64-encoded.
     pub histogram_v2_base64: String,

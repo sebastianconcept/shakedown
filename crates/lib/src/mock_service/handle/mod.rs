@@ -14,14 +14,23 @@ use super::types::MockServiceError;
 /// One recorded inbound HTTP request and its response (mock service server wrapper).
 #[derive(Debug, Clone)]
 pub struct RecordedCall {
+    /// When the request was received by the mock server.
     pub timestamp: OffsetDateTime,
+    /// HTTP method (e.g. `GET`, `POST`).
     pub method: String,
+    /// URL path component of the inbound request.
     pub path: String,
+    /// Raw query string without the leading `?`, if present.
     pub query: Option<String>,
+    /// Request headers as `(name, value)` pairs (names lowercased by the harness).
     pub request_headers: Vec<(String, String)>,
+    /// Raw request body bytes (may be truncated; see [`RecordedCall::body_truncated`]).
     pub request_body: Bytes,
+    /// HTTP status code returned by the mock route handler.
     pub response_status: u16,
+    /// Raw response body bytes (may be truncated; see [`RecordedCall::body_truncated`]).
     pub response_body: Bytes,
+    /// Time elapsed between request receipt and response sent.
     pub duration: Duration,
     /// True if request or response body was truncated when recording (see [`MockServiceHandle::max_recorded_body_size`]).
     pub body_truncated: bool,
@@ -53,6 +62,7 @@ impl RecordedCall {
         &self.request_body
     }
 
+    /// HTTP status code returned by the mock route handler.
     pub fn response_status(&self) -> u16 {
         self.response_status
     }
@@ -62,10 +72,12 @@ impl RecordedCall {
         &self.response_body
     }
 
+    /// When this request was received by the mock server.
     pub fn timestamp(&self) -> OffsetDateTime {
         self.timestamp
     }
 
+    /// Time elapsed between request receipt and response sent.
     pub fn duration(&self) -> Duration {
         self.duration
     }
@@ -80,19 +92,29 @@ impl RecordedCall {
 /// Full request/response snapshot passed to [`MockServiceHandle::push_recorded_exchange`].
 #[derive(Debug)]
 pub struct RecordedExchange {
+    /// When the request was received by the mock server.
     pub timestamp: OffsetDateTime,
+    /// HTTP method (e.g. `GET`, `POST`).
     pub method: String,
+    /// URL path component of the inbound request.
     pub path: String,
+    /// Raw query string without the leading `?`, if present.
     pub query: Option<String>,
+    /// Request headers as `(name, value)` pairs (names lowercased by the harness).
     pub request_headers: Vec<(String, String)>,
+    /// Raw request body bytes.
     pub request_body: Bytes,
+    /// HTTP status code returned by the mock route handler.
     pub response_status: u16,
+    /// Raw response body bytes.
     pub response_body: Bytes,
+    /// Time elapsed between request receipt and response sent.
     pub duration: Duration,
 }
 
 /// Handle for one mock service instance: bind URL, client URL, and recorded traffic.
 pub struct MockServiceHandle {
+    /// Logical name of this mock service (used in assertion messages and registration lookup).
     pub name: String,
     /// Actual socket address the server bound to (e.g. `127.0.0.1:54321`).
     pub bind_address: String,

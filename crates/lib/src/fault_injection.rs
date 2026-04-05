@@ -41,6 +41,7 @@ pub(crate) const FAULT_EVENT_CHANNEL_CAPACITY: usize = 64;
 
 /// Fault-injection failures (Toxiproxy control API and proxy registry).
 #[derive(Display, Debug, thiserror::Error)]
+#[allow(missing_docs)]
 pub enum Error {
     /// Failed to create Toxiproxy proxy: {0}
     ProxyCreationFailed(#[source] noxious_client::error::ClientError),

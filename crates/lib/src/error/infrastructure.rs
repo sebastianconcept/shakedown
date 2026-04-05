@@ -19,7 +19,9 @@ pub enum InfrastructureError {
     /// Cause: Docker, driver, or network failure while starting the resource, or invalid config.
     #[error("Infrastructure error: Failed to provision {resource}: {source}")]
     Provision {
+        /// Resource name or type identifier that failed to provision.
         resource: String,
+        /// Underlying Docker, driver, or network error.
         #[source]
         source: Box<dyn Error + Send + Sync>,
     },
@@ -28,7 +30,9 @@ pub enum InfrastructureError {
     /// Cause: TCP up but deep readiness failed (migrations, auth, broker metadata, etc.).
     #[error("Infrastructure error: Resource '{resource}' not ready: {source}")]
     Readiness {
+        /// Resource name or type identifier that failed the readiness check.
         resource: String,
+        /// Underlying readiness probe error.
         #[source]
         source: Box<dyn Error + Send + Sync>,
     },
@@ -37,7 +41,9 @@ pub enum InfrastructureError {
     /// Cause: container stop/remove failed, connection leak, or timeout during cleanup.
     #[error("Infrastructure error: Failed to teardown {resource}: {source}")]
     Teardown {
+        /// Resource name or type identifier that failed teardown.
         resource: String,
+        /// Underlying teardown error.
         #[source]
         source: Box<dyn Error + Send + Sync>,
     },

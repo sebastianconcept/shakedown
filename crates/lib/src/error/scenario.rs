@@ -34,7 +34,10 @@ pub enum ScenarioError {
     ///
     /// Cause: the scenario body or a step exceeded the configured wall-clock limit.
     #[error("Scenario timeout error: {timeout:?}")]
-    Timeout { timeout: std::time::Duration },
+    Timeout {
+        /// Wall-clock duration that elapsed before the scenario was cancelled.
+        timeout: std::time::Duration,
+    },
     /// Scenario error: {0}
     ///
     /// Cause: boxed error returned from scenario or extension code.

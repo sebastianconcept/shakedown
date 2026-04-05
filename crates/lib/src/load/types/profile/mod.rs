@@ -40,6 +40,7 @@ impl From<Phase> for NamedPhase {
 
 /// Traffic shape for a load profile (distinct from [`crate::lifecycle::Phase`] lifecycle labels).
 #[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
 pub enum Phase {
     /// Open-model arrivals at `rate` for `duration` before steady-state phases; must be first and at most once in a profile.
     Warmup { duration: Duration, rate: Rate },

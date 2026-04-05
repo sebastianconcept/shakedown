@@ -120,6 +120,8 @@
 //! The workspace [`docs/README.md`](../../docs/README.md) points maintainers at notes kept
 //! alongside this repository.
 
+#![warn(missing_docs)]
+
 mod docker_labels;
 
 /// Cluster topology — Docker networks and node control (`cluster` feature).

@@ -14,6 +14,7 @@ use displaydoc::Display;
 /// integration for that field type on stable Rust.
 #[derive(Debug, Display)]
 #[ignore_extra_doc_attributes]
+#[allow(missing_docs)]
 pub enum InternalError {
     /// Internal error: Invariant violation: {0}
     ///

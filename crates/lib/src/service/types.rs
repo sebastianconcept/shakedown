@@ -50,6 +50,7 @@ pub enum PullPolicy {
 
 /// Overrides the default environment variable name for a harness binding when injecting into a service container.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
 pub enum EnvMapping {
     /// Kafka bootstrap / connection string → custom env var name.
     Kafka(String),
