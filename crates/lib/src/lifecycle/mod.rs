@@ -2471,6 +2471,11 @@ fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[Resour
             let sentinel_hosts = meta.get("sentinel_hosts").and_then(|value| value.as_str());
             let master_name = meta.get("master_name").and_then(|value| value.as_str());
             let connection_url = meta.get("connection_url").and_then(|value| value.as_str());
+            let key_prefix = meta
+                .get("key_prefix")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string();
             let replica_urls = meta
                 .get("replica_connection_urls")
                 .and_then(|value| value.as_array())
@@ -2489,6 +2494,7 @@ fn apply_resource_handles_to_redis_bindings(ctx: &mut Context, handles: &[Resour
                     master_name: master_name.to_string(),
                     connection_url: connection_url.to_string(),
                     replica_connection_urls: replica_urls,
+                    key_prefix,
                 });
             }
         }

@@ -25,6 +25,29 @@ use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
 use async_trait::async_trait;
 use std::fmt;
 
+/// Uniform namespacing contract for all scenario-scoped Bindings that use a prefix.
+///
+/// Implement this trait to write generic test helpers that construct isolation-safe entity names
+/// without coupling to a specific resource type.
+///
+/// Every built-in prefix-based Bindings type implements this trait. The `namespace` method
+/// prepends the scenario-scoped isolation prefix to the given logical name using the separator
+/// convention of the underlying resource (e.g. `_` for Kafka, `:` for Redis, `.` for NATS).
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use shakedown::Namespaced;
+///
+/// fn make_name<B: Namespaced>(bindings: &B, logical: &str) -> String {
+///     bindings.namespace(logical)
+/// }
+/// ```
+pub trait Namespaced {
+    /// Return `name` prefixed with this scenario's isolation prefix.
+    fn namespace(&self, name: &str) -> String;
+}
+
 /// Derive a safe, unique namespace from a scenario id for any resource type.
 ///
 /// If you're implementing [`Resource`] for your own infrastructure (Redis, Elasticsearch,
@@ -785,6 +808,13 @@ impl KafkaBindings {
     }
 }
 
+impl Namespaced for KafkaBindings {
+    /// Return `name` prefixed with this scenario's Kafka topic prefix.
+    fn namespace(&self, name: &str) -> String {
+        format!("{}{}", self.topic_prefix, name)
+    }
+}
+
 /// AMQP connection details and scenario-scoped naming for RabbitMQ.
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -867,6 +897,30 @@ impl RabbitBindings {
     /// Compose a queue or exchange name under this scenario's prefix (same composition as [`KafkaBindings::topic_namespace`]).
     pub fn namespaced_name(&self, logical_name: &str) -> String {
         format!("{}{}", self.resource_prefix, logical_name)
+    }
+
+    /// Return `queue` prefixed with this scenario's resource prefix.
+    ///
+    /// Use this when declaring queues so parallel scenarios don't share the same queue name and
+    /// accidentally consume each other's messages.
+    pub fn queue_namespace(&self, queue: &str) -> String {
+        format!("{}{}", self.resource_prefix, queue)
+    }
+
+    /// Return `exchange` prefixed with this scenario's resource prefix.
+    ///
+    /// Use this when declaring exchanges so parallel scenarios don't route messages to shared
+    /// exchanges unintentionally.
+    pub fn exchange_namespace(&self, exchange: &str) -> String {
+        format!("{}{}", self.resource_prefix, exchange)
+    }
+}
+
+#[cfg(feature = "rabbitmq")]
+impl Namespaced for RabbitBindings {
+    /// Return `name` prefixed with this scenario's RabbitMQ resource prefix.
+    fn namespace(&self, name: &str) -> String {
+        format!("{}{}", self.resource_prefix, name)
     }
 }
 
@@ -975,6 +1029,25 @@ pub struct RedisBindings {
     pub key_prefix: String,
 }
 
+#[cfg(any(feature = "redis", feature = "valkey"))]
+impl RedisBindings {
+    /// Return `key` prefixed with this scenario's key prefix.
+    ///
+    /// Use this when storing or looking up keys so parallel scenarios don't share the same
+    /// key namespace and overwrite each other's data.
+    pub fn key_namespace(&self, key: &str) -> String {
+        format!("{}{}", self.key_prefix, key)
+    }
+}
+
+#[cfg(any(feature = "redis", feature = "valkey"))]
+impl Namespaced for RedisBindings {
+    /// Return `name` prefixed with this scenario's Redis key prefix.
+    fn namespace(&self, name: &str) -> String {
+        format!("{}{}", self.key_prefix, name)
+    }
+}
+
 /// Redis Sentinel discovery endpoints plus primary URL (`redis-sentinel` feature).
 ///
 /// Populated when [`BuiltinResource::RedisSentinel`] provisions the suite. [`connection_url`] is the
@@ -991,6 +1064,27 @@ pub struct RedisSentinelBindings {
     pub connection_url: String,
     /// Host-mapped `redis://` URLs for replica nodes (read-only), in replica order.
     pub replica_connection_urls: Vec<String>,
+    /// Prefix prepended to logical keys for isolation (`shakedown:<scenario>:`).
+    pub key_prefix: String,
+}
+
+#[cfg(feature = "redis-sentinel")]
+impl RedisSentinelBindings {
+    /// Return `key` prefixed with this scenario's key prefix.
+    ///
+    /// Use this when storing or looking up keys through the Sentinel-connected primary so
+    /// parallel scenarios don't share the same key namespace and overwrite each other's data.
+    pub fn key_namespace(&self, key: &str) -> String {
+        format!("{}{}", self.key_prefix, key)
+    }
+}
+
+#[cfg(feature = "redis-sentinel")]
+impl Namespaced for RedisSentinelBindings {
+    /// Return `name` prefixed with this scenario's Redis Sentinel key prefix.
+    fn namespace(&self, name: &str) -> String {
+        format!("{}{}", self.key_prefix, name)
+    }
 }
 
 /// Connection details and scenario-scoped NATS subject prefix (`nats` feature).
@@ -1015,6 +1109,14 @@ impl NatsBindings {
     /// Full subject for a logical name under this scenario's prefix.
     pub fn subject_namespace(&self, logical_subject: &str) -> String {
         format!("{}{}", self.subject_prefix, logical_subject)
+    }
+}
+
+#[cfg(feature = "nats")]
+impl Namespaced for NatsBindings {
+    /// Return `name` prefixed with this scenario's NATS subject prefix.
+    fn namespace(&self, name: &str) -> String {
+        format!("{}{}", self.subject_prefix, name)
     }
 }
 
@@ -1072,6 +1174,14 @@ impl ElasticsearchBindings {
     }
 }
 
+#[cfg(feature = "elasticsearch")]
+impl Namespaced for ElasticsearchBindings {
+    /// Return `name` prefixed with this scenario's Elasticsearch index prefix.
+    fn namespace(&self, name: &str) -> String {
+        format!("{}{}", self.index_prefix, name)
+    }
+}
+
 /// HTTP connection details and scenario-scoped OpenSearch index prefix (`opensearch` feature).
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -1098,6 +1208,14 @@ impl OpenSearchBindings {
     /// Full index name for a logical index name under this scenario's prefix.
     pub fn index_namespace(&self, logical_index: &str) -> String {
         format!("{}{}", self.index_prefix, logical_index)
+    }
+}
+
+#[cfg(feature = "opensearch")]
+impl Namespaced for OpenSearchBindings {
+    /// Return `name` prefixed with this scenario's OpenSearch index prefix.
+    fn namespace(&self, name: &str) -> String {
+        format!("{}{}", self.index_prefix, name)
     }
 }
 
@@ -1130,6 +1248,14 @@ impl QdrantBindings {
     }
 }
 
+#[cfg(feature = "qdrant")]
+impl Namespaced for QdrantBindings {
+    /// Return `name` prefixed with this scenario's Qdrant collection prefix.
+    fn namespace(&self, name: &str) -> String {
+        format!("{}{}", self.collection_prefix, name)
+    }
+}
+
 /// REST endpoint and scenario-scoped Weaviate class name prefix (`weaviate` feature).
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -1152,6 +1278,20 @@ impl WeaviateBindings {
     /// Full class name for a logical name under this scenario's prefix (Weaviate requires an initial capital letter).
     pub fn class_namespace(&self, logical_class: &str) -> String {
         let raw = format!("{}{}", self.class_prefix, logical_class);
+        let mut chars = raw.chars();
+        match chars.next() {
+            None => String::from("ShakedownEmpty"),
+            Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+        }
+    }
+}
+
+#[cfg(feature = "weaviate")]
+impl Namespaced for WeaviateBindings {
+    /// Return `name` prefixed with this scenario's Weaviate class prefix, capitalised (Weaviate
+    /// requires class names to start with an uppercase letter).
+    fn namespace(&self, name: &str) -> String {
+        let raw = format!("{}{}", self.class_prefix, name);
         let mut chars = raw.chars();
         match chars.next() {
             None => String::from("ShakedownEmpty"),
@@ -1525,5 +1665,24 @@ mod tests {
         // Then the binding exposes the config we passed in
         assert_eq!(binding.config.resource_type, "fake");
         assert_eq!(binding.config.connection_string, "localhost:1234");
+    }
+
+    #[test]
+    fn kafka_bindings_namespaced_trait() {
+        let bindings = KafkaBindings::new("localhost:9092", "shakedown_abc_");
+        assert_eq!(bindings.namespace("orders"), "shakedown_abc_orders");
+        assert_eq!(
+            bindings.topic_namespace("orders"),
+            bindings.namespace("orders")
+        );
+    }
+
+    #[test]
+    fn namespaced_generic_function_compiles_and_works() {
+        fn make_name<B: Namespaced>(bindings: &B, logical: &str) -> String {
+            bindings.namespace(logical)
+        }
+        let bindings = KafkaBindings::new("localhost:9092", "shakedown_abc_");
+        assert_eq!(make_name(&bindings, "payments"), "shakedown_abc_payments");
     }
 }
