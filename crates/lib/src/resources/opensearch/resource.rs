@@ -92,7 +92,7 @@ impl OpenSearchResource {
         }
     }
 
-    /// Enable the security plugin with fixed `admin` / `shakedown` credentials (D-13).
+    /// Enable the security plugin with fixed `admin` / `shakedown` credentials for integration tests.
     pub fn with_security(mut self, enabled: bool) -> Self {
         self.security_enabled = enabled;
         self

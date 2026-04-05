@@ -50,7 +50,7 @@ fn image_fingerprint(image_name: &str, tag_override: &Option<String>) -> String 
     format!("{image_name}:{tag}")
 }
 
-/// Docker-backed Toxiproxy using a suite-wide container (mirrors [`super::kafka_impl::KafkaResource`] / D-3).
+/// Docker-backed Toxiproxy using a suite-wide container (same suite-shared refcount pattern as the built-in `KafkaResource`).
 #[derive(Debug)]
 pub struct ToxiproxyResource {
     image_name: String,

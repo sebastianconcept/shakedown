@@ -97,7 +97,7 @@ async fn delete_collections_with_prefix(rest_url: &str, prefix: &str) -> Result<
 /// deletes matching collections then may remove the container.
 ///
 /// Default tag **`latest`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_QDRANT_IMAGE_TAG`.
-/// Readiness uses HTTP [`GET /readyz`](https://qdrant.tech/documentation/guides/installation/) on the REST port (D-12).
+/// Readiness probes HTTP [`GET /readyz`](https://qdrant.tech/documentation/guides/installation/) on the REST port until the node reports ready.
 #[derive(Debug)]
 pub struct QdrantResource {
     image_repository: String,

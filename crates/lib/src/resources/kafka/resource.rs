@@ -14,7 +14,7 @@ use testcontainers_modules::kafka::apache::{self, KAFKA_PORT};
 use tokio::sync::Mutex;
 
 /// Suite-wide broker: one Docker container per test process, shared by all [`KafkaResource`]
-/// instances until the last holder tears down (D-3).
+/// instances until the last holder tears down — shared across scenarios in the process to avoid repeated broker startup cost.
 #[allow(clippy::large_enum_variant)] // Running holds ContainerAsync; boxing would complicate rm() handoff.
 enum SuiteBrokerState {
     Idle,
@@ -40,7 +40,7 @@ fn image_fingerprint(image: &apache::Kafka, tag_override: &Option<String>) -> St
 
 /// Docker-backed Kafka using testcontainers-modules KRaft image (`apache/kafka-native` by default).
 ///
-/// **Suite lifecycle (D-3):** the first provision in the process starts a single KRaft broker;
+/// **Suite lifecycle:** the first provision in the process starts a single KRaft broker;
 /// further [`KafkaResource`] instances reuse it. The last successful [`Resource::teardown`]
 /// removes the container. All instances in one process must use the same image name and tag
 /// (first configuration wins).

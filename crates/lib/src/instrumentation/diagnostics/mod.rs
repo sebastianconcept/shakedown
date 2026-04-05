@@ -2,7 +2,7 @@
 //!
 //! **What:** read-only observation of containers the harness already started—resource stats, log
 //! streaming, and engine events—plus optional resource budget assertions. This module never creates,
-//! starts, or stops containers (see product DECISIONS).
+//! starts, or stops containers.
 //!
 //! **Why:** operators need correlated infra signals in [`crate::event::EventLog`] and failure
 //! timelines without ad hoc `docker` CLI in tests.

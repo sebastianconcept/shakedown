@@ -22,7 +22,7 @@ async-trait = "0.1"
 # `FutureExt::catch_unwind` so run_scenario still merges load/cluster/fault events if the scenario panics
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 
-# Kafka integration (behind feature gate per D-2)
+# Kafka integration (optional; enable the `kafka` Cargo feature)
 # `tokio` enables `FutureProducer` + `AsyncRuntime` (helpers and mock services use async send).
 rdkafka = { version = "=0.38", optional = true, default-features = false, features = ["ssl-vendored", "tokio"] }
 
