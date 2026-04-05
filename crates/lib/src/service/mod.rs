@@ -1,8 +1,21 @@
-//! Service-under-test lifecycle (`services` feature).
+//! Service-under-test lifecycle management (`services` feature).
 //!
-//! Opt-in module for running real services in Docker during scenarios: builder ([`ServiceUnderTest`]),
-//! injection ([`crate::service::injection`]), dependency order, readiness probes, and lifecycle hooks
-//! in [`crate::lifecycle`].
+//! **Why:** testing a service in isolation with mocked dependencies misses serialization bugs,
+//! real error-handling paths, and emergent behaviour at service boundaries. Running the real
+//! service binary in Docker during a scenario exercises the same code path that production does,
+//! without requiring the full service mesh.
+//!
+//! **How:** build a [`ServiceUnderTest`] with the Docker image, environment variables, and
+//! dependency order, then register it on [`crate::lifecycle::Context`] before calling
+//! [`crate::lifecycle::run_scenario`]. The harness starts the container, waits for the
+//! [`HealthCheck`] to pass, injects resource URLs via [`EnvMapping`], and stops the container
+//! during teardown. Access the service's runtime URL from the scenario body via
+//! `ctx.service_url("my-service")`.
+//!
+//! # Book reference
+//!
+//! Part II, *Chapter 9: Service Basics* — introduces `ServiceUnderTest`, Docker image
+//! configuration, health checks, and environment injection into service containers.
 
 pub mod address;
 mod builder;

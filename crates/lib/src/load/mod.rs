@@ -1,10 +1,24 @@
-//! Open-model load profiles: phased arrival rates and worker settings (`load` feature).
+//! Load and soak testing: phased arrival rates, metrics, assertions, and baselines (`load` feature).
 //!
-//! Load [`Phase`](types::Phase) values describe traffic shape (constant, ramp, spike, pause, and closed-model VU phases).
-//! [`LoadProfile`](types::LoadProfile) is built with [`LoadProfile::open_model`](types::LoadProfile::open_model) and validated by [`LoadProfileBuilder::build`](types::LoadProfileBuilder::build).
-//! [`LoadHandle`](handle::LoadHandle) schedules work from [`crate::lifecycle::Context::start_load`].
-//! [`Phase::warmup`](types::Phase::warmup) runs as open-model traffic before steady-state phases; the driver records
-//! `LoadMetricsAccumulator::set_warmup_end` when warmup completes.
+//! **Why:** correctness tests prove a service behaves correctly for one request; load tests prove
+//! it behaves correctly under sustained traffic. Shakedown reuses the same container lifecycle,
+//! resource provisioning, and failure timeline for load scenarios so you do not need a separate
+//! tool or separate infrastructure setup.
+//!
+//! **How:** build a [`types::LoadProfile`] with [`types::LoadProfile::open_model`], register it
+//! via [`crate::lifecycle::Context::start_load`] to receive a [`handle::LoadHandle`], then drive
+//! requests inside the load body. After the run, chain [`LoadMetricsAssertBuilder`] calls to
+//! express SLO budgets (p99 latency, error rate, throughput). Persist baselines with
+//! [`LoadBaseline`] for CI regression gating across PRs.
+//!
+//! [`types::Phase::warmup`] runs open-model traffic before steady-state phases and automatically
+//! excludes cold-start latency from steady-state statistics.
+//!
+//! # Book reference
+//!
+//! Part VI, *Chapters 24–28: Load, Soak, and Resilience* — walks through building a
+//! `LoadProfile`, interpreting `LoadRunReport` JSON artifacts, asserting SLOs with
+//! `LoadMetricsAssertBuilder`, and comparing runs against committed baselines.
 
 pub(crate) mod error;
 pub(crate) mod types;
