@@ -1,7 +1,13 @@
-//! Shared helpers for typed resource helpers (`map_backend_error`, [`ConsumedMessage`], timeouts).
+//! Shared helper types and utilities used across typed resource helpers.
 //!
-//! Lives at crate root so `resources::<engine>::helpers` and `helpers` can both use it without
-//! `helpers` ↔ `resources` dependency cycles.
+//! **Why:** engine-specific helper modules (`resources::<engine>::helpers`) and the top-level
+//! `helpers` module both need common types — `map_backend_error`, [`ConsumedMessage`], and
+//! timeout constants — but cannot import from each other without creating dependency cycles.
+//! This crate-root module breaks the cycle by providing a neutral location both can import from.
+//!
+//! **How:** this module is `pub(crate)` and not part of the public API. If you are implementing a
+//! custom [`crate::resources::Resource`], use the public types re-exported at the crate root
+//! instead of importing from here directly.
 
 use std::time::Duration;
 

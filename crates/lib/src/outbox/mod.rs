@@ -1,14 +1,28 @@
-//! Outbox setup helpers for scenario databases.
+//! Transactional outbox helpers for scenario databases.
 //!
-//! This module creates the canonical `outbox_event` table (relational/SQLite/DuckDB) or collection
-//! (MongoDB) in the active storage binding attached to [`crate::lifecycle::Context`].
+//! **Why:** services that write domain events to a relational outbox table and then publish them
+//! to a message bus are hard to test end-to-end. This module provisions the canonical
+//! `outbox_event` table (or MongoDB collection), exposes row-state assertions (`assert_pending`,
+//! `assert_sent`, …), and integrates with [`crate::publication`] so you can verify the full
+//! pipeline — database write → outbox poll → broker publication — in a single scenario.
 //!
-//! **DuckDB and SQLite (assertion-only):** row-state assertions (`assert_pending`, `assert_sent`, …)
-//! do not exercise `SELECT FOR UPDATE SKIP LOCKED` or other claim-locking semantics; they only read
-//! the latest matching row for observability-style checks — same limitation as the SQLite path.
+//! **How:** call `ctx.setup_outbox()` inside your seed or scenario body to create the outbox
+//! table for the active relational binding. Use the row-state assertion helpers to check that your
+//! service's outbox relay processed each event correctly. Pair with a
+//! [`crate::publication::PublicationVerifier`] to confirm delivery reached the broker.
 //!
-//! [`OutboxError`] is defined in `outbox/error.rs` (crate-private `outbox_error` module) and re-exported
-//! here and at the crate root as [`crate::OutboxError`].
+//! **DuckDB and SQLite (assertion-only):** row-state assertions do not exercise
+//! `SELECT FOR UPDATE SKIP LOCKED` or other claim-locking semantics; they only read the latest
+//! matching row for observability-style checks.
+//!
+//! [`OutboxError`] is defined in `outbox/error.rs` (crate-private) and re-exported at the crate
+//! root as [`crate::OutboxError`].
+//!
+//! # Book reference
+//!
+//! Part II, *Chapter 12: Outbox Pattern* — explains the transactional outbox model, how
+//! Shakedown provisions the outbox table, and how to assert the full write → relay → publish
+//! pipeline in one scenario.
 
 pub use crate::OutboxError;
 

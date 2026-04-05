@@ -1,14 +1,23 @@
 //! Toxiproxy control-plane helpers for fault-injection scenarios (`fault-injection` feature).
 //!
-//! [`FaultHandle`] wraps the `noxious-client` API and a small registry of proxy listen addresses.
-//! [`crate::lifecycle::run_scenario`] installs it when a [`crate::resources::ToxiproxyResource`]
-//! provisions successfully.
+//! **Why:** proving that a service handles network failures correctly — broker timeouts,
+//! slow downstream APIs, connection resets — requires injecting those faults at the network layer
+//! without modifying the service under test. Shakedown owns the Toxiproxy integration directly
+//! so fault semantics are reliable and version-controlled alongside your scenarios.
+//!
+//! **How:** register a [`crate::resources::ToxiproxyResource`] on your [`crate::lifecycle::Context`]
+//! and use [`FaultHandle`] inside `#[shakedown::faulty_test]` to add toxics, reset proxies, and
+//! remove faults. The harness installs the handle automatically when Toxiproxy provisions
+//! successfully.
 //!
 //! Toxic add/remove and proxy reset enqueue [`crate::event::Event`] values on an internal
-//! [`std::sync::mpsc::SyncSender`] (set by the harness before the scenario body). The harness
-//! drains the matching receiver into the caller-owned [`crate::event::EventLog`] after the scenario
-//! body so failure timelines correlate faults with harness and infra signals — without storing raw
-//! pointers to the log.
+//! channel. The harness drains that channel into the caller-owned [`crate::event::EventLog`] after
+//! the scenario body so failure timelines correlate faults with infrastructure and harness signals.
+//!
+//! # Book reference
+//!
+//! Part IV, *Chapter 17: Fault Injection* — covers `#[shakedown::faulty_test]`, the Toxiproxy
+//! resource lifecycle, and patterns for asserting graceful degradation under network faults.
 
 use std::collections::HashMap;
 use std::sync::mpsc::SyncSender;

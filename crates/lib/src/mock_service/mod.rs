@@ -1,17 +1,27 @@
-//! Service virtualization for integration tests.
+//! Service virtualization for integration tests — HTTP and gRPC mock services.
 //!
-//! Mock services act as controllable stand-ins for downstream HTTP or gRPC services. Each mock
-//! service runs as a local server, gets its URL injected into service containers via
-//! [`EnvMapping`](crate::service::EnvMapping), answers requests with the behavior you register for
-//! that scenario (declarative routes or custom handlers), and records all calls for post-scenario
-//! assertions.
+//! **Why:** a service under test often calls external APIs (payment processors, inventory
+//! services, notification gateways) that are unavailable in a test environment. Replacing those
+//! dependencies with trait mocks swaps serialization and real HTTP error handling for fake ones,
+//! masking the bugs you most want to catch. Mock services run as real local servers on real
+//! network ports so your service's HTTP client hits the same code path it would in production.
 //!
-//! Use [`HttpMockService`] / [`GrpcMockService`] for quick predefined responses, or implement
-//! [`HttpMockServiceTrait`] / [`GrpcMockServiceTrait`] when you need per-request logic (state,
-//! branching on the request, and similar custom behavior).
+//! **How:** create an [`HttpMockService`] (or [`GrpcMockService`] with the `grpc-mock-services`
+//! feature), register scenario-specific routes or handlers, then inject its URL into the service
+//! container via [`crate::service::EnvMapping`]. The harness starts and stops the mock server as
+//! part of the normal lifecycle. After the scenario, assert call counts and request bodies through
+//! the [`MockServiceHandle`].
+//!
+//! Implement [`HttpMockServiceTrait`] / [`GrpcMockServiceTrait`] for stateful or branching
+//! per-request logic.
 //!
 //! Enabled with the **`mock-services`** feature (default). Add **`grpc-mock-services`** for gRPC
 //! support (`tonic` + `prost`).
+//!
+//! # Book reference
+//!
+//! Part I, *Chapter 8: Mock Services* — introduces `HttpMockService`, route registration,
+//! per-scenario response overrides, and call-count assertions.
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
 pub(crate) mod grpc;

@@ -1,22 +1,33 @@
 //! Scenario lifecycle types and execution.
 //!
-//! The scenario lifecycle consists of six ordered phases:
+//! **Why:** integration tests need a reproducible, phase-ordered harness that provisions real
+//! infrastructure, seeds data, runs your scenario body, asserts outcomes, and tears everything
+//! down — even when the scenario panics or an infrastructure step fails.
 //!
-//! 1. Provision resources
-//! 2. Check resource readiness
-//! 3. Seed data into resources
-//! 4. Run the scenario logic
-//! 5. Assert scenario outcomes
-//! 6. Teardown resources
+//! **How:** call [`run_scenario`] (or use `#[shakedown::test]`) passing a [`Context`] with
+//! registered resources. The harness drives the six phases in order and classifies any failure as
+//! a [`crate::error::ScenarioError`] (your logic/assertions) or an
+//! [`crate::error::InfrastructureError`] (provision/readiness) so you always know whether to fix
+//! your test or your infrastructure setup.
 //!
-//! If any phase fails, the lifecycle will attempt to run teardown for resources that were
-//! successfully provisioned. The error classification distinguishes between scenario errors
-//! (user logic/assertions) and infrastructure errors (provision/readiness failures).
+//! ## Phase sequence
+//!
+//! 1. **Provision** — start containers or allocate logical namespaces
+//! 2. **Readiness** — block until each resource reports healthy (no fixed sleeps)
+//! 3. **Seed** — apply project-default data, then scenario-specific overrides
+//! 4. **Run** — execute the scenario body with a [`Context`] reference
+//! 5. **Assert** — evaluate outcome predicates
+//! 6. **Teardown** — stop containers and drop namespaces (always attempted)
 //!
 //! ## Event logging
 //!
 //! The lifecycle emits structured events during each phase. These events are collected in an
 //! [`EventLog`] that can be retrieved for debugging or failure analysis.
+//!
+//! # Book reference
+//!
+//! Part I, *Chapter 1: Your First Scenario* — introduces `run_scenario`, the six lifecycle
+//! phases, and the error classification model that distinguishes scenario bugs from infra flake.
 //!
 //! # Example
 //!

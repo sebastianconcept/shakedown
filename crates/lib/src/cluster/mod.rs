@@ -1,10 +1,27 @@
 //! Cluster topology support — shared Docker networks, node control, and engine-specific ops.
 //!
+//! **Why:** some correctness and resilience scenarios require a real multi-node cluster — a
+//! Kafka cluster for partition-leader failover, a MongoDB replica set for read-preference testing,
+//! a Redis Sentinel group for automatic failover. Running a standalone container cannot reproduce
+//! these failure modes. The cluster module provisions multi-node topologies on a shared Docker
+//! network and exposes node-level control (stop, restart, promote, demote) through the
+//! [`ClusterControl`] trait.
+//!
+//! **How:** register a cluster resource (e.g. `MongoReplicaSetResource`, `KafkaClusterResource`)
+//! on [`crate::lifecycle::Context`] before calling [`crate::lifecycle::run_scenario`]. Access the
+//! cluster handle inside the scenario body to drive node operations. Combine with the
+//! `fault-injection` feature to inject network faults between specific nodes.
+//!
 //! Requires the **`cluster`** Cargo feature (pulls in [`bollard`] for Docker Engine API calls).
 //!
 //! **Layout:** each engine is a subdirectory (`kafka_cluster/`, `mongo_replica_set/`, …) with
-//! `resource` + `cluster_control` modules (and Mongo `inter_node` when `fault-injection` is on).
-//! The crate root re-exports resource types (`MongoReplicaSetResource`, …) for macros and ergonomics.
+//! `resource` + `cluster_control` modules.
+//!
+//! # Book reference
+//!
+//! Part V, *Chapters 19–23: Cluster Topologies* — covers the `ClusterControl` trait, engine-
+//! specific cluster resources, node-level fault injection, and assertions for leader election and
+//! failover behaviour.
 
 pub mod network;
 

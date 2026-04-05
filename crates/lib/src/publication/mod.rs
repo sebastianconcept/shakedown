@@ -1,8 +1,20 @@
 //! Publication observation types and the [`PublicationVerifier`] trait.
 //!
-//! Used by outbox helpers to prove that messages reached a bus after relational outbox state
-//! assertions. Implementations are feature-gated (`kafka`, `rabbitmq`, `nats`, `redis` / `valkey`,
-//! …); this module defines the shared contract only.
+//! **Why:** proving that a message was written to the outbox table is not enough — the relay must
+//! also have published it to the broker and the broker must have delivered it to a consumer. This
+//! module closes that observability gap with a uniform assertion surface regardless of which
+//! message bus your service uses.
+//!
+//! **How:** after asserting outbox row state with the [`crate::outbox`] helpers, obtain a
+//! verifier for your bus (e.g. [`KafkaPublicationVerifier`] when the `kafka` feature is enabled)
+//! and call `verifier.observe(spec).await` to assert that the expected messages arrived within the
+//! configured timeout. Feature-gated implementations are provided for Kafka, RabbitMQ, NATS, and
+//! Redis Streams; the [`PublicationVerifier`] trait lets you add custom transports.
+//!
+//! # Book reference
+//!
+//! Part II, *Chapter 12: Outbox Pattern* — covers the full pipeline assertion model: outbox row
+//! state, publication observation, and how `PublicationVerifier` composes with outbox helpers.
 
 mod matching;
 mod spec;

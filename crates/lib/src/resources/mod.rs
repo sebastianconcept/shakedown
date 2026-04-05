@@ -1,18 +1,25 @@
 //! Resource providers and registration for the Shakedown harness.
 //!
-//! **Layout:** shared contract, sanitizers, [`BuiltinResource`], and bindings live in this `mod.rs`;
-//! each engine is a directory `resources/<engine>/` with `resource.rs`, `helpers.rs`, and
-//! `tests.rs` (Redis and Valkey share `resp_family.rs`; Valkey reuses Redis helpers; Elasticsearch
-//! and OpenSearch share `search_operations.rs` for reqwest HTTP to the cluster).
+//! **Why:** integration tests need real infrastructure — databases, brokers, caches — provisioned
+//! fresh and fully isolated for each scenario. The [`Resource`] trait is the contract every engine
+//! implements so the lifecycle harness can provision, health-check, seed, and tear down anything
+//! behind one async interface.
 //!
-//! What: [`Resource`], [`BuiltinResource`], [`RegisteredResource`], and helpers such as
-//! [`crate::resources::ResourceRegistry`].
+//! **How:** register resources on [`crate::lifecycle::Context`] before calling
+//! [`crate::lifecycle::run_scenario`]. For built-in engines (Kafka, Postgres, Redis, …) use
+//! [`BuiltinResource`] variants. For custom infrastructure implement [`Resource`] directly and call
+//! `ctx.register_resource(your_resource)`. Use [`sanitize_resource_namespace`] inside `provision`
+//! to derive a scenario-scoped name that is safe as a database name, topic prefix, index name, or
+//! key namespace.
 //!
-//! Why: tests need pluggable databases, brokers, and mocks behind one async contract with scenario
-//! isolation (`scenario_id` on provision).
+//! **Layout:** shared contract, sanitizers, [`BuiltinResource`], and bindings live in this module;
+//! each engine lives under `resources/<engine>/` with `resource.rs`, `helpers.rs`, and `tests.rs`.
 //!
-//! How: implement [`Resource`] for your system; register via [`crate::lifecycle::Context`] or
-//! `#[shakedown::test(resources = [...])]` for builtins.
+//! # Book reference
+//!
+//! Part I, *Chapters 2–8: Foundations* — each chapter introduces one engine family (relational,
+//! Kafka, Redis, MongoDB, …), showing how to register resources, configure isolation, and seed
+//! scenario-specific data.
 
 use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
 use async_trait::async_trait;
