@@ -31,7 +31,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```rust,no_run
 //! use shakedown::{run_scenario, Context, EventLog};
 //!
 //! async fn my_scenario(ctx: &mut Context) {
@@ -50,7 +50,7 @@
 //!     // Retrieve application events after scenario completion (see also [`EventLog::entries`])
 //!     assert!(event_log
 //!         .events()
-//!         .any(|e| e.source == "scenario" && e.level == EventLevel::Info));
+//!         .any(|e| e.source == "scenario" && e.level == shakedown::EventLevel::Info));
 //! }
 //! ```
 
@@ -2779,7 +2779,7 @@ async fn register_rabbit_cluster_control(ctx: &mut Context, handles: &[ResourceH
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rust,no_run
 /// use shakedown::{Context, run_scenario, EventLog};
 ///
 /// async fn my_scenario(ctx: &mut Context) {

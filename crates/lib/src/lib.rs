@@ -85,7 +85,9 @@
 //!
 //! The [`Resource`] trait is **async and scenario-aware**:
 //!
-//! ```text
+//! ```rust,no_run
+//! # use async_trait::async_trait;
+//! # use shakedown::{InfrastructureError, ResourceHandle, ScenarioId};
 //! #[async_trait]
 //! pub trait Resource: Send + Sync {
 //!     async fn provision(&mut self, scenario_id: &ScenarioId) -> Result<Vec<ResourceHandle>, InfrastructureError>;
