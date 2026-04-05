@@ -139,12 +139,15 @@ impl Tolerance {
 pub struct MetricComparison {
     /// Metric identifier (`p50`, `p95`, `p99`, `throughput`, `error_rate`).
     pub name: String,
+    /// Human-readable baseline measurement for this metric.
     pub baseline_value: String,
+    /// Human-readable current measurement for this metric.
     pub current_value: String,
     /// Signed relative delta when baseline is non-zero (`(current - baseline) / baseline`).
     pub change_pct: f64,
     /// Relative tolerance fraction used for this comparison direction (from [`Tolerance::percent`]).
     pub threshold_pct: f64,
+    /// Whether this comparison is within the tolerance threshold.
     pub passed: bool,
     /// Human-readable bound that was evaluated.
     pub limit_description: String,
@@ -153,9 +156,13 @@ pub struct MetricComparison {
 /// Outcome of comparing live [`LoadMetrics`] to a [`LoadBaseline`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComparisonResult {
+    /// Name of the baseline snapshot used for this comparison.
     pub baseline_name: String,
+    /// Tolerance settings used when comparing metrics.
     pub tolerance: Tolerance,
+    /// Per-metric comparison outcomes.
     pub metrics: Vec<MetricComparison>,
+    /// Whether all per-metric comparisons passed within the tolerance.
     pub passed: bool,
 }
 

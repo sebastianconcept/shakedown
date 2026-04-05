@@ -3174,6 +3174,15 @@ impl ScenarioRunOutcome for Result<(), ShakedownError> {
     }
 }
 
+/// Run the full scenario lifecycle: provision → readiness → seed → scenario → assert → teardown.
+///
+/// This is the primary entry point for executing a shakedown scenario. It drives all registered
+/// resources through the lifecycle phases, then runs `scenario_fn` with the prepared `ctx`.
+/// On success it runs teardown; on failure it builds a failure timeline before teardown.
+///
+/// # Panics
+///
+/// Does not panic; propagates errors as `Err(ShakedownError)`.
 pub async fn run_scenario<F, O>(
     ctx: &mut Context,
     scenario_id: impl Into<String>,

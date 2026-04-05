@@ -582,6 +582,7 @@ impl LoadMetrics {
         merged.successful + merged.failed + merged.dropped
     }
 
+    /// Total iterations that completed without error (post-warmup steady state, or global if no warmup).
     pub fn successful_operations(&self) -> u64 {
         if self.inner.use_global_aggregate_path(self.force_full_run) {
             return self.inner.successful_operations();
@@ -589,6 +590,7 @@ impl LoadMetrics {
         self.merged_steady_buckets().successful
     }
 
+    /// Total iterations that completed with an error (post-warmup steady state, or global if no warmup).
     pub fn failed_operations(&self) -> u64 {
         if self.inner.use_global_aggregate_path(self.force_full_run) {
             return self.inner.failed_operations();
@@ -596,6 +598,7 @@ impl LoadMetrics {
         self.merged_steady_buckets().failed
     }
 
+    /// Total iterations that were dropped (channel full or send failure).
     pub fn dropped_iterations(&self) -> u64 {
         if self.inner.use_global_aggregate_path(self.force_full_run) {
             return self.inner.dropped_iterations();
@@ -643,18 +646,22 @@ impl LoadMetrics {
         completed as f64 / elapsed.as_secs_f64()
     }
 
+    /// 50th-percentile (median) latency over the steady-state window.
     pub fn p50(&self) -> Duration {
         self.percentile(0.5)
     }
 
+    /// 90th-percentile latency over the steady-state window.
     pub fn p90(&self) -> Duration {
         self.percentile(0.90)
     }
 
+    /// 95th-percentile latency over the steady-state window.
     pub fn p95(&self) -> Duration {
         self.percentile(0.95)
     }
 
+    /// 99th-percentile latency over the steady-state window.
     pub fn p99(&self) -> Duration {
         self.percentile(0.99)
     }
@@ -675,6 +682,7 @@ impl LoadMetrics {
         duration_from_histogram_quantile(&merged.histogram, quantile)
     }
 
+    /// Minimum observed latency over the steady-state window (or global if no warmup).
     pub fn min_latency(&self) -> Duration {
         if self.inner.use_global_aggregate_path(self.force_full_run) {
             let min_ns = self.inner.min_latency_ns.load(Ordering::Relaxed);
@@ -691,6 +699,7 @@ impl LoadMetrics {
         Duration::from_nanos(min_ns)
     }
 
+    /// Maximum observed latency over the steady-state window (or global if no warmup).
     pub fn max_latency(&self) -> Duration {
         if self.inner.use_global_aggregate_path(self.force_full_run) {
             return Duration::from_nanos(self.inner.max_latency_ns.load(Ordering::Relaxed));
@@ -712,6 +721,7 @@ impl LoadMetrics {
         fail as f64 / completed as f64
     }
 
+    /// 99th-percentile latency for the given time window (bucket-aligned histogram merge).
     pub fn p99_during(&self, window: &Range<Instant>) -> Duration {
         match self.inner.merge_window_histogram(window) {
             Some(histogram) => duration_from_histogram_quantile(&histogram, 0.99),

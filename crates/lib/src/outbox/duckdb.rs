@@ -107,7 +107,7 @@ pub(crate) async fn fetch_entry_with_status(
                 .map_err(as_backend_error)?;
             if let Some(row) = rows.next().map_err(as_backend_error)? {
                 let outbox_assert_row =
-                    duckdb_read_outbox_assert_row(&row).map_err(as_backend_error)?;
+                    duckdb_read_outbox_assert_row(row).map_err(as_backend_error)?;
                 let payload = parse_payload_json(outbox_assert_row.4.as_str())?;
                 let status = parse_outbox_row_state(
                     outbox_assert_row.5.as_str(),
@@ -178,7 +178,7 @@ pub(crate) async fn fetch_latest_entry(
                 .map_err(as_backend_error)?;
             if let Some(row) = rows.next().map_err(as_backend_error)? {
                 let outbox_assert_row =
-                    duckdb_read_outbox_assert_row(&row).map_err(as_backend_error)?;
+                    duckdb_read_outbox_assert_row(row).map_err(as_backend_error)?;
                 let payload = parse_payload_json(outbox_assert_row.4.as_str())?;
                 let status = parse_outbox_row_state(
                     outbox_assert_row.5.as_str(),
