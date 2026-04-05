@@ -1,20 +1,89 @@
-//! # Shakedown — Orchestration library for shakedown testing
+//! # Shakedown
 //!
-//! **Shakedown** is a Rust framework for shakedown testing — proving systems are safe to
-//! promote to production by running realistic scenarios that exercise the full stack.
+//! The familiar pain is **tests pass, production breaks**: CI went green because mocks and unit
+//! tests never exercised the real integrations, ordering, and I/O that production relies on—so
+//! the first serious run of the system is your users, not your pipeline.
 //!
-//! ## Overview
+//! Teams adopted testing vocabulary but often skipped the **methodology** that ties scenarios to
+//! real infrastructure, isolation, and evidence. Without that thread, "green" stops meaning
+//! **safe to ship**.
 //!
-//! This library provides:
+//! **Shakedown** takes its name from the aerospace and motorsport **shakedown**—the deliberate
+//! qualification run before something is cleared as **safe to fly**. Here, scenarios are that
+//! runway: prove behavior on real dependencies, record what happened, and promote when the
+//! evidence says the system is ready—not when the easy tests merely pass.
 //!
-//! - **Scenario orchestration** — lifecycle phases: provision → readiness → seed → run → assert → teardown
-//! - **Resource providers** — traits for integrating databases, message queues, and other infrastructure
-//! - **Error classification** — structured errors distinguishing scenario vs infrastructure failures
-//! - **Instrumentation** — structured events, failure timelines, and optional Docker diagnostics ([`instrumentation`])
+//! ## Progressive confidence
 //!
-//! ## Async resource trait
+//! The library supports **progressive confidence** in five steps—start where you are and deepen
+//! fidelity as risk demands:
 //!
-//! The [`Resource`] trait is now **async and scenario-aware**:
+//! 1. **Scenarios & lifecycle** — run through provision → readiness → seed → run → assert →
+//!    teardown so every run has a repeatable shape ([`lifecycle`], [`run_scenario`]).
+//! 2. **Resources** — register databases, buses, and other engines with per-scenario isolation
+//!    while reusing suite-wide infrastructure where it makes sense ([`resources`]).
+//! 3. **Services & data paths** — exercise what you deploy: containers under test, bridges, and
+//!    transactional patterns such as outbox flows ([`service`], [`outbox`], [`publication`]).
+//! 4. **Faults & instrumentation** — inject network faults on proxied dependencies and read a
+//!    correlated timeline when something breaks ([`fault_injection`], [`instrumentation`]).
+//! 5. **Load & topology** — add open-model load, performance assertions, and multi-node layouts
+//!    when you need scale or HA-shaped coverage ([`load`], [`cluster`]).
+//!
+//! ## Three modes of confidence
+//!
+//! Shakedown is built around **three modes of confidence** that reinforce each other:
+//!
+//! - **Transferring confidence** — shared scenarios and structured output give reviewers and
+//!   teammates evidence they can trust in PRs and release gates.
+//! - **Preserving confidence** — when production misbehaves, the same harness vocabulary helps
+//!   you lock the failure in as a regression scenario instead of a one-off mystery.
+//! - **Trusting the result** — diagnostics and error classification help you see whether a red
+//!   run points at your product or at the test infrastructure, so flakes do not erode belief in
+//!   the signal.
+//!
+//! ## Quick start
+//!
+//! The [`#[shakedown::test]`](crate::test) attribute registers resources and runs your scenario
+//! on the Tokio test runtime. The example below uses [`BuiltinResource::Fake`]
+//! so it compiles with default features (no Docker). For in-memory SQL with no container runtime,
+//! enable the `sqlite` feature and `resources = [Sqlite]`—see [`README.md`](../README.md).
+//!
+//! For full manual control, call [`run_scenario`] with a [`Context`], a scenario id, an async
+//! closure, and an [`EventLog`].
+//!
+//! ```rust
+//! use shakedown::Context;
+//!
+//! #[shakedown::test(resources = [Fake])]
+//! async fn my_first_shakedown(ctx: &mut Context) {
+//!     assert!(!ctx.is_empty());
+//! }
+//! ```
+//!
+//! Fault-oriented scenarios use [`#[shakedown::faulty_test]`](crate::faulty_test) instead of
+//! [`#[shakedown::test]`](crate::test) so the harness can treat them as the faulty path when you
+//! wire Toxiproxy and related tooling.
+//!
+//! ## Cargo features
+//!
+//! Integrations are **opt-in** so default builds stay light (`mock-services` only). Enable what
+//! you need in `Cargo.toml`: for example `kafka`, `postgres`, `mariadb`, `mysql`, `rabbitmq`,
+//! `sqlite`, `duckdb`, `redis`, `valkey`, `redis-sentinel`, `mongodb`, `nats`, `neo4j`,
+//! `elasticsearch`, `opensearch`, `qdrant`, `weaviate`, `influxdb`, `timescaledb`, `outbox`,
+//! `fault-injection`, `load`, `services`, `cluster`, and engine-specific cluster flags such as
+//! `kafka-cluster` or `postgres-cluster`. The full matrix, CI guidance, and operator workflows
+//! are documented in [`README.md`](../README.md).
+//!
+//! ## What this crate provides
+//!
+//! - **Scenario orchestration** — the lifecycle above, with structured errors ([`error`])
+//! - **Resource registration** — [`BuiltinResource`], [`RegisteredResource`], and the async
+//!   [`Resource`] trait for custom backends
+//! - **Instrumentation** — events, failure timelines, optional Docker diagnostics ([`instrumentation`])
+//!
+//! ## Async [`Resource`] trait
+//!
+//! The [`Resource`] trait is **async and scenario-aware**:
 //!
 //! ```text
 //! #[async_trait]
@@ -26,8 +95,8 @@
 //! }
 //! ```
 //!
-//! This enables real infrastructure (Kafka, Postgres, etc.) to be integrated while maintaining
-//! a clean extension point for custom resources.
+//! That contract lets Kafka, Postgres, SQLite, and custom integrations share the same lifecycle
+//! hooks and extension points.
 //!
 //! ## Workspace layout
 //!
@@ -40,58 +109,14 @@
 //!
 //! ## Extension points
 //!
-//! - **[`Resource`] trait** — implement for new infrastructure integrations (Kafka, Postgres, etc.)
-//! - **[`EnvironmentBackend`] trait** — implement for alternative execution environments
-//! - **`Context::register_builtin()` / `Context::register_extension()`** — declarative registration
-//!
-//! ## Milestone status
-//!
-//! - **Shipped:** `mvp-outbox` — first-party outbox helpers on relational + Kafka bindings (`ctx.outbox()`, row/payload/Kafka assertions).
-//! - **Prior:** `mvp-postgres-mariadb` — PostgreSQL, MariaDB, Oracle MySQL, and SQLite [`Resource`] types with suite-shared Docker containers and per-scenario isolation.
-//! - **Next:** `mvp-fault-injection` — Toxiproxy-backed fault scenarios on the [`#[shakedown::faulty_test]`](crate::faulty_test) path: inject latency, loss, and partition behavior on proxied dependencies while scenarios run.
+//! - **[`Resource`] trait** — implement for new infrastructure integrations
+//! - **[`EnvironmentBackend`] trait** — plug in alternative execution environments
+//! - **`Context::register_builtin()` / `Context::register_extension()`** — register resources from code
 //!
 //! ## See also
 //!
-//! The workspace [`docs/README.md`](../../docs/README.md) points maintainers at product and architecture notes kept alongside this repo.
-//!
-//! ## Example
-//!
-//! ```text
-//! use shakedown::Context;
-//!
-//! #[async_trait]
-//! impl Resource for MyResource {
-//!     async fn provision(&mut self, scenario_id: &ScenarioId) -> Result<Vec<ResourceHandle>, InfrastructureError> {
-//!         // Provision my resource with scenario isolation
-//!         Ok(vec![ResourceHandle { ... }])
-//!     }
-//!
-//!     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-//!         // Apply migrations, seed data, etc.
-//!         Ok(())
-//!     }
-//!
-//!     async fn check_ready(&self) -> Result<(), InfrastructureError> {
-//!         // Verify deep readiness beyond TCP
-//!         Ok(())
-//!     }
-//!
-//!     async fn teardown(&mut self) -> Result<(), InfrastructureError> {
-//!         // Clean up
-//!         Ok(())
-//!     }
-//! }
-//!
-//! #[tokio::test]
-//! async fn test_my_scenario() {
-//!     let mut ctx = Context::new();
-//!     ctx.register_extension(MyResource);
-//!
-//!     run_scenario(&mut ctx, "my-scenario", |c| Box::pin(my_scenario_logic(c)), &mut event_log)
-//!         .await
-//!         .unwrap();
-//! }
-//! ```
+//! The workspace [`docs/README.md`](../../docs/README.md) points maintainers at notes kept
+//! alongside this repository.
 
 mod docker_labels;
 
