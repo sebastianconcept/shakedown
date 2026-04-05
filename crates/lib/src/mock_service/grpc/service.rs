@@ -5,7 +5,7 @@
 //!
 //! Example:
 //!
-//! ```ignore
+//! ```rust,no_run
 //! use std::sync::Arc;
 //!
 //! use shakedown::mock_service::{
