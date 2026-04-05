@@ -188,6 +188,7 @@ pub enum LoadRuntime {
 }
 
 /// Validated load profile: phases, worker bounds, saturation, and runtime hint.
+#[cfg_attr(docsrs, doc(cfg(feature = "load")))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadProfile {
     phases: Vec<NamedPhase>,

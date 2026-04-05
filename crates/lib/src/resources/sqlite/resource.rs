@@ -15,6 +15,7 @@ const RESOURCE_NAME: &str = "sqlite";
 /// `rusqlite::Connection` is not [`Sync`]; it is wrapped in [`Arc`] [`Mutex`] so [`BuiltinResource`]
 /// remains [`Sync`] and readiness can use [`tokio::task::spawn_blocking`] (works on the default
 /// single-threaded Tokio test executor used by `#[tokio::test]`).
+#[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
 #[derive(Debug, Default)]
 pub struct SqliteResource {
     connection: Option<Arc<Mutex<Connection>>>,

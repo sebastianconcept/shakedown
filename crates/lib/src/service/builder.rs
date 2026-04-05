@@ -49,6 +49,7 @@ use crate::service::health::HealthCheck;
 use crate::service::types::{EnvMapping, PortMapping, PullPolicy, ServiceSpec};
 
 /// Builder for declaring a Docker-backed service under test.
+#[cfg_attr(docsrs, doc(cfg(feature = "services")))]
 #[derive(Debug, Clone)]
 pub struct ServiceUnderTest {
     image: String,

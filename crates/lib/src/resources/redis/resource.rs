@@ -17,6 +17,7 @@ fn suite_redis_mutex() -> &'static Mutex<SuiteState<Redis>> {
 /// Suite lifecycle matches Rabbit/Postgres: one container per process; refcounted teardown.
 /// Default image tag is **`7`** (`redis:7`). Override with [`Self::with_image_tag`] or
 /// `SHAKEDOWN_REDIS_IMAGE_TAG`.
+#[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
 #[derive(Debug)]
 pub struct RedisResource(pub(super) RespResource<Redis>);
 

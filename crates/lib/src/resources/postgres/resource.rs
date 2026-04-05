@@ -68,6 +68,7 @@ async fn connect_with_url(url: &str) -> Result<tokio_postgres::Client, Infrastru
 /// **Suite lifecycle:** the first provision in the process starts a single server; further
 /// [`PostgresResource`] instances reuse it. The last successful [`Resource::teardown`] drops the
 /// scenario database and may remove the container when the refcount reaches zero.
+#[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
 #[derive(Debug)]
 pub struct PostgresResource {
     image: Postgres,
