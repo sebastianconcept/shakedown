@@ -310,6 +310,7 @@ fn primary_and_secondaries_ok(status: &Document, node_count: usize) -> bool {
 ///
 /// Default is **3** nodes and replica set id **`rs0`**. Image defaults to **`mongo:7`**; override with
 /// [`Self::with_image_tag`] or **`SHAKEDOWN_MONGO_CLUSTER_IMAGE_TAG`**.
+#[cfg_attr(docsrs, doc(cfg(feature = "mongodb-cluster")))]
 #[derive(Debug)]
 pub struct MongoReplicaSetResource {
     node_count: usize,

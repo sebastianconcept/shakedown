@@ -68,6 +68,7 @@ pub enum Error {
 /// [`FaultHandle::set_event_sender`] wires the sender half of an `mpsc` pair. The harness drains the
 /// receiver into the log after the scenario body. [`crate::lifecycle::Context::clear_fault_handle`]
 /// drops the handle at teardown.
+#[cfg_attr(docsrs, doc(cfg(feature = "fault-injection")))]
 #[derive(Debug)]
 pub struct FaultHandle {
     client: ToxiproxyClient,

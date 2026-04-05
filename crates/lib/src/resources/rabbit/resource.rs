@@ -38,6 +38,7 @@ fn image_fingerprint(image: &RabbitMq, tag_override: &Option<String>) -> String 
 /// **Suite lifecycle:** the first provision in the process starts a single broker; further
 /// [`RabbitResource`] instances reuse it. The last successful [`Resource::teardown`] removes the
 /// container when the refcount reaches zero.
+#[cfg_attr(docsrs, doc(cfg(feature = "rabbitmq")))]
 #[derive(Debug)]
 pub struct RabbitResource {
     image: RabbitMq,

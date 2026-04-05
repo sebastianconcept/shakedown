@@ -44,6 +44,7 @@ fn image_fingerprint(image: &apache::Kafka, tag_override: &Option<String>) -> St
 /// further [`KafkaResource`] instances reuse it. The last successful [`Resource::teardown`]
 /// removes the container. All instances in one process must use the same image name and tag
 /// (first configuration wins).
+#[cfg_attr(docsrs, doc(cfg(feature = "kafka")))]
 #[derive(Debug)]
 pub struct KafkaResource {
     image: apache::Kafka,

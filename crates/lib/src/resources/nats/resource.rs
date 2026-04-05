@@ -43,6 +43,7 @@ fn image_fingerprint(image: &Nats, tag_override: &Option<String>) -> String {
 ///
 /// Default image tag is **`2`** (`nats:2`). Override with [`Self::with_image_tag`] or
 /// `SHAKEDOWN_NATS_IMAGE_TAG`.
+#[cfg_attr(docsrs, doc(cfg(feature = "nats")))]
 #[derive(Debug)]
 pub struct NatsResource {
     image: Nats,

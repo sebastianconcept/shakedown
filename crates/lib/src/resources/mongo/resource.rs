@@ -57,6 +57,7 @@ async fn mongo_client(uri: &str) -> Result<Client, mongodb::error::Error> {
 ///
 /// Default image tag is **`7`** (`mongo:7`). Override with [`Self::with_image_tag`] or
 /// `SHAKEDOWN_MONGO_IMAGE_TAG`. Root credentials are fixed (`root` / `root`) for the suite container.
+#[cfg_attr(docsrs, doc(cfg(feature = "mongodb")))]
 #[derive(Debug)]
 pub struct MongoResource {
     image: Mongo,

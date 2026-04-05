@@ -246,6 +246,7 @@ impl Image for KraftBrokerImage {
 ///
 /// Default is **3** brokers. Image defaults to **`apache/kafka-native:3.8.0`**; override with
 /// [`Self::with_image_tag`] or **`SHAKEDOWN_KAFKA_CLUSTER_IMAGE_TAG`**.
+#[cfg_attr(docsrs, doc(cfg(feature = "kafka-cluster")))]
 #[derive(Debug)]
 pub struct KafkaClusterResource {
     node_count: usize,
