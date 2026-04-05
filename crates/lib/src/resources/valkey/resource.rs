@@ -26,6 +26,7 @@ impl Default for ValkeyResource {
 }
 
 impl ValkeyResource {
+    /// Create a new `ValkeyResource` using the default image tag (`valkey:8`), overridable via `SHAKEDOWN_VALKEY_IMAGE_TAG`.
     pub fn new() -> Self {
         Self(
             RespResource::new(
@@ -39,10 +40,12 @@ impl ValkeyResource {
         )
     }
 
+    /// Override the Valkey image tag (e.g. `"7.2"` for an earlier version).
     pub fn with_image_tag(self, tag: impl Into<String>) -> Self {
         Self(self.0.with_image_tag(tag))
     }
 
+    /// Apply the image tag from `SHAKEDOWN_VALKEY_IMAGE_TAG` if set (called automatically by [`Self::new`]).
     pub fn with_image_tag_from_env(self) -> Self {
         Self(self.0.with_image_tag_from_env())
     }

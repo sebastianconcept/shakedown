@@ -9,6 +9,7 @@ use thiserror::Error;
 /// until then.
 #[derive(Debug, Display, Error)]
 #[ignore_extra_doc_attributes]
+#[allow(missing_docs)]
 pub enum StepError {
     /// {detail}
     ///

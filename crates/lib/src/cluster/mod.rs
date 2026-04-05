@@ -82,6 +82,7 @@ pub enum NodeStatus {
 /// Failure from cluster topology operations (node control, networks, engine-specific steps).
 #[derive(Debug, Display, Error)]
 #[ignore_extra_doc_attributes]
+#[allow(missing_docs)]
 pub enum ClusterError {
     /// node index {index} is out of range for cluster with {node_count} nodes
     NodeIndexOutOfRange { index: usize, node_count: usize },
@@ -116,15 +117,25 @@ pub enum ClusterError {
 /// Generic node-level control for clustered resources (MongoDB replica set, Kafka brokers, etc.).
 #[async_trait]
 pub trait ClusterControl: Send + Sync {
+    /// Stop the node at `index` (Docker container stop / equivalent).
     async fn stop_node(&self, index: usize) -> Result<(), ClusterError>;
+    /// Start or restart the node at `index`.
     async fn start_node(&self, index: usize) -> Result<(), ClusterError>;
+    /// Pause (SIGSTOP / docker pause) the node at `index`.
     async fn pause_node(&self, index: usize) -> Result<(), ClusterError>;
+    /// Unpause (SIGCONT / docker unpause) the node at `index`.
     async fn unpause_node(&self, index: usize) -> Result<(), ClusterError>;
+    /// Disconnect the node at `index` from the cluster network.
     async fn disconnect_node(&self, index: usize) -> Result<(), ClusterError>;
+    /// Reconnect the node at `index` to the cluster network.
     async fn reconnect_node(&self, index: usize) -> Result<(), ClusterError>;
+    /// Return the current [`NodeStatus`] for the node at `index`.
     async fn node_status(&self, index: usize) -> Result<NodeStatus, ClusterError>;
+    /// Number of nodes that are currently in a healthy / running state.
     async fn healthy_node_count(&self) -> Result<usize, ClusterError>;
+    /// Bring all nodes back to a clean running state (undo all stop/pause/disconnect operations).
     async fn reset_topology(&self) -> Result<(), ClusterError>;
+    /// Total number of nodes in this cluster (fixed for the lifetime of the handle).
     fn node_count(&self) -> usize;
 
     /// Disable the bidirectional proxy pair between two nodes (inter-node Toxiproxy mesh when enabled).

@@ -13,7 +13,9 @@ use super::response_builder::HttpMockServiceResponseBuilder;
 pub struct HttpMockServiceResponse {
     /// HTTP status code.
     pub status: u16,
+    /// Response headers as `(name, value)` pairs.
     pub headers: Vec<(String, String)>,
+    /// Raw response body bytes.
     pub body: Bytes,
 }
 

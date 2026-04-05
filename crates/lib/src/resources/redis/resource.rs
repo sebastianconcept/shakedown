@@ -28,6 +28,7 @@ impl Default for RedisResource {
 }
 
 impl RedisResource {
+    /// Create a new `RedisResource` using the default image tag (`redis:7`), overridable via `SHAKEDOWN_REDIS_IMAGE_TAG`.
     pub fn new() -> Self {
         Self(
             RespResource::new(
@@ -41,10 +42,12 @@ impl RedisResource {
         )
     }
 
+    /// Override the Redis image tag (e.g. `"6.2"` for an older LTS).
     pub fn with_image_tag(self, tag: impl Into<String>) -> Self {
         Self(self.0.with_image_tag(tag))
     }
 
+    /// Apply the image tag from `SHAKEDOWN_REDIS_IMAGE_TAG` if set (called automatically by [`Self::new`]).
     pub fn with_image_tag_from_env(self) -> Self {
         Self(self.0.with_image_tag_from_env())
     }

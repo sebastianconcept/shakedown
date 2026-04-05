@@ -30,18 +30,27 @@ pub(crate) const LOAD_RUN_REPORT_SCHEMA_VERSION: u32 = 1;
 pub struct ReportMetrics {
     /// All arrivals: successes, failures, and scheduling drops.
     pub total_iterations: u64,
+    /// Iterations that completed without returning an error.
     pub successful_operations: u64,
+    /// Iterations that returned an error.
     pub failed_operations: u64,
+    /// Iterations dropped by the open-model scheduler (backpressure saturation).
     pub dropped_iterations: u64,
-    /// Failed / completed (0..1).
+    /// Failed / completed ratio (0..1).
     pub error_rate: f64,
     /// Completed iterations per second (steady-state window when warmup is configured).
     pub throughput: f64,
+    /// 50th percentile latency in nanoseconds.
     pub p50_ns: u64,
+    /// 90th percentile latency in nanoseconds.
     pub p90_ns: u64,
+    /// 95th percentile latency in nanoseconds.
     pub p95_ns: u64,
+    /// 99th percentile latency in nanoseconds.
     pub p99_ns: u64,
+    /// Minimum recorded latency in nanoseconds.
     pub min_latency_ns: u64,
+    /// Maximum recorded latency in nanoseconds.
     pub max_latency_ns: u64,
 }
 
@@ -67,19 +76,26 @@ impl From<&LoadMetrics> for ReportMetrics {
 /// Machine-readable record of a single load run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoadRunReport {
+    /// Format version; bump when the JSON shape changes incompatibly.
     pub schema_version: u32,
+    /// Scenario identifier under which this load run executed.
     pub scenario_id: String,
+    /// Author-supplied label for this load profile (from [`crate::load::LoadHandle`]).
     pub load_name: String,
     /// Wall time when the report was built (RFC 3339, UTC).
     pub timestamp: String,
     /// Wall milliseconds from load accumulator origin until report build.
     pub duration_ms: u64,
+    /// Human-readable description of the load profile phases.
     pub load_profile_summary: String,
+    /// Scalar metric snapshot for this run.
     pub metrics: ReportMetrics,
     /// HdrHistogram V2 payload, base64-encoded.
     pub histogram_v2_base64: String,
+    /// Assertion verdicts when [`crate::load::LoadMetricsAssertBuilder::store_for_report`] was called.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assertions: Option<Vec<ReportAssertion>>,
+    /// Baseline comparison results when [`crate::load::LoadMetricsAssertBuilder::no_regression_from`] was called.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comparison: Option<ReportComparison>,
 }

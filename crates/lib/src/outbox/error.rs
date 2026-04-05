@@ -12,6 +12,7 @@ use thiserror::Error;
 /// [`OutboxError::PayloadInvalid`] for shape or domain messages without an underlying [`std::error::Error`].
 #[derive(Debug, Display, Error)]
 #[ignore_extra_doc_attributes]
+#[allow(missing_docs)]
 pub enum OutboxError {
     /// No outbox storage binding on [`crate::lifecycle::Context`]. Outbox row helpers need exactly one of postgres, mariadb, mysql, sqlite, mongodb, or duckdb provisioned (see `Outbox` / `mvp-outbox` docs).
     ///

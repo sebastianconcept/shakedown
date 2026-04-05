@@ -12,6 +12,7 @@ pub const DEFAULT_HEALTH_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Describes how Shakedown should determine that a service container is ready.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
 pub enum HealthCheck {
     /// HTTP `GET` to `path` must return `expected_status`.
     Http {

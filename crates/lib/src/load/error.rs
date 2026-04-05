@@ -66,6 +66,7 @@ pub enum LoadError {
     SaturationExceeded,
     /// load driver failed
     DriverFailed {
+        /// Underlying driver or runtime error.
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },

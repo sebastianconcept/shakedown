@@ -9,6 +9,7 @@ use thiserror::Error;
 /// no dedicated variant exists yet.
 #[derive(Debug, Display, Error)]
 #[ignore_extra_doc_attributes]
+#[allow(missing_docs)]
 pub enum AssertionError {
     /// mock service `{mock_service_name}`: expected {expected} total calls, got {actual}; recorded: {recorded_calls_diagnostic}
     ///

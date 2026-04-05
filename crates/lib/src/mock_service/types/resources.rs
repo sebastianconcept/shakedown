@@ -24,18 +24,25 @@ use crate::resources::RabbitBindings;
 /// when no infrastructure is wired.
 #[derive(Default)]
 pub struct MockServiceResources {
+    /// Kafka connection bindings for topic prefix and bootstrap address (`kafka` feature).
     #[cfg(feature = "kafka")]
     pub kafka_bindings: Option<KafkaBindings>,
+    /// Ready-to-use Kafka producer (`kafka` feature).
     #[cfg(feature = "kafka")]
     pub kafka_producer: Option<FutureProducer>,
+    /// RabbitMQ connection bindings for exchange and vhost (`rabbitmq` feature).
     #[cfg(feature = "rabbitmq")]
     pub rabbit_bindings: Option<RabbitBindings>,
+    /// Ready-to-use AMQP channel (`rabbitmq` feature).
     #[cfg(feature = "rabbitmq")]
     pub rabbit_channel: Option<Channel>,
+    /// Postgres connection bindings (`postgres` feature).
     #[cfg(feature = "postgres")]
     pub postgres_bindings: Option<PostgresBindings>,
+    /// TimescaleDB connection bindings (`timescaledb` feature).
     #[cfg(feature = "timescaledb")]
     pub timescaledb_bindings: Option<PostgresBindings>,
+    /// MariaDB connection bindings (`mariadb` feature).
     #[cfg(feature = "mariadb")]
     pub mariadb_bindings: Option<MariaDBBindings>,
 }
