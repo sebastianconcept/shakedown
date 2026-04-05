@@ -4,6 +4,17 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
+description = "Progressive confidence testing for Rust backend services — real infrastructure, structured evidence, safe to ship."
+readme = "README.md"
+repository = "https://github.com/sebastianconcept/shakedown"
+homepage = "https://shakedown.dev"
+license = "MIT"
+keywords = ["testing", "integration-testing", "kafka", "postgres", "testcontainers"]
+categories = ["development-tools::testing"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Procedural macros (greeting smoke test; macros milestone will expand usage)

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
+description = "Procedural macros for the Shakedown testing framework."
+repository = "https://github.com/sebastianconcept/shakedown"
+license = "MIT"
 
 [lib]
 proc-macro = true
