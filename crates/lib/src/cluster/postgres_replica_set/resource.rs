@@ -1,7 +1,7 @@
 //! Per-scenario PostgreSQL primary + streaming replica (`postgres-cluster` feature).
 //!
-//! Provisions **two** containers per scenario (suite sharing would break irreversible promotion —
-//! D-9). A bridge network connects primary (`pg-primary`) and replica (`pg-replica`); the replica
+//! Provisions **two** containers per scenario (suite sharing would break irreversible promotion
+//! tests such as failover). A bridge network connects primary (`pg-primary`) and replica (`pg-replica`); the replica
 //! data directory is populated with [`pg_basebackup`](https://www.postgresql.org/docs/current/app-pgbasebackup.html)
 //! into a Docker named volume, then a replica container mounts that volume.
 //!
@@ -149,7 +149,7 @@ async fn wait_for_streaming_primary(
 
 /// Docker-backed **primary + streaming replica** PostgreSQL topology (per-scenario containers).
 ///
-/// D-9: containers are **not** suite-shared — each scenario provisions fresh primary and replica so
+/// Containers are **not** suite-shared — each scenario provisions fresh primary and replica so
 /// future promotion/failover tests stay meaningful.
 #[derive(Debug)]
 pub struct PostgresReplicaSetResource {

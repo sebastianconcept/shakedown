@@ -12,7 +12,7 @@
 //! - **Error classification** — structured errors distinguishing scenario vs infrastructure failures
 //! - **Instrumentation** — structured events, failure timelines, and optional Docker diagnostics ([`instrumentation`])
 //!
-//! ## Async Resource Trait (D-6)
+//! ## Async resource trait
 //!
 //! The [`Resource`] trait is now **async and scenario-aware**:
 //!

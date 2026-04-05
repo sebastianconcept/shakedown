@@ -2750,8 +2750,8 @@ async fn register_rabbit_cluster_control(ctx: &mut Context, handles: &[ResourceH
 ///
 /// # Lifecycle ordering
 ///
-/// The function respects the lifecycle order: provision → readiness → seed → run → assert → teardown
-/// as documented in ARCHITECTURE.md §§ 3.6–3.9.
+/// Phases always run in this order: provision → readiness → seed → run → assert → teardown
+/// (summarized in the list at the start of this documentation).
 ///
 /// # Event logging
 ///

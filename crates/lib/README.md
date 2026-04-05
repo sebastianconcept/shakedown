@@ -283,7 +283,7 @@ Docker-backed tests are opt-in; see [Running tests](#running-tests) for the full
 ```
 
 Topics are created in `apply_default_seed` phase under the scenario's isolated namespace.
-See [`KafkaResource::apply_default_seed`](src/resources.rs) and [DECISIONS.md D-4](../../DECISIONS.md) for details.
+Readiness only checks the broker; topic creation stays in seed so the split matches other resources (migrations and data writes after the service is reachable). See [`KafkaResource::apply_default_seed`](src/resources.rs) for the implementation.
 
 ### Fault injection (Toxiproxy) and the Kafka path
 
@@ -814,14 +814,14 @@ reqwest = { version = "0.11", default-features = false, features = ["json", "rus
 
 `default-features = false` is shown so you opt in explicitly; many teams keep default **`mock-services`** on and add **`services`**.
 
-Public entry points (all behind `feature = "services"`): [`ServiceUnderTest`](src/service/builder.rs), [`ServiceSpec`](src/service/types.rs), [`HealthCheck`](src/service/health.rs), [`EnvMapping`](src/service/types.rs) / [`PullPolicy`](src/service/types.rs), [`ServiceHandle`](src/service/handle.rs), [`Context::register_service`](src/lifecycle/mod.rs), [`Context::service_url`](src/lifecycle/mod.rs), [`Context::service_handle`](src/lifecycle/mod.rs). Address rewriting for containers uses [`HOST_DOCKER_INTERNAL`](src/service/address.rs) (see §2).
+Public entry points (all behind `feature = "services"`): [`ServiceUnderTest`](src/service/builder.rs), [`ServiceSpec`](src/service/types.rs), [`HealthCheck`](src/service/health.rs), [`EnvMapping`](src/service/types.rs) / [`PullPolicy`](src/service/types.rs), [`ServiceHandle`](src/service/handle.rs), [`Context::register_service`](src/lifecycle/mod.rs), [`Context::service_url`](src/lifecycle/mod.rs), [`Context::service_handle`](src/lifecycle/mod.rs). Address rewriting for containers uses [`HOST_DOCKER_INTERNAL`](src/service/address.rs) (see **Container vs test host** under config injection below).
 
 Runnable references in this repo: [`tests/services_lifecycle.rs`](tests/services_lifecycle.rs) (single container), [`tests/services_kafka_mock_service_whoami.rs`](tests/services_kafka_mock_service_whoami.rs), [`tests/services_multi_postgres_whoami.rs`](tests/services_multi_postgres_whoami.rs).
 
 ### 1. Single-service quick-start (register, health check, assert)
 
 1. Build a [`ServiceSpec`](src/service/types.rs) with [`ServiceUnderTest::docker`](src/service/builder.rs) — **`.name(...)`** and **at least one `.port(...)`** are required; if you omit [`.health_check`](src/service/builder.rs), the harness defaults to [`HealthCheck::tcp`](src/service/health.rs).
-2. Call [`Context::register_service`](src/lifecycle/mod.rs) **before** [`run_scenario`](src/lifecycle/mod.rs). Dependencies must already be registered (see §3).
+2. Call [`Context::register_service`](src/lifecycle/mod.rs) **before** [`run_scenario`](src/lifecycle/mod.rs). Dependencies must already be registered (see **Multi-service dependencies** below).
 3. Inside the scenario closure, use [`Context::service_url`](src/lifecycle/mod.rs) for HTTP clients from the **host** (`http://127.0.0.1:…`). [`Context::service_handle`](src/lifecycle/mod.rs) exposes [`ServiceHandle::base_url`](src/service/handle.rs), [`container_id`](src/service/handle.rs), and [`is_healthy`](src/service/handle.rs).
 
 The example below matches [`tests/services_lifecycle.rs`](tests/services_lifecycle.rs) and requires **Docker** when executed (`#[ignore]` in the crate’s integration test). Add **`tokio`** and **`reqwest`** to your crate as in the manifest snippet above.
@@ -871,7 +871,7 @@ When **[`auto_inject(true)`](src/service/builder.rs)** (the default), the harnes
 | Binding | Default env var | Notes |
 |--------|-------------------|--------|
 | Kafka | `KAFKA_BOOTSTRAP_SERVERS` | Requires `kafka` feature + registered Kafka resource |
-| Postgres | `DATABASE_URL` | `postgres` feature; see §3 for **per-service** URLs when multiple services are registered |
+| Postgres | `DATABASE_URL` | `postgres` feature; see **Multi-service dependencies** below for **per-service** URLs when multiple services are registered |
 | MariaDB | `MARIADB_URL` | `mariadb` feature |
 | MySQL | `MYSQL_URL` | `mysql` feature |
 | RabbitMQ | `RABBITMQ_URL` | `rabbitmq` feature |
@@ -887,7 +887,7 @@ When **[`auto_inject(true)`](src/service/builder.rs)** (the default), the harnes
 | InfluxDB 2.x | `INFLUXDB_URL` | `influxdb` feature; also sets `INFLUXDB_TOKEN`, `INFLUXDB_ORG`, `INFLUXDB_BUCKET` |
 | TimescaleDB | `TIMESCALEDB_URL` | `timescaledb` feature (distinct from Postgres `DATABASE_URL`) |
 | HTTP/gRPC mock service | `{UPPER_SNAKE(mock_service_name)}_URL` | e.g. mock service `"order-gateway"` → `ORDER_GATEWAY_URL` (`mock-services` + `services`) |
-| `depends_on` peer | `{UPPER_SNAKE(service_name)}_URL` | Only for names listed in [`.depends_on`](src/service/builder.rs) (§3) |
+| `depends_on` peer | `{UPPER_SNAKE(service_name)}_URL` | Only for names listed in [`.depends_on`](src/service/builder.rs) (see **Multi-service dependencies** below) |
 
 **Overrides:** Pass [`.env_mapping`](src/service/builder.rs) with [`EnvMapping::kafka`](src/service/types.rs), [`postgres`](src/service/types.rs), [`mariadb`](src/service/types.rs), [`mysql`](src/service/types.rs), [`rabbitmq`](src/service/types.rs), [`redis`](src/service/types.rs), [`mongo`](src/service/types.rs), [`nats`](src/service/types.rs), [`neo4j`](src/service/types.rs), [`duckdb`](src/service/types.rs), [`elasticsearch`](src/service/types.rs), [`opensearch`](src/service/types.rs), [`qdrant`](src/service/types.rs), [`weaviate`](src/service/types.rs), [`influxdb`](src/service/types.rs), [`timescaledb`](src/service/types.rs), [`mock_service`](src/service/types.rs), or [`service`](src/service/types.rs) to rename the variable for that binding. **Explicit** [`.env(key, value)`](src/service/builder.rs) entries win over convention and mappings.
 
@@ -919,7 +919,7 @@ let _tcp_fallback = HealthCheck::tcp().with_interval(Duration::from_millis(250))
 
 Register **each** service with [`register_service`](src/lifecycle/mod.rs). Declare ordering with [`.depends_on("other_name")`](src/service/builder.rs); the harness performs a **topological sort** and rejects **cycles** or **missing** dependency names at registration time.
 
-When **`auto_inject`** is on and more than one service is registered, **Postgres / MariaDB / MySQL** URLs use **per-service database path suffixes** so every container still receives the standard name (`DATABASE_URL` for Postgres, etc.) but points at an **isolated** database — same transparency model as other resources ([DECISIONS.md](../../DECISIONS.md) scenario isolation).
+When **`auto_inject`** is on and more than one service is registered, **Postgres / MariaDB / MySQL** URLs use **per-service database path suffixes** so every container still receives the standard name (`DATABASE_URL` for Postgres, etc.) but points at an **isolated** database — same transparency model as other resources (each scenario gets its own logical slice so parallel runs do not share state).
 
 A downstream service that **depends on** an upstream receives **`UPSTREAM_URL`** (upper-snake of the dependency name) with the upstream’s base URL, rewritten for the container network. Services **not** listed in `depends_on` do **not** get each other’s URLs automatically.
 
