@@ -94,18 +94,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "kafka")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Kafka(
-                        ::shakedown::KafkaResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "kafka"))]
-                {
-                    ::core::compile_error!(
-                        "Kafka in #[shakedown::test(resources = [...])] requires `kafka` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Kafka(
+                    ::shakedown::KafkaResource::new(),
+                ));
             });
         }
         "Postgres" => {
@@ -116,18 +107,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "postgres")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Postgres(
-                        ::shakedown::PostgresResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "postgres"))]
-                {
-                    ::core::compile_error!(
-                        "Postgres in #[shakedown::test(resources = [...])] requires `postgres` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Postgres(
+                    ::shakedown::PostgresResource::new(),
+                ));
             });
         }
         "PostgresReplicaSet" => {
@@ -159,18 +141,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             builder_tokens = quote! { #builder_tokens.with_image_tag_from_env() };
 
             return Ok(quote! {
-                #[cfg(feature = "postgres-cluster")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::PostgresReplicaSet(
-                        #builder_tokens,
-                    ));
-                }
-                #[cfg(not(feature = "postgres-cluster"))]
-                {
-                    ::core::compile_error!(
-                        "PostgresReplicaSet in #[shakedown::test(resources = [...])] requires `postgres-cluster` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::PostgresReplicaSet(
+                    #builder_tokens,
+                ));
             });
         }
         "MariaDB" => {
@@ -181,18 +154,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "mariadb")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::MariaDB(
-                        ::shakedown::MariaDBResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "mariadb"))]
-                {
-                    ::core::compile_error!(
-                        "MariaDB in #[shakedown::test(resources = [...])] requires `mariadb` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::MariaDB(
+                    ::shakedown::MariaDBResource::new(),
+                ));
             });
         }
         "Mysql" => {
@@ -203,18 +167,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "mysql")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Mysql(
-                        ::shakedown::MysqlResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "mysql"))]
-                {
-                    ::core::compile_error!(
-                        "Mysql in #[shakedown::test(resources = [...])] requires `mysql` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Mysql(
+                    ::shakedown::MysqlResource::new(),
+                ));
             });
         }
         "Sqlite" => {
@@ -225,18 +180,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "sqlite")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Sqlite(
-                        ::shakedown::SqliteResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "sqlite"))]
-                {
-                    ::core::compile_error!(
-                        "Sqlite in #[shakedown::test(resources = [...])] requires `sqlite` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Sqlite(
+                    ::shakedown::SqliteResource::new(),
+                ));
             });
         }
         "DuckDb" => {
@@ -247,18 +193,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "duckdb")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::DuckDb(
-                        ::shakedown::DuckDbResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "duckdb"))]
-                {
-                    ::core::compile_error!(
-                        "DuckDb in #[shakedown::test(resources = [...])] requires `duckdb` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::DuckDb(
+                    ::shakedown::DuckDbResource::new(),
+                ));
             });
         }
         "Rabbit" => {
@@ -269,18 +206,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "rabbitmq")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Rabbit(
-                        ::shakedown::RabbitResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "rabbitmq"))]
-                {
-                    ::core::compile_error!(
-                        "Rabbit in #[shakedown::test(resources = [...])] requires `rabbitmq` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Rabbit(
+                    ::shakedown::RabbitResource::new(),
+                ));
             });
         }
         "Redis" => {
@@ -291,18 +219,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "redis")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Redis(
-                        ::shakedown::RedisResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "redis"))]
-                {
-                    ::core::compile_error!(
-                        "Redis in #[shakedown::test(resources = [...])] requires `redis` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Redis(
+                    ::shakedown::RedisResource::new(),
+                ));
             });
         }
         "RedisSentinel" => {
@@ -337,18 +256,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             builder_tokens = quote! { #builder_tokens.with_image_tag_from_env() };
 
             return Ok(quote! {
-                #[cfg(feature = "redis-sentinel")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::RedisSentinel(
-                        #builder_tokens,
-                    ));
-                }
-                #[cfg(not(feature = "redis-sentinel"))]
-                {
-                    ::core::compile_error!(
-                        "RedisSentinel in #[shakedown::test(resources = [...])] requires `redis-sentinel` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::RedisSentinel(
+                    #builder_tokens,
+                ));
             });
         }
         "Valkey" => {
@@ -359,18 +269,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "valkey")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Valkey(
-                        ::shakedown::ValkeyResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "valkey"))]
-                {
-                    ::core::compile_error!(
-                        "Valkey in #[shakedown::test(resources = [...])] requires `valkey` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Valkey(
+                    ::shakedown::ValkeyResource::new(),
+                ));
             });
         }
         "Mongo" => {
@@ -381,18 +282,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "mongodb")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Mongo(
-                        ::shakedown::MongoResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "mongodb"))]
-                {
-                    ::core::compile_error!(
-                        "Mongo in #[shakedown::test(resources = [...])] requires `mongodb` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Mongo(
+                    ::shakedown::MongoResource::new(),
+                ));
             });
         }
         "MongoReplicaSet" => {
@@ -427,18 +319,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             builder_tokens = quote! { #builder_tokens.with_image_tag_from_env() };
 
             return Ok(quote! {
-                #[cfg(feature = "mongodb-cluster")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::MongoReplicaSet(
-                        #builder_tokens,
-                    ));
-                }
-                #[cfg(not(feature = "mongodb-cluster"))]
-                {
-                    ::core::compile_error!(
-                        "MongoReplicaSet in #[shakedown::test(resources = [...])] requires `mongodb-cluster` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::MongoReplicaSet(
+                    #builder_tokens,
+                ));
             });
         }
         "KafkaCluster" => {
@@ -479,18 +362,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             builder_tokens = quote! { #builder_tokens.with_image_tag_from_env() };
 
             return Ok(quote! {
-                #[cfg(feature = "kafka-cluster")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::KafkaCluster(
-                        #builder_tokens,
-                    ));
-                }
-                #[cfg(not(feature = "kafka-cluster"))]
-                {
-                    ::core::compile_error!(
-                        "KafkaCluster in #[shakedown::test(resources = [...])] requires `kafka-cluster` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::KafkaCluster(
+                    #builder_tokens,
+                ));
             });
         }
         "RabbitCluster" => {
@@ -525,18 +399,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             builder_tokens = quote! { #builder_tokens.with_image_tag_from_env() };
 
             return Ok(quote! {
-                #[cfg(feature = "rabbitmq-cluster")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::RabbitCluster(
-                        #builder_tokens,
-                    ));
-                }
-                #[cfg(not(feature = "rabbitmq-cluster"))]
-                {
-                    ::core::compile_error!(
-                        "RabbitCluster in #[shakedown::test(resources = [...])] requires `rabbitmq-cluster` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::RabbitCluster(
+                    #builder_tokens,
+                ));
             });
         }
         "Nats" => {
@@ -547,18 +412,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "nats")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Nats(
-                        ::shakedown::NatsResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "nats"))]
-                {
-                    ::core::compile_error!(
-                        "Nats in #[shakedown::test(resources = [...])] requires `nats` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Nats(
+                    ::shakedown::NatsResource::new(),
+                ));
             });
         }
         "Neo4j" => {
@@ -569,18 +425,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "neo4j")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Neo4j(
-                        ::shakedown::Neo4jResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "neo4j"))]
-                {
-                    ::core::compile_error!(
-                        "Neo4j in #[shakedown::test(resources = [...])] requires `neo4j` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Neo4j(
+                    ::shakedown::Neo4jResource::new(),
+                ));
             });
         }
         "Elasticsearch" => {
@@ -591,18 +438,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "elasticsearch")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Elasticsearch(
-                        ::shakedown::ElasticsearchResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "elasticsearch"))]
-                {
-                    ::core::compile_error!(
-                        "Elasticsearch in #[shakedown::test(resources = [...])] requires `elasticsearch` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Elasticsearch(
+                    ::shakedown::ElasticsearchResource::new(),
+                ));
             });
         }
         "OpenSearch" => {
@@ -613,18 +451,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "opensearch")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::OpenSearch(
-                        ::shakedown::OpenSearchResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "opensearch"))]
-                {
-                    ::core::compile_error!(
-                        "OpenSearch in #[shakedown::test(resources = [...])] requires `opensearch` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::OpenSearch(
+                    ::shakedown::OpenSearchResource::new(),
+                ));
             });
         }
         "Qdrant" => {
@@ -635,18 +464,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "qdrant")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Qdrant(
-                        ::shakedown::QdrantResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "qdrant"))]
-                {
-                    ::core::compile_error!(
-                        "Qdrant in #[shakedown::test(resources = [...])] requires `qdrant` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Qdrant(
+                    ::shakedown::QdrantResource::new(),
+                ));
             });
         }
         "Weaviate" => {
@@ -657,18 +477,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "weaviate")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Weaviate(
-                        ::shakedown::WeaviateResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "weaviate"))]
-                {
-                    ::core::compile_error!(
-                        "Weaviate in #[shakedown::test(resources = [...])] requires `weaviate` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Weaviate(
+                    ::shakedown::WeaviateResource::new(),
+                ));
             });
         }
         "InfluxDb" => {
@@ -679,18 +490,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "influxdb")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::InfluxDb(
-                        ::shakedown::InfluxDbResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "influxdb"))]
-                {
-                    ::core::compile_error!(
-                        "InfluxDb in #[shakedown::test(resources = [...])] requires `influxdb` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::InfluxDb(
+                    ::shakedown::InfluxDbResource::new(),
+                ));
             });
         }
         "Timescaledb" => {
@@ -701,18 +503,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "timescaledb")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Timescaledb(
-                        ::shakedown::TimescaledbResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "timescaledb"))]
-                {
-                    ::core::compile_error!(
-                        "Timescaledb in #[shakedown::test(resources = [...])] requires `timescaledb` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Timescaledb(
+                    ::shakedown::TimescaledbResource::new(),
+                ));
             });
         }
         "Toxiproxy" => {
@@ -723,18 +516,9 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             }
             return Ok(quote! {
-                #[cfg(feature = "fault-injection")]
-                {
-                    ctx.register_builtin(::shakedown::BuiltinResource::Toxiproxy(
-                        ::shakedown::ToxiproxyResource::new(),
-                    ));
-                }
-                #[cfg(not(feature = "fault-injection"))]
-                {
-                    ::core::compile_error!(
-                        "Toxiproxy in #[shakedown::test(resources = [...])] requires `fault-injection` feature on the `shakedown` dependency"
-                    );
-                }
+                ctx.register_builtin(::shakedown::BuiltinResource::Toxiproxy(
+                    ::shakedown::ToxiproxyResource::new(),
+                ));
             });
         }
         _ => {
