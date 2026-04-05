@@ -967,7 +967,9 @@ pub struct DuckDbBindings {
 pub struct RedisBindings {
     /// `redis://` URL without authentication (default suite images).
     pub connection_url: String,
+    /// Hostname or IP (typically `127.0.0.1` for the suite container).
     pub host: String,
+    /// Mapped host port for Redis.
     pub port: u16,
     /// Prefix prepended to logical keys for isolation (`shakedown:<scenario>:`).
     pub key_prefix: String,
@@ -991,10 +993,6 @@ pub struct RedisSentinelBindings {
     pub replica_connection_urls: Vec<String>,
 }
 
-/// Connection details for a provisioned MongoDB scenario database (`mongodb` feature).
-///
-/// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
-/// [`crate::lifecycle::Context::mongo_bindings`] after provision.
 /// Connection details and scenario-scoped NATS subject prefix (`nats` feature).
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -1004,7 +1002,9 @@ pub struct RedisSentinelBindings {
 pub struct NatsBindings {
     /// `nats://` URL to the suite broker (no auth for default image).
     pub connection_url: String,
+    /// Hostname or IP (typically `127.0.0.1` for the suite container).
     pub host: String,
+    /// Mapped host port for NATS.
     pub port: u16,
     /// Prefix prepended to logical subjects (`shakedown.<scenario>.`).
     pub subject_prefix: String,
@@ -1029,12 +1029,15 @@ pub struct Neo4jBindings {
     pub bolt_url: String,
     /// HTTP URL (browser/REST; includes credentials for default anonymous HTTP off).
     pub http_url: String,
+    /// Hostname or IP (typically `127.0.0.1` for the suite container).
     pub host: String,
     /// Mapped host port for Bolt (`7687` in the container).
     pub port: u16,
     /// Mapped host port for HTTP (`7474` in the container).
     pub http_port: u16,
+    /// Username for the Neo4j database.
     pub username: String,
+    /// Password for `username`.
     pub password: String,
     /// Scenario-isolated database name (multi-database Enterprise).
     pub database: String,
@@ -1049,12 +1052,15 @@ pub struct Neo4jBindings {
 pub struct ElasticsearchBindings {
     /// Base URL for the HTTP API (e.g. `http://127.0.0.1:9200`).
     pub url: String,
+    /// Hostname or IP (typically `127.0.0.1` for the suite container).
     pub host: String,
+    /// Mapped host port for Elasticsearch HTTP.
     pub port: u16,
     /// Prefix for logical index names (`shakedown_<scenario>_`).
     pub index_prefix: String,
     /// Set when [`ElasticsearchResource::with_security`] was used (`elastic` user by default).
     pub username: Option<String>,
+    /// Password for `username` when security is enabled.
     pub password: Option<String>,
 }
 
@@ -1075,12 +1081,15 @@ impl ElasticsearchBindings {
 pub struct OpenSearchBindings {
     /// Base URL for the HTTP API (e.g. `http://127.0.0.1:9200`).
     pub url: String,
+    /// Hostname or IP (typically `127.0.0.1` for the suite container).
     pub host: String,
+    /// Mapped host port for OpenSearch HTTP.
     pub port: u16,
     /// Prefix for logical index names (`shakedown_<scenario>_`).
     pub index_prefix: String,
     /// Set when [`OpenSearchResource::with_security`] was used (`admin` user by default).
     pub username: Option<String>,
+    /// Password for `username` when security is enabled.
     pub password: Option<String>,
 }
 
@@ -1103,8 +1112,11 @@ pub struct QdrantBindings {
     pub grpc_url: String,
     /// REST URL for HTTP probes and optional direct API use (e.g. `http://127.0.0.1:6333`).
     pub rest_url: String,
+    /// Hostname or IP (typically `127.0.0.1` for the suite container).
     pub host: String,
+    /// Mapped host port for Qdrant gRPC.
     pub grpc_port: u16,
+    /// Mapped host port for Qdrant REST.
     pub rest_port: u16,
     /// Prefix for logical collection names (`shakedown_<scenario>_`).
     pub collection_prefix: String,
@@ -1127,7 +1139,9 @@ impl QdrantBindings {
 pub struct WeaviateBindings {
     /// Base URL for the HTTP API (e.g. `http://127.0.0.1:8080`).
     pub rest_url: String,
+    /// Hostname or IP (typically `127.0.0.1` for the suite container).
     pub host: String,
+    /// Mapped host port for Weaviate REST.
     pub port: u16,
     /// Prefix for logical class names (`shakedown_<scenario>_`, same sanitizer as index/collection prefixes).
     pub class_prefix: String,
@@ -1155,15 +1169,22 @@ impl WeaviateBindings {
 pub struct InfluxDbBindings {
     /// Base URL for the HTTP API (e.g. `http://127.0.0.1:8086`).
     pub url: String,
+    /// Hostname or IP (typically `127.0.0.1` for the suite container).
     pub host: String,
+    /// Mapped host port for InfluxDB HTTP.
     pub port: u16,
     /// Admin token (fixed in the default container init — matches `DOCKER_INFLUXDB_INIT_ADMIN_TOKEN`).
     pub token: String,
+    /// InfluxDB organization name (matches `DOCKER_INFLUXDB_INIT_ORG`).
     pub organization: String,
     /// Per-scenario bucket name.
     pub bucket: String,
 }
 
+/// Connection details for a provisioned MongoDB scenario database (`mongodb` feature).
+///
+/// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
+/// [`crate::lifecycle::Context::mongo_bindings`] after provision.
 #[cfg(feature = "mongodb")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MongoBindings {

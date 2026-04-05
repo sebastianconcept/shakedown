@@ -363,16 +363,13 @@ impl ClusterControl for Arc<PostgresReplicaSetClusterControl> {
                     timeout: RESET_TOPOLOGY_TIMEOUT,
                 });
             }
-            match self.primary_index_from_pg_state().await {
-                Ok(primary_index) => {
-                    self.emit_cluster_row(
-                        "reset_topology",
-                        None,
-                        Some(format!("converged primary_index={primary_index}")),
-                    );
-                    return Ok(());
-                }
-                Err(_) => {}
+            if let Ok(primary_index) = self.primary_index_from_pg_state().await {
+                self.emit_cluster_row(
+                    "reset_topology",
+                    None,
+                    Some(format!("converged primary_index={primary_index}")),
+                );
+                return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(400)).await;
         }

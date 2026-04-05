@@ -53,3 +53,54 @@ fn relational_builtins_emit_unconditional_registration() {
         );
     }
 }
+
+#[test]
+fn all_builtins_emit_unconditional_registration() {
+    // Given every supported builtin resource name and its expected resource type
+    for (resource_name, expected_type) in [
+        ("Fake", "FakeResource"),
+        ("Kafka", "KafkaResource"),
+        ("KafkaCluster", "KafkaClusterResource"),
+        ("Rabbit", "RabbitResource"),
+        ("RabbitCluster", "RabbitClusterResource"),
+        ("Postgres", "PostgresResource"),
+        ("PostgresReplicaSet", "PostgresReplicaSetResource"),
+        ("MariaDB", "MariaDBResource"),
+        ("Mysql", "MysqlResource"),
+        ("Sqlite", "SqliteResource"),
+        ("DuckDb", "DuckDbResource"),
+        ("Redis", "RedisResource"),
+        ("RedisSentinel", "RedisSentinelResource"),
+        ("Valkey", "ValkeyResource"),
+        ("Mongo", "MongoResource"),
+        ("MongoReplicaSet", "MongoReplicaSetResource"),
+        ("Nats", "NatsResource"),
+        ("Neo4j", "Neo4jResource"),
+        ("Elasticsearch", "ElasticsearchResource"),
+        ("OpenSearch", "OpenSearchResource"),
+        ("Qdrant", "QdrantResource"),
+        ("Weaviate", "WeaviateResource"),
+        ("InfluxDb", "InfluxDbResource"),
+        ("Timescaledb", "TimescaledbResource"),
+        ("Toxiproxy", "ToxiproxyResource"),
+    ] {
+        // When registration tokens are built for that builtin
+        let resource_ident = parse_str(resource_name).expect("resource identifier should parse");
+        let expansion = build_resource_registration(&resource_ident)
+            .expect("resource registration should build")
+            .to_string();
+        // Then the expansion references the expected type without any cfg(feature) guard or compile_error!
+        assert!(
+            expansion.contains(expected_type),
+            "{resource_name} expansion should reference {expected_type}",
+        );
+        assert!(
+            !expansion.contains("cfg (feature"),
+            "{resource_name} expansion must not contain cfg(feature) — feature resolution must happen in shakedown, not the calling crate",
+        );
+        assert!(
+            !expansion.contains("compile_error"),
+            "{resource_name} expansion must not contain compile_error!",
+        );
+    }
+}

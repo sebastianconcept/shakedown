@@ -58,19 +58,11 @@ pub(crate) fn default_stream_name_for_namespaced_subject(namespaced_subject: &st
 }
 
 /// Options for [`NatsPublicationVerifier`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NatsPublicationVerifierOptions {
     /// JetStream stream name. If empty (after trim), [`NatsPublicationVerifier`] derives a name
     /// via [`default_stream_name_for_namespaced_subject`] from the namespaced subject.
     pub stream_name: String,
-}
-
-impl Default for NatsPublicationVerifierOptions {
-    fn default() -> Self {
-        Self {
-            stream_name: String::new(),
-        }
-    }
 }
 
 /// First-party NATS publication verifier using JetStream on [`Context::nats_bindings`] subjects.

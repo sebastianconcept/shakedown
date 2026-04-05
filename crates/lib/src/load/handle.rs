@@ -111,6 +111,7 @@ impl LoadHandle {
         }
     }
 
+    /// Wait for the phase identified by `name_or_index` (name string or decimal index) to complete.
     pub async fn await_phase(&self, name_or_index: &str) -> Result<(), LoadError> {
         let index = resolve_phase_index(self.profile.phases(), name_or_index)?;
         let mut phase_rx = self.phase_watch.clone();

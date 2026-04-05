@@ -43,8 +43,10 @@ pub struct RootCauseHint {
     /// Human-readable explanation (terminal output prefixes this with `HINT:`).
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Memory usage in bytes at the time of the event, when available
     pub mem_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Container memory limit in bytes, when available
     pub mem_limit: Option<u64>,
 }
 
@@ -138,6 +140,7 @@ pub enum TimelineEventJson {
     ContainerLog {
         /// RFC 3339 UTC timestamp
         timestamp: String,
+        /// Milliseconds since scenario start
         offset_ms: u64,
         /// Lifecycle phase
         phase: String,
@@ -153,6 +156,7 @@ pub enum TimelineEventJson {
     DockerEvent {
         /// RFC 3339 UTC timestamp
         timestamp: String,
+        /// Milliseconds since scenario start
         offset_ms: u64,
         /// Lifecycle phase
         phase: String,
@@ -163,10 +167,13 @@ pub enum TimelineEventJson {
         /// Severity tier
         severity: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// Container exit code when the event carries one
         exit_code: Option<i64>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// Whether the container was OOM-killed
         oom_killed: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// Additional detail from the Docker event payload
         detail: Option<String>,
     },
 }
