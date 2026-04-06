@@ -507,6 +507,34 @@ pub use crate::outbox::{Outbox, OutboxEntry, OutboxRowState};
 /// library (avoids cycles); generated code refers to `::shakedown::…` resolved at the call site.
 pub use shakedown_macros::{faulty_test, test};
 
+/// Re-export the pinned `rdkafka` crate so consumers inherit the exact version used internally.
+///
+/// Enable the `kafka` feature and write `use shakedown::rdkafka::…` instead of declaring a
+/// separate `rdkafka` dependency. This prevents version skew between the harness and test code.
+#[cfg(feature = "kafka")]
+pub use rdkafka;
+
+/// Re-export the pinned `redis` crate so consumers inherit the exact version used internally.
+///
+/// Enable the `redis` or `valkey` feature and write `use shakedown::redis::…` instead of
+/// declaring a separate `redis` dependency.
+#[cfg(any(feature = "redis", feature = "valkey"))]
+pub use redis;
+
+/// Re-export the pinned `mongodb` crate so consumers inherit the exact version used internally.
+///
+/// Enable the `mongodb` feature and write `use shakedown::mongodb::…` instead of declaring a
+/// separate `mongodb` dependency.
+#[cfg(feature = "mongodb")]
+pub use mongodb;
+
+/// Re-export the pinned `lapin` crate so consumers inherit the exact version used internally.
+///
+/// Enable the `rabbitmq` feature and write `use shakedown::lapin::…` instead of declaring a
+/// separate `lapin` dependency.
+#[cfg(feature = "rabbitmq")]
+pub use lapin;
+
 #[cfg(test)]
 mod tests {
     use crate::error::{
