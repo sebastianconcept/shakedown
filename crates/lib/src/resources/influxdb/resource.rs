@@ -73,7 +73,7 @@ async fn influx_health_passes(base_url: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn fetch_organization_id(
+pub(crate) async fn fetch_organization_id(
     base_url: &str,
     admin_token: &str,
     org_name: &str,
@@ -110,7 +110,7 @@ async fn fetch_organization_id(
     Ok(org_id.to_string())
 }
 
-async fn create_bucket(
+pub(crate) async fn create_bucket(
     base_url: &str,
     admin_token: &str,
     organization_id: &str,

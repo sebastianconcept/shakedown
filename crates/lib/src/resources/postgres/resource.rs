@@ -39,11 +39,16 @@ fn image_fingerprint(image: &Postgres, tag_override: &Option<String>) -> String 
     format!("{}:{}", image.name(), tag)
 }
 
-fn admin_connection_url(host: &str, port: u16, username: &str, password: &str) -> String {
+pub(crate) fn admin_connection_url(
+    host: &str,
+    port: u16,
+    username: &str,
+    password: &str,
+) -> String {
     format!("postgresql://{username}:{password}@{host}:{port}/postgres")
 }
 
-fn scenario_connection_url(
+pub(crate) fn scenario_connection_url(
     host: &str,
     port: u16,
     database: &str,
@@ -53,7 +58,9 @@ fn scenario_connection_url(
     format!("postgresql://{username}:{password}@{host}:{port}/{database}")
 }
 
-async fn connect_with_url(url: &str) -> Result<tokio_postgres::Client, InfrastructureError> {
+pub(crate) async fn connect_with_url(
+    url: &str,
+) -> Result<tokio_postgres::Client, InfrastructureError> {
     let (client, connection) = tokio_postgres::connect(url, NoTls).await.map_err(|e| {
         InfrastructureError::Backend(Box::new(std::io::Error::other(e.to_string())))
     })?;
