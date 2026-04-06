@@ -51,6 +51,19 @@ fn authorization_value(token: &str) -> String {
     format!("Token {token}")
 }
 
+/// Sanitize a logical bucket name for InfluxDB 2.x (alphanumeric, `-`, `_`; other chars become `_`).
+pub(crate) fn sanitize_bucket_name(name: &str) -> String {
+    name.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 async fn influx_health_passes(base_url: &str) -> Result<(), String> {
     let client = reqwest::Client::new();
     let url = format!("{}/health", base_url.trim_end_matches('/'));
@@ -442,5 +455,20 @@ impl Resource for InfluxDbResource {
         self.bucket_name.clear();
         self.bucket_id.clear();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod sanitize_bucket_name_tests {
+    use super::sanitize_bucket_name;
+
+    #[test]
+    fn maps_non_alphanumeric_to_underscore() {
+        // Given logical names with spaces and symbols
+        // When we sanitize for InfluxDB bucket API
+        // Then only safe characters remain
+        assert_eq!(sanitize_bucket_name("my bucket"), "my_bucket");
+        assert_eq!(sanitize_bucket_name("a#b"), "a_b");
+        assert_eq!(sanitize_bucket_name("ok-name_1"), "ok-name_1");
     }
 }

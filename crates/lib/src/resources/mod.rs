@@ -1097,11 +1097,13 @@ impl Isolatable for MariaDBBindings {
     /// suite container tears down.
     async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
         use mysql_async::prelude::Queryable;
-        let safe_name = name.replace('`', "");
-        if safe_name.is_empty() {
+        let safe_name = sanitize_sql_database_name(name);
+        if safe_name.len() > 63 {
             return Err(InfrastructureError::Provision {
                 resource: format!("mariadb:isolate:{name}"),
-                source: Box::new(std::io::Error::other("database name must not be empty")),
+                source: Box::new(std::io::Error::other(
+                    "database name exceeds 63 characters after sanitization",
+                )),
             });
         }
         let pool = mariadb::admin_pool(&self.host, self.port, &self.username, &self.password);
@@ -1167,11 +1169,13 @@ impl Isolatable for MysqlBindings {
     /// suite container tears down.
     async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
         use mysql_async::prelude::Queryable;
-        let safe_name = name.replace('`', "");
-        if safe_name.is_empty() {
+        let safe_name = sanitize_sql_database_name(name);
+        if safe_name.len() > 63 {
             return Err(InfrastructureError::Provision {
                 resource: format!("mysql:isolate:{name}"),
-                source: Box::new(std::io::Error::other("database name must not be empty")),
+                source: Box::new(std::io::Error::other(
+                    "database name exceeds 63 characters after sanitization",
+                )),
             });
         }
         let pool = mysql::admin_pool(&self.host, self.port, &self.username, &self.password);
@@ -1396,7 +1400,7 @@ impl Isolatable for NatsBindings {
             connection_url: self.connection_url.clone(),
             host: self.host.clone(),
             port: self.port,
-            subject_prefix: format!("{}{}", self.subject_prefix, name),
+            subject_prefix: format!("{}{}.", self.subject_prefix, name),
         })
     }
 }
@@ -1659,7 +1663,7 @@ impl Namespaced for WeaviateBindings {
         let raw = format!("{}{}", self.class_prefix, name);
         let mut chars = raw.chars();
         match chars.next() {
-            None => String::from("ShakedownEmpty"),
+            None => unreachable!("Weaviate class prefix is always non-empty after provision"),
             Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
         }
     }
@@ -1709,6 +1713,7 @@ impl Isolatable for InfluxDbBindings {
     /// The bucket is created in the same organization as the parent Bindings. It is cleaned up
     /// when the suite container tears down.
     async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        let safe_name = influxdb::sanitize_bucket_name(name);
         let organization_id =
             influxdb::fetch_organization_id(&self.url, &self.token, &self.organization)
                 .await
@@ -1716,7 +1721,7 @@ impl Isolatable for InfluxDbBindings {
                     resource: format!("influxdb:isolate:{name}"),
                     source: Box::new(std::io::Error::other(error)),
                 })?;
-        influxdb::create_bucket(&self.url, &self.token, &organization_id, name)
+        influxdb::create_bucket(&self.url, &self.token, &organization_id, &safe_name)
             .await
             .map_err(|error| InfrastructureError::Provision {
                 resource: format!("influxdb:isolate:{name}"),
@@ -1728,7 +1733,7 @@ impl Isolatable for InfluxDbBindings {
             port: self.port,
             token: self.token.clone(),
             organization: self.organization.clone(),
-            bucket: name.to_string(),
+            bucket: safe_name,
         })
     }
 }
@@ -2115,6 +2120,17 @@ mod tests {
     }
 
     #[test]
+    fn kafka_consumer_group_namespace_uses_topic_prefix() {
+        // Given Kafka Bindings with a known scenario prefix
+        let bindings = KafkaBindings::new("localhost:9092", "shakedown_abc_");
+        // When we namespace a production consumer group ID
+        let group = bindings.consumer_group_namespace("analysis-consumer-input");
+        // Then it is prefixed identically to topics, isolating the group per scenario
+        assert_eq!(group, "shakedown_abc_analysis-consumer-input");
+        assert_eq!(group, bindings.topic_namespace("analysis-consumer-input"));
+    }
+
+    #[test]
     fn namespaced_generic_function_compiles_and_works() {
         fn make_name<B: Namespaced>(bindings: &B, logical: &str) -> String {
             bindings.namespace(logical)
@@ -2154,6 +2170,24 @@ mod tests {
     }
 
     #[cfg(any(feature = "redis", feature = "valkey"))]
+    #[test]
+    fn redis_bindings_namespaced_matches_key_namespace() {
+        // Given Redis Bindings with a scenario key prefix
+        let bindings = RedisBindings {
+            connection_url: "redis://127.0.0.1:6379".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 6379,
+            key_prefix: "shakedown:abc:".to_string(),
+        };
+        // When we use Namespaced vs key_namespace
+        // Then they agree for the same logical key
+        assert_eq!(
+            bindings.namespace("orders"),
+            bindings.key_namespace("orders")
+        );
+    }
+
+    #[cfg(any(feature = "redis", feature = "valkey"))]
     #[tokio::test]
     async fn redis_bindings_isolate_deepens_prefix() {
         // Given Redis Bindings with a base key prefix
@@ -2171,6 +2205,185 @@ mod tests {
         // Then the key prefix appends name + colon separator and connection details are preserved
         assert_eq!(sub.key_prefix, "shakedown:abc:events:");
         assert_eq!(sub.connection_url, "redis://127.0.0.1:6379");
+    }
+
+    #[cfg(feature = "redis-sentinel")]
+    #[tokio::test]
+    async fn redis_sentinel_bindings_namespaced_and_isolate() {
+        // Given Sentinel-backed Bindings with a key prefix
+        let bindings = RedisSentinelBindings {
+            sentinel_hosts: "127.0.0.1:26379".to_string(),
+            master_name: "mymaster".to_string(),
+            connection_url: "redis://127.0.0.1:6379".to_string(),
+            replica_connection_urls: vec![],
+            key_prefix: "shakedown:abc:".to_string(),
+        };
+        // When we compare trait namespace to key_namespace
+        assert_eq!(bindings.namespace("k"), bindings.key_namespace("k"));
+        // And we isolate a sub-context
+        let sub = bindings.isolate("s").await.expect("isolate should succeed");
+        // Then the key prefix deepens with a colon separator
+        assert_eq!(sub.key_prefix, "shakedown:abc:s:");
+    }
+
+    #[cfg(feature = "nats")]
+    #[tokio::test]
+    async fn nats_bindings_namespace_isolate_and_nested() {
+        // Given NATS Bindings with a hierarchical subject prefix
+        let bindings = NatsBindings {
+            connection_url: "nats://127.0.0.1:4222".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 4222,
+            subject_prefix: "shakedown.abc.".to_string(),
+        };
+        assert_eq!(bindings.namespace("orders"), "shakedown.abc.orders");
+        assert_eq!(
+            bindings.subject_namespace("orders"),
+            bindings.namespace("orders")
+        );
+        // When we isolate and nest
+        let sub = bindings
+            .isolate("payments")
+            .await
+            .expect("isolate should succeed");
+        assert_eq!(sub.subject_prefix, "shakedown.abc.payments.");
+        assert_eq!(sub.namespace("events"), "shakedown.abc.payments.events");
+        let sub2 = sub.isolate("retry").await.expect("nested isolate");
+        assert_eq!(sub2.subject_prefix, "shakedown.abc.payments.retry.");
+    }
+
+    #[cfg(feature = "rabbitmq")]
+    #[tokio::test]
+    async fn rabbit_bindings_namespaced_isolate_nested() {
+        // Given RabbitMQ Bindings with a resource prefix
+        let bindings = RabbitBindings::new(
+            "amqp://guest:guest@127.0.0.1:5672/%2f",
+            "127.0.0.1",
+            5672,
+            "guest",
+            "guest",
+            "/",
+            "shakedown_abc_",
+        );
+        assert_eq!(bindings.namespace("q1"), bindings.queue_namespace("q1"));
+        assert_eq!(
+            bindings.namespace("ex1"),
+            bindings.exchange_namespace("ex1")
+        );
+        assert_eq!(bindings.namespace("x"), bindings.namespaced_name("x"));
+        let sub = bindings
+            .isolate("sub")
+            .await
+            .expect("isolate should succeed");
+        assert_eq!(sub.resource_prefix, "shakedown_abc_sub_");
+        let sub2 = sub.isolate("inner").await.expect("nested isolate");
+        assert_eq!(sub2.resource_prefix, "shakedown_abc_sub_inner_");
+    }
+
+    #[cfg(feature = "elasticsearch")]
+    #[tokio::test]
+    async fn elasticsearch_bindings_namespaced_isolate_nested() {
+        let bindings = ElasticsearchBindings {
+            url: "http://127.0.0.1:9200".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 9200,
+            index_prefix: "shakedown_abc_".to_string(),
+            username: None,
+            password: None,
+        };
+        assert_eq!(bindings.namespace("idx"), bindings.index_namespace("idx"));
+        let sub = bindings.isolate("a").await.expect("isolate should succeed");
+        assert_eq!(sub.index_prefix, "shakedown_abc_a_");
+        let sub2 = sub.isolate("b").await.expect("nested isolate");
+        assert_eq!(sub2.index_prefix, "shakedown_abc_a_b_");
+    }
+
+    #[cfg(feature = "opensearch")]
+    #[tokio::test]
+    async fn opensearch_bindings_namespaced_isolate_nested() {
+        let bindings = OpenSearchBindings {
+            url: "http://127.0.0.1:9200".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 9200,
+            index_prefix: "shakedown_abc_".to_string(),
+            username: None,
+            password: None,
+        };
+        assert_eq!(bindings.namespace("idx"), bindings.index_namespace("idx"));
+        let sub = bindings.isolate("a").await.expect("isolate should succeed");
+        assert_eq!(sub.index_prefix, "shakedown_abc_a_");
+    }
+
+    #[cfg(feature = "qdrant")]
+    #[tokio::test]
+    async fn qdrant_bindings_namespaced_isolate_nested() {
+        let bindings = QdrantBindings {
+            grpc_url: "http://127.0.0.1:6334".to_string(),
+            rest_url: "http://127.0.0.1:6333".to_string(),
+            host: "127.0.0.1".to_string(),
+            grpc_port: 6334,
+            rest_port: 6333,
+            collection_prefix: "shakedown_abc_".to_string(),
+        };
+        assert_eq!(bindings.namespace("c"), bindings.collection_namespace("c"));
+        let sub = bindings.isolate("a").await.expect("isolate should succeed");
+        assert_eq!(sub.collection_prefix, "shakedown_abc_a_");
+    }
+
+    #[cfg(feature = "weaviate")]
+    #[tokio::test]
+    async fn weaviate_bindings_namespaced_isolate() {
+        let bindings = WeaviateBindings {
+            rest_url: "http://127.0.0.1:8080".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 8080,
+            class_prefix: "shakedown_abc_".to_string(),
+        };
+        assert_eq!(
+            bindings.namespace("thing"),
+            bindings.class_namespace("thing")
+        );
+        let sub = bindings
+            .isolate("sub")
+            .await
+            .expect("isolate should succeed");
+        assert_eq!(sub.class_prefix, "shakedown_abc_sub_");
+    }
+
+    #[cfg(feature = "mongodb")]
+    #[tokio::test]
+    async fn mongo_bindings_isolate_sets_database_and_url() {
+        let parent = MongoBindings {
+            host: "127.0.0.1".to_string(),
+            port: 27017,
+            database: "app".to_string(),
+            username: "root".to_string(),
+            password: "secret".to_string(),
+            connection_url: "mongodb://root:secret@127.0.0.1:27017/app?authSource=admin"
+                .to_string(),
+            replica_set_host_ports: vec![],
+        };
+        let sub = parent
+            .isolate("analytics")
+            .await
+            .expect("isolate should succeed");
+        assert_eq!(sub.database, "analytics");
+        assert!(sub.connection_url.contains("/analytics"));
+        assert!(sub.connection_url.contains("authSource=admin"));
+    }
+
+    #[cfg(feature = "duckdb")]
+    #[tokio::test]
+    async fn duckdb_bindings_isolate_distinct_path() {
+        let original = DuckDbBindings {
+            database_url: duckdb_named_memory_database_path("scenario_a"),
+        };
+        let sub = original
+            .isolate("analytics")
+            .await
+            .expect("isolate should succeed");
+        assert_ne!(sub.database_url, original.database_url);
+        assert!(sub.database_url.contains("analytics"));
     }
 
     #[cfg(feature = "sqlite")]

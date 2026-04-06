@@ -6,4 +6,4 @@ mod tests;
 
 pub use helpers::{InfluxDbHelpers, InfluxFieldValue};
 pub use resource::InfluxDbResource;
-pub(crate) use resource::{create_bucket, fetch_organization_id};
+pub(crate) use resource::{create_bucket, fetch_organization_id, sanitize_bucket_name};
