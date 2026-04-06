@@ -58,6 +58,20 @@ mod test;
 /// - `#[shakedown::test(prelude = { ctx.register_http_mock_service("api", stub).unwrap(); })]` —
 ///   runs the block before the scenario lifecycle (after `resources` registration).
 ///
+/// # Context injection
+///
+/// The macro injects `ctx: &mut ::shakedown::Context` into your function using an absolute path.
+/// **Do not add `use shakedown::Context;`** to your test file — the import is unnecessary and will
+/// trigger an `unused_imports` warning from the compiler.
+///
+/// ```rust,no_run
+/// // Correct — no `use shakedown::Context` needed
+/// #[shakedown::test]
+/// async fn my_scenario(ctx: &mut Context) {
+///     // ctx is provided by the macro
+/// }
+/// ```
+///
 /// # Panics
 ///
 /// Panics with the display string of `shakedown::ShakedownError` if the scenario fails.
