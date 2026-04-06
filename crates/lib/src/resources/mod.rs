@@ -833,6 +833,20 @@ impl KafkaBindings {
     pub fn topic_namespace(&self, topic_name: &str) -> String {
         format!("{}{}", self.topic_prefix, topic_name)
     }
+
+    /// Return `group_id` prefixed with this scenario's topic prefix.
+    ///
+    /// Use this when configuring application code that has a hardcoded consumer group ID.
+    /// Parallel scenarios share the same Kafka broker and topic namespace — without this
+    /// prefix, two parallel scenarios with the same logical group ID will join the *same*
+    /// consumer group and steal each other's messages, causing non-deterministic test
+    /// failures.
+    ///
+    /// Uses the same prefix as [`topic_namespace`](Self::topic_namespace) so topics and
+    /// their consumer groups always share the scenario boundary.
+    pub fn consumer_group_namespace(&self, group_id: &str) -> String {
+        format!("{}{}", self.topic_prefix, group_id)
+    }
 }
 
 impl Namespaced for KafkaBindings {
