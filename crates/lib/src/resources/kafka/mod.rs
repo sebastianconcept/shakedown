@@ -63,9 +63,17 @@
 //! # }
 //! ```
 //!
-//! The pinned `rdkafka` version used by Shakedown is listed in `Cargo.toml` under
-//! `[dependencies]`. Re-export it via `shakedown::rdkafka` (`kafka` feature) to inherit the
-//! same pinned version in your test crate without a separate dependency declaration.
+//! ## Inheriting the pinned `rdkafka` version
+//!
+//! Shakedown pins `rdkafka` at **`=0.38`** to guarantee a reproducible build. When the `kafka`
+//! feature is enabled, the crate re-exports it as `shakedown::rdkafka`, so you can write:
+//!
+//! ```rust,no_run
+//! use shakedown::rdkafka::producer::FutureProducer;
+//! ```
+//!
+//! …without declaring a separate `rdkafka` dependency in your own `Cargo.toml`. This prevents
+//! version skew between the harness and your test code.
 mod helpers;
 mod resource;
 #[cfg(test)]
