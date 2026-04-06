@@ -350,7 +350,8 @@ pub use crate::diagnostics::ResourceAssertBuilder;
 #[doc(inline)]
 pub use crate::resources::{
     sanitize_nats_subject_prefix, sanitize_redis_key_prefix, sanitize_resource_namespace,
-    BuiltinResource, FakeResource, KafkaBindings, Namespaced, RegisteredResource, Resource,
+    BuiltinResource, FakeResource, Isolatable, KafkaBindings, Namespaced, RegisteredResource,
+    Resource,
 };
 
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]

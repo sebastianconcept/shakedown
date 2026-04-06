@@ -38,7 +38,7 @@ fn image_fingerprint(image: &MysqlImage, tag_override: &Option<String>) -> Strin
     format!("{}:{}", image.name(), tag)
 }
 
-fn admin_pool(host: &str, port: u16, username: &str, password: &str) -> Pool {
+pub(crate) fn admin_pool(host: &str, port: u16, username: &str, password: &str) -> Pool {
     let mut builder = OptsBuilder::default()
         .user(Some(username))
         .ip_or_hostname(host)
@@ -52,7 +52,7 @@ fn admin_pool(host: &str, port: u16, username: &str, password: &str) -> Pool {
     Pool::new(builder)
 }
 
-fn scenario_connection_url(
+pub(crate) fn scenario_connection_url(
     host: &str,
     port: u16,
     database: &str,

@@ -5,4 +5,5 @@ mod resource;
 mod tests;
 
 pub use helpers::Neo4jHelpers;
+pub(crate) use resource::graph_system;
 pub use resource::Neo4jResource;

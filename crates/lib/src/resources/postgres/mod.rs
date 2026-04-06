@@ -14,6 +14,9 @@ pub use resource::PostgresResource;
 #[cfg(feature = "postgres")]
 pub use helpers::PostgresHelpers;
 
+#[cfg(feature = "postgres")]
+pub(crate) use resource::{admin_connection_url, connect_with_url, scenario_connection_url};
+
 // Re-export for `timescaledb` helpers only (`postgres` callers use `helpers` directly).
 #[cfg(feature = "timescaledb")]
 pub(crate) use helpers::{

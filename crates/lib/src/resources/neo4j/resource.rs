@@ -12,8 +12,8 @@ const NEO4J_BOLT_PORT: u16 = 7687;
 const NEO4J_HTTP_PORT: u16 = 7474;
 /// Default image tag: Enterprise edition so each scenario can use a separate database on one broker.
 pub const DEFAULT_NEO4J_IMAGE_TAG: &str = "5-enterprise";
-const SUITE_USER: &str = "neo4j";
-const SUITE_PASSWORD: &str = "shakedown";
+pub(crate) const SUITE_USER: &str = "neo4j";
+pub(crate) const SUITE_PASSWORD: &str = "shakedown";
 
 #[allow(clippy::large_enum_variant)]
 enum SuiteNeo4jState {
@@ -66,7 +66,7 @@ async fn graph_for_database(
     Graph::connect(configuration).await.map_err(map_neo_err)
 }
 
-async fn graph_system(host: &str, bolt_port: u16) -> Result<Graph, InfrastructureError> {
+pub(crate) async fn graph_system(host: &str, bolt_port: u16) -> Result<Graph, InfrastructureError> {
     graph_for_database(host, bolt_port, "system").await
 }
 

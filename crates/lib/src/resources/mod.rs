@@ -25,6 +25,33 @@ use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
 use async_trait::async_trait;
 use std::fmt;
 
+/// Uniform sub-context creation for all scenario-scoped Bindings.
+///
+/// Both prefix-based resources (Kafka, Redis, NATS, …) and entity-based resources (Postgres,
+/// MariaDB, Neo4j, …) implement this trait. The call site is always the same:
+///
+/// ```rust,no_run
+/// # use shakedown::{Isolatable, KafkaBindings, InfrastructureError};
+/// # async fn example(kafka: &KafkaBindings) -> Result<(), InfrastructureError> {
+/// let sub = kafka.isolate("analytics").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Prefix-based resources return new Bindings with a derived sub-prefix — **no I/O**.
+/// Entity-based resources provision a real database or bucket (I/O).
+pub trait Isolatable: Sized {
+    /// Create a named sub-context of this Bindings.
+    ///
+    /// For prefix-based resources this is a pure in-memory O(1) operation — the new Bindings
+    /// derive a deeper prefix from `name`. For entity-based resources (Postgres, MariaDB, …)
+    /// this provisions a real secondary database and returns Bindings pointing to it.
+    fn isolate(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<Self, InfrastructureError>> + Send;
+}
+
 /// Uniform namespacing contract for all scenario-scoped Bindings that use a prefix.
 ///
 /// Implement this trait to write generic test helpers that construct isolation-safe entity names
@@ -815,6 +842,17 @@ impl Namespaced for KafkaBindings {
     }
 }
 
+impl Isolatable for KafkaBindings {
+    /// Return new Bindings with a deeper topic prefix (`{current}{name}_`) — no I/O.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(KafkaBindings {
+            bootstrap_servers: self.bootstrap_servers.clone(),
+            topic_prefix: format!("{}{}_", self.topic_prefix, name),
+            client_id_prefix: self.client_id_prefix.clone(),
+        })
+    }
+}
+
 /// AMQP connection details and scenario-scoped naming for RabbitMQ.
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -924,6 +962,24 @@ impl Namespaced for RabbitBindings {
     }
 }
 
+#[cfg(feature = "rabbitmq")]
+impl Isolatable for RabbitBindings {
+    /// Return new Bindings with a deeper resource prefix (`{current}{name}.`) — no I/O.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(RabbitBindings {
+            amqp_uri: self.amqp_uri.clone(),
+            connection_url: self.connection_url.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            username: self.username.clone(),
+            password: self.password.clone(),
+            vhost: self.vhost.clone(),
+            resource_prefix: format!("{}{}_", self.resource_prefix, name),
+            client_id_prefix: self.client_id_prefix.clone(),
+        })
+    }
+}
+
 /// Connection details for a provisioned PostgreSQL or TimescaleDB scenario database.
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -948,6 +1004,55 @@ pub struct PostgresBindings {
     pub replica_port: Option<u16>,
 }
 
+/// Implementation of [`Isolatable`] for [`PostgresBindings`] (provisions a new database on the
+/// suite container — I/O).
+#[cfg(feature = "postgres")]
+impl Isolatable for PostgresBindings {
+    /// Provision a new Postgres database named `name` on the suite container.
+    ///
+    /// The returned Bindings point to the new database; connection credentials are the same as
+    /// the parent. The database is cleaned up when the suite container tears down.
+    ///
+    /// Returns an error for invalid names (longer than 63 chars or containing invalid characters).
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        let safe_name = sanitize_sql_database_name(name);
+        if safe_name.len() > 63 {
+            return Err(InfrastructureError::Provision {
+                resource: format!("postgres:isolate:{name}"),
+                source: Box::new(std::io::Error::other(
+                    "database name exceeds 63 characters after sanitization",
+                )),
+            });
+        }
+        let admin_url =
+            postgres::admin_connection_url(&self.host, self.port, &self.username, &self.password);
+        let client = postgres::connect_with_url(&admin_url).await?;
+        let create_sql = format!("CREATE DATABASE {safe_name}");
+        client.batch_execute(&create_sql).await.map_err(|error| {
+            InfrastructureError::Provision {
+                resource: format!("postgres:isolate:{name}"),
+                source: Box::new(std::io::Error::other(error.to_string())),
+            }
+        })?;
+        let connection_url = postgres::scenario_connection_url(
+            &self.host,
+            self.port,
+            &safe_name,
+            &self.username,
+            &self.password,
+        );
+        Ok(PostgresBindings {
+            host: self.host.clone(),
+            port: self.port,
+            database: safe_name,
+            username: self.username.clone(),
+            password: self.password.clone(),
+            connection_url,
+            replica_port: None,
+        })
+    }
+}
+
 /// Connection details for a provisioned MariaDB scenario database.
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -967,6 +1072,55 @@ pub struct MariaDBBindings {
     pub password: String,
     /// `mysql://` URL for this scenario database.
     pub connection_url: String,
+}
+
+/// Implementation of [`Isolatable`] for [`MariaDBBindings`] (provisions a new database — I/O).
+#[cfg(feature = "mariadb")]
+impl Isolatable for MariaDBBindings {
+    /// Provision a new MariaDB database named `name` on the suite container.
+    ///
+    /// The returned Bindings point to the new database. The database is cleaned up when the
+    /// suite container tears down.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        use mysql_async::prelude::Queryable;
+        let safe_name = name.replace('`', "");
+        if safe_name.is_empty() {
+            return Err(InfrastructureError::Provision {
+                resource: format!("mariadb:isolate:{name}"),
+                source: Box::new(std::io::Error::other("database name must not be empty")),
+            });
+        }
+        let pool = mariadb::admin_pool(&self.host, self.port, &self.username, &self.password);
+        let mut connection =
+            pool.get_conn()
+                .await
+                .map_err(|error| InfrastructureError::Provision {
+                    resource: format!("mariadb:isolate:{name}"),
+                    source: Box::new(std::io::Error::other(error.to_string())),
+                })?;
+        connection
+            .query_drop(format!("CREATE DATABASE `{safe_name}`").as_str())
+            .await
+            .map_err(|error| InfrastructureError::Provision {
+                resource: format!("mariadb:isolate:{name}"),
+                source: Box::new(std::io::Error::other(error.to_string())),
+            })?;
+        let connection_url = mariadb::scenario_connection_url(
+            &self.host,
+            self.port,
+            &safe_name,
+            &self.username,
+            &self.password,
+        );
+        Ok(MariaDBBindings {
+            host: self.host.clone(),
+            port: self.port,
+            database: safe_name,
+            username: self.username.clone(),
+            password: self.password.clone(),
+            connection_url,
+        })
+    }
 }
 
 /// Connection details for a provisioned Oracle MySQL scenario database.
@@ -990,6 +1144,55 @@ pub struct MysqlBindings {
     pub connection_url: String,
 }
 
+/// Implementation of [`Isolatable`] for [`MysqlBindings`] (provisions a new database — I/O).
+#[cfg(feature = "mysql")]
+impl Isolatable for MysqlBindings {
+    /// Provision a new MySQL database named `name` on the suite container.
+    ///
+    /// The returned Bindings point to the new database. The database is cleaned up when the
+    /// suite container tears down.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        use mysql_async::prelude::Queryable;
+        let safe_name = name.replace('`', "");
+        if safe_name.is_empty() {
+            return Err(InfrastructureError::Provision {
+                resource: format!("mysql:isolate:{name}"),
+                source: Box::new(std::io::Error::other("database name must not be empty")),
+            });
+        }
+        let pool = mysql::admin_pool(&self.host, self.port, &self.username, &self.password);
+        let mut connection =
+            pool.get_conn()
+                .await
+                .map_err(|error| InfrastructureError::Provision {
+                    resource: format!("mysql:isolate:{name}"),
+                    source: Box::new(std::io::Error::other(error.to_string())),
+                })?;
+        connection
+            .query_drop(format!("CREATE DATABASE `{safe_name}`").as_str())
+            .await
+            .map_err(|error| InfrastructureError::Provision {
+                resource: format!("mysql:isolate:{name}"),
+                source: Box::new(std::io::Error::other(error.to_string())),
+            })?;
+        let connection_url = mysql::scenario_connection_url(
+            &self.host,
+            self.port,
+            &safe_name,
+            &self.username,
+            &self.password,
+        );
+        Ok(MysqlBindings {
+            host: self.host.clone(),
+            port: self.port,
+            database: safe_name,
+            username: self.username.clone(),
+            password: self.password.clone(),
+            connection_url,
+        })
+    }
+}
+
 /// Connection details for a provisioned in-memory SQLite database.
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -1010,6 +1213,30 @@ pub struct SqliteBindings {
 pub struct DuckDbBindings {
     /// Path string for this scenario's database (named in-memory; see [`super::duckdb_named_memory_database_path`]).
     pub database_url: String,
+}
+
+#[cfg(feature = "sqlite")]
+impl Isolatable for SqliteBindings {
+    /// Return new in-memory SQLite Bindings scoped to `name` — no I/O.
+    ///
+    /// Each unique `name` yields an independent named in-memory database.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(SqliteBindings {
+            database_url: sqlite_named_memory_uri(name),
+        })
+    }
+}
+
+#[cfg(feature = "duckdb")]
+impl Isolatable for DuckDbBindings {
+    /// Return new DuckDB Bindings scoped to `name` — no I/O.
+    ///
+    /// Each unique `name` yields an independent named database path.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(DuckDbBindings {
+            database_url: duckdb_named_memory_database_path(name),
+        })
+    }
 }
 
 /// Redis or Valkey connection details and scenario-scoped key prefix.
@@ -1045,6 +1272,19 @@ impl Namespaced for RedisBindings {
     /// Return `name` prefixed with this scenario's Redis key prefix.
     fn namespace(&self, name: &str) -> String {
         format!("{}{}", self.key_prefix, name)
+    }
+}
+
+#[cfg(any(feature = "redis", feature = "valkey"))]
+impl Isolatable for RedisBindings {
+    /// Return new Bindings with a deeper key prefix (`{current}{name}:`) — no I/O.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(RedisBindings {
+            connection_url: self.connection_url.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            key_prefix: format!("{}{}:", self.key_prefix, name),
+        })
     }
 }
 
@@ -1087,6 +1327,20 @@ impl Namespaced for RedisSentinelBindings {
     }
 }
 
+#[cfg(feature = "redis-sentinel")]
+impl Isolatable for RedisSentinelBindings {
+    /// Return new Bindings with a deeper key prefix (`{current}{name}:`) — no I/O.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(RedisSentinelBindings {
+            sentinel_hosts: self.sentinel_hosts.clone(),
+            master_name: self.master_name.clone(),
+            connection_url: self.connection_url.clone(),
+            replica_connection_urls: self.replica_connection_urls.clone(),
+            key_prefix: format!("{}{}:", self.key_prefix, name),
+        })
+    }
+}
+
 /// Connection details and scenario-scoped NATS subject prefix (`nats` feature).
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -1120,6 +1374,19 @@ impl Namespaced for NatsBindings {
     }
 }
 
+#[cfg(feature = "nats")]
+impl Isolatable for NatsBindings {
+    /// Return new Bindings with a deeper subject prefix (`{current}{name}.`) — no I/O.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(NatsBindings {
+            connection_url: self.connection_url.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            subject_prefix: format!("{}{}", self.subject_prefix, name),
+        })
+    }
+}
+
 /// Bolt/HTTP connection details and scenario-isolated Neo4j database name (`neo4j` feature).
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -1143,6 +1410,45 @@ pub struct Neo4jBindings {
     pub password: String,
     /// Scenario-isolated database name (multi-database Enterprise).
     pub database: String,
+}
+
+/// Implementation of [`Isolatable`] for [`Neo4jBindings`] (provisions a new database via Cypher — I/O).
+#[cfg(feature = "neo4j")]
+impl Isolatable for Neo4jBindings {
+    /// Provision a new Neo4j database named `name` using `CREATE DATABASE … WAIT`.
+    ///
+    /// Requires Neo4j Enterprise edition (which is the default image tag). The database is
+    /// cleaned up when the suite container tears down.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        use neo4rs::query;
+        let system_graph = neo4j::graph_system(&self.host, self.port).await?;
+        let cypher = format!("CREATE DATABASE `{name}` WAIT");
+        system_graph
+            .run(query(&cypher))
+            .await
+            .map_err(|error| InfrastructureError::Provision {
+                resource: format!("neo4j:isolate:{name}"),
+                source: Box::new(std::io::Error::other(error.to_string())),
+            })?;
+        let bolt_url = format!(
+            "bolt://{}:{}@{}:{}",
+            self.username, self.password, self.host, self.port
+        );
+        let http_url = format!(
+            "http://{}:{}@{}:{}",
+            self.username, self.password, self.host, self.http_port
+        );
+        Ok(Neo4jBindings {
+            bolt_url,
+            http_url,
+            host: self.host.clone(),
+            port: self.port,
+            http_port: self.http_port,
+            username: self.username.clone(),
+            password: self.password.clone(),
+            database: name.to_string(),
+        })
+    }
 }
 
 /// HTTP connection details and scenario-scoped Elasticsearch index prefix (`elasticsearch` feature).
@@ -1179,6 +1485,21 @@ impl Namespaced for ElasticsearchBindings {
     /// Return `name` prefixed with this scenario's Elasticsearch index prefix.
     fn namespace(&self, name: &str) -> String {
         format!("{}{}", self.index_prefix, name)
+    }
+}
+
+#[cfg(feature = "elasticsearch")]
+impl Isolatable for ElasticsearchBindings {
+    /// Return new Bindings with a deeper index prefix (`{current}{name}_`) — no I/O.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(ElasticsearchBindings {
+            url: self.url.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            index_prefix: format!("{}{}_", self.index_prefix, name),
+            username: self.username.clone(),
+            password: self.password.clone(),
+        })
     }
 }
 
@@ -1219,6 +1540,21 @@ impl Namespaced for OpenSearchBindings {
     }
 }
 
+#[cfg(feature = "opensearch")]
+impl Isolatable for OpenSearchBindings {
+    /// Return new Bindings with a deeper index prefix (`{current}{name}_`) — no I/O.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(OpenSearchBindings {
+            url: self.url.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            index_prefix: format!("{}{}_", self.index_prefix, name),
+            username: self.username.clone(),
+            password: self.password.clone(),
+        })
+    }
+}
+
 /// gRPC and REST endpoints plus scenario-scoped Qdrant collection name prefix (`qdrant` feature).
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -1253,6 +1589,21 @@ impl Namespaced for QdrantBindings {
     /// Return `name` prefixed with this scenario's Qdrant collection prefix.
     fn namespace(&self, name: &str) -> String {
         format!("{}{}", self.collection_prefix, name)
+    }
+}
+
+#[cfg(feature = "qdrant")]
+impl Isolatable for QdrantBindings {
+    /// Return new Bindings with a deeper collection prefix (`{current}{name}_`) — no I/O.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(QdrantBindings {
+            grpc_url: self.grpc_url.clone(),
+            rest_url: self.rest_url.clone(),
+            host: self.host.clone(),
+            grpc_port: self.grpc_port,
+            rest_port: self.rest_port,
+            collection_prefix: format!("{}{}_", self.collection_prefix, name),
+        })
     }
 }
 
@@ -1300,6 +1651,21 @@ impl Namespaced for WeaviateBindings {
     }
 }
 
+#[cfg(feature = "weaviate")]
+impl Isolatable for WeaviateBindings {
+    /// Return new Bindings with a deeper class prefix (`{current}{name}_`) — no I/O.
+    ///
+    /// The returned prefix is capitalised as required by Weaviate class naming rules.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        Ok(WeaviateBindings {
+            rest_url: self.rest_url.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            class_prefix: format!("{}{}_", self.class_prefix, name),
+        })
+    }
+}
+
 /// InfluxDB 2.x HTTP API base URL and scenario-isolated bucket (`influxdb` feature).
 ///
 /// Filled from [`ResourceHandle::metadata`] by the lifecycle; read from
@@ -1319,6 +1685,38 @@ pub struct InfluxDbBindings {
     pub organization: String,
     /// Per-scenario bucket name.
     pub bucket: String,
+}
+
+/// Implementation of [`Isolatable`] for [`InfluxDbBindings`] (creates a new bucket via HTTP API — I/O).
+#[cfg(feature = "influxdb")]
+impl Isolatable for InfluxDbBindings {
+    /// Create a new InfluxDB bucket named `name` using the HTTP API.
+    ///
+    /// The bucket is created in the same organization as the parent Bindings. It is cleaned up
+    /// when the suite container tears down.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        let organization_id =
+            influxdb::fetch_organization_id(&self.url, &self.token, &self.organization)
+                .await
+                .map_err(|error| InfrastructureError::Provision {
+                    resource: format!("influxdb:isolate:{name}"),
+                    source: Box::new(std::io::Error::other(error)),
+                })?;
+        influxdb::create_bucket(&self.url, &self.token, &organization_id, name)
+            .await
+            .map_err(|error| InfrastructureError::Provision {
+                resource: format!("influxdb:isolate:{name}"),
+                source: Box::new(std::io::Error::other(error)),
+            })?;
+        Ok(InfluxDbBindings {
+            url: self.url.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            token: self.token.clone(),
+            organization: self.organization.clone(),
+            bucket: name.to_string(),
+        })
+    }
 }
 
 /// Connection details for a provisioned MongoDB scenario database (`mongodb` feature).
@@ -1342,6 +1740,31 @@ pub struct MongoBindings {
     pub connection_url: String,
     /// Published host ports for each replica-set member index (`0..N`), suite order (empty for standalone).
     pub replica_set_host_ports: Vec<u16>,
+}
+
+/// Implementation of [`Isolatable`] for [`MongoBindings`] — returns new Bindings with a different
+/// database name. No I/O: MongoDB creates the database on first write.
+#[cfg(feature = "mongodb")]
+impl Isolatable for MongoBindings {
+    /// Return new Bindings targeting a MongoDB database named `name`.
+    ///
+    /// No I/O is performed — MongoDB creates the database on first write. All connection details
+    /// (host, port, credentials) are preserved from the parent Bindings.
+    async fn isolate(&self, name: &str) -> Result<Self, InfrastructureError> {
+        let connection_url = format!(
+            "mongodb://{}:{}@{}:{}/{}?authSource=admin",
+            self.username, self.password, self.host, self.port, name
+        );
+        Ok(MongoBindings {
+            host: self.host.clone(),
+            port: self.port,
+            database: name.to_string(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            connection_url,
+            replica_set_host_ports: self.replica_set_host_ports.clone(),
+        })
+    }
 }
 
 /// A marker trait for resources that can be cloned.
@@ -1684,5 +2107,72 @@ mod tests {
         }
         let bindings = KafkaBindings::new("localhost:9092", "shakedown_abc_");
         assert_eq!(make_name(&bindings, "payments"), "shakedown_abc_payments");
+    }
+
+    #[tokio::test]
+    async fn kafka_bindings_isolate_deepens_prefix() {
+        // Given Kafka Bindings with a base scenario prefix
+        let bindings = KafkaBindings::new("localhost:9092", "shakedown_abc_");
+        // When we isolate a sub-context named "analytics"
+        let sub = bindings
+            .isolate("analytics")
+            .await
+            .expect("isolate should succeed");
+        // Then the sub-prefix appends name + underscore separator and bootstrap is preserved
+        assert_eq!(sub.topic_prefix, "shakedown_abc_analytics_");
+        assert_eq!(sub.bootstrap_servers, "localhost:9092");
+    }
+
+    #[tokio::test]
+    async fn isolatable_generic_function_compiles_and_works() {
+        // Given a generic function that uses the Isolatable trait
+        async fn sub_context<B: Isolatable>(bindings: &B, name: &str) -> B {
+            bindings
+                .isolate(name)
+                .await
+                .expect("isolate should succeed")
+        }
+        let bindings = KafkaBindings::new("localhost:9092", "shakedown_abc_");
+        // When we call it with a KafkaBindings
+        let sub = sub_context(&bindings, "metrics").await;
+        // Then we get correctly prefixed Bindings back
+        assert_eq!(sub.topic_prefix, "shakedown_abc_metrics_");
+    }
+
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    #[tokio::test]
+    async fn redis_bindings_isolate_deepens_prefix() {
+        // Given Redis Bindings with a base key prefix
+        let bindings = RedisBindings {
+            connection_url: "redis://127.0.0.1:6379".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 6379,
+            key_prefix: "shakedown:abc:".to_string(),
+        };
+        // When we isolate "events"
+        let sub = bindings
+            .isolate("events")
+            .await
+            .expect("isolate should succeed");
+        // Then the key prefix appends name + colon separator and connection details are preserved
+        assert_eq!(sub.key_prefix, "shakedown:abc:events:");
+        assert_eq!(sub.connection_url, "redis://127.0.0.1:6379");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn sqlite_bindings_isolate_returns_new_in_memory_db() {
+        // Given a SQLite Bindings for one scenario
+        let original = SqliteBindings {
+            database_url: sqlite_named_memory_uri("scenario_a"),
+        };
+        // When we isolate to "analytics"
+        let sub = original
+            .isolate("analytics")
+            .await
+            .expect("isolate should succeed");
+        // Then the sub URL is different from the original (independent database)
+        assert_ne!(sub.database_url, original.database_url);
+        assert!(sub.database_url.contains("analytics"));
     }
 }
