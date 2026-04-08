@@ -126,6 +126,83 @@ async fn redis_sentinel_quorum_helpers_and_replicas() {
 
 #[tokio::test]
 #[ignore = "requires Docker; run: cargo test -p shakedown --features redis-sentinel --test redis_sentinel_vertical -- --ignored"]
+async fn redis_sentinel_sentinel_client_set_get_and_survives_failover() {
+    let mut ctx = Context::new();
+    ctx.register_builtin(BuiltinResource::RedisSentinel(
+        RedisSentinelResource::new().with_image_tag_from_env(),
+    ));
+    let mut event_log = EventLog::new();
+
+    run_scenario(
+        &mut ctx,
+        "redis_sentinel_sentinel_client_proof",
+        |ctx: &mut Context| {
+            Box::pin(async move {
+                let sentinel = ctx
+                    .redis_sentinel_bindings()
+                    .expect("redis sentinel bindings after provision");
+
+                let mut sentinel_topology_client = sentinel
+                    .sentinel_client()
+                    .expect("RedisSentinelBindings::sentinel_client");
+
+                let redis_client = sentinel_topology_client
+                    .async_get_client()
+                    .await
+                    .expect("SentinelClient::async_get_client (master)");
+                let mut connection = redis_client
+                    .get_multiplexed_async_connection()
+                    .await
+                    .expect("multiplexed connection via SentinelClient");
+
+                let key = sentinel.key_namespace("sentinel_client_k");
+                let _: () = connection
+                    .set::<_, _, ()>(key.as_str(), "sentinel_client_v1")
+                    .await
+                    .expect("SET via SentinelClient-resolved primary");
+                let value: Option<String> = connection
+                    .get(key.as_str())
+                    .await
+                    .expect("GET via SentinelClient-resolved primary");
+                assert_eq!(value.as_deref(), Some("sentinel_client_v1"));
+
+                let cluster = ctx
+                    .redis_sentinel_cluster()
+                    .expect("redis sentinel cluster control after provision");
+                cluster.trigger_failover().await.expect("trigger_failover");
+                cluster
+                    .await_failover_complete(Duration::from_secs(90))
+                    .await
+                    .expect("await_failover_complete");
+
+                let redis_client_after = sentinel_topology_client
+                    .async_get_client()
+                    .await
+                    .expect("async_get_client after failover");
+                let mut connection_after = redis_client_after
+                    .get_multiplexed_async_connection()
+                    .await
+                    .expect("connection after failover");
+                let key_after = sentinel.key_namespace("sentinel_client_after_failover");
+                let _: () = connection_after
+                    .set::<_, _, ()>(key_after.as_str(), "sentinel_client_v2")
+                    .await
+                    .expect("SET after failover via fresh SentinelClient resolution");
+                let read_back: Option<String> = connection_after
+                    .get(key_after.as_str())
+                    .await
+                    .expect("GET after failover");
+                assert_eq!(read_back.as_deref(), Some("sentinel_client_v2"));
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario should succeed");
+}
+
+#[tokio::test]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features redis-sentinel --test redis_sentinel_vertical -- --ignored"]
 async fn redis_sentinel_trigger_failover_changes_primary() {
     let mut ctx = Context::new();
     ctx.register_builtin(BuiltinResource::RedisSentinel(
