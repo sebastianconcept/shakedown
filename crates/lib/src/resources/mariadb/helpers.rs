@@ -7,6 +7,7 @@ use crate::error::{InfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
 use crate::resources::mysql_family;
 use crate::resources::MariaDBBindings;
+use crate::resources::MigrationRunner;
 
 /// Facade for MariaDB helpers bound to [`Context`].
 pub struct MariaDbHelpers<'ctx> {
@@ -77,5 +78,14 @@ impl<'ctx> MariaDbHelpers<'ctx> {
     ) -> Result<Vec<Row>, ShakedownError> {
         let bindings = self.mariadb_bindings()?;
         mysql_family::query_all(bindings.connection_url.as_str(), query, params).await
+    }
+
+    /// Run migrations against this scenario's database (same entry style as [`Self::execute`]).
+    pub async fn run_migrations(
+        &self,
+        runner: &(impl MigrationRunner + ?Sized),
+    ) -> Result<(), ShakedownError> {
+        let bindings = self.mariadb_bindings()?;
+        bindings.run_migrations(runner).await
     }
 }

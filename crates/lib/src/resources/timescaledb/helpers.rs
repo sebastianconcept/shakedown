@@ -10,6 +10,7 @@ use crate::lifecycle::Context;
 use crate::resources::postgres::{
     postgres_assert_row_count, postgres_assert_row_exists, postgres_execute, postgres_query_all,
 };
+use crate::resources::MigrationRunner;
 use crate::resources::PostgresBindings;
 
 /// Facade for TimescaleDB helpers bound to [`Context`] (`timescaledb` feature).
@@ -80,5 +81,21 @@ impl<'ctx> TimescaledbHelpers<'ctx> {
             &[&table_name],
         )
         .await
+    }
+
+    /// Run migrations against this scenario's database (same entry style as [`Self::execute`]).
+    pub async fn run_migrations(
+        &self,
+        runner: &(impl MigrationRunner + ?Sized),
+    ) -> Result<(), ShakedownError> {
+        let postgres_bindings = self.timescaledb_bindings()?;
+        postgres_bindings.run_migrations(runner).await
+    }
+
+    /// Connected [`sqlx::postgres::PgPool`](sqlx::postgres::PgPool) for this scenario (`timescaledb` + `sqlx`).
+    #[cfg(all(feature = "timescaledb", feature = "sqlx"))]
+    pub async fn pg_pool(&self) -> Result<sqlx::postgres::PgPool, ShakedownError> {
+        let postgres_bindings = self.timescaledb_bindings()?;
+        postgres_bindings.pg_pool().await
     }
 }

@@ -700,6 +700,12 @@ impl Resource for FakeResource {
 }
 
 // --- Engine resource implementations (`resources/<engine>/`; shared Redis/Valkey in `resp_family.rs`) ---
+
+mod migration_runner;
+mod sql_bindings_migrations;
+
+pub use migration_runner::MigrationRunner;
+
 /// Shared reqwest client for Elasticsearch/OpenSearch HTTP APIs (`elasticsearch` / `opensearch` features).
 #[cfg(any(feature = "elasticsearch", feature = "opensearch"))]
 pub(crate) mod search_operations;

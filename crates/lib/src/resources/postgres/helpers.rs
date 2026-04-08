@@ -15,6 +15,8 @@ use crate::error::{AssertionError, ScenarioError, ShakedownError};
 use crate::helper_prelude::map_backend_error;
 #[cfg(feature = "postgres")]
 use crate::lifecycle::Context;
+#[cfg(feature = "postgres")]
+use crate::resources::MigrationRunner;
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]
 use crate::resources::PostgresBindings;
 
@@ -187,5 +189,21 @@ impl<'ctx> PostgresHelpers<'ctx> {
     ) -> Result<Vec<Row>, ShakedownError> {
         let postgres_bindings = self.postgres_bindings()?;
         postgres_query_all(postgres_bindings, query, params).await
+    }
+
+    /// Run migrations against this scenario's database (same entry style as [`Self::execute`]).
+    pub async fn run_migrations(
+        &self,
+        runner: &(impl MigrationRunner + ?Sized),
+    ) -> Result<(), ShakedownError> {
+        let postgres_bindings = self.postgres_bindings()?;
+        postgres_bindings.run_migrations(runner).await
+    }
+
+    /// Connected [`sqlx::postgres::PgPool`](sqlx::postgres::PgPool) for this scenario (`postgres` + `sqlx`).
+    #[cfg(all(feature = "postgres", feature = "sqlx"))]
+    pub async fn pg_pool(&self) -> Result<sqlx::postgres::PgPool, ShakedownError> {
+        let postgres_bindings = self.postgres_bindings()?;
+        postgres_bindings.pg_pool().await
     }
 }

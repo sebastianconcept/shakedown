@@ -52,6 +52,9 @@ mysql_async = { version = "0.36.1", optional = true }
 # SQLite for in-memory per-scenario resources (no Docker; rusqlite + spawn_blocking)
 rusqlite = { version = "0.32", optional = true, default-features = false, features = ["bundled"] }
 
+# Optional sqlx pools + migrate! Migrator integration (`sqlx` feature; pairs with `postgres` / `sqlite`)
+sqlx = { version = "0.8", optional = true, default-features = false, features = ["runtime-tokio", "macros", "migrate", "postgres", "sqlite"] }
+
 # Redis / Valkey async client (`redis` / `valkey` features; RESP)
 redis = { version = "1.1", optional = true, default-features = false, features = ["tokio-comp", "streams"] }
 
@@ -193,6 +196,8 @@ mysql = [
 ]
 # In-memory SQLite per scenario (no Docker)
 sqlite = ["dep:rusqlite"]
+# sqlx pools and `impl MigrationRunner for sqlx::migrate::Migrator<…>` (use with `postgres` and/or `sqlite`)
+sqlx = ["dep:sqlx"]
 # In-process DuckDB per scenario (no Docker; no diagnostics)
 duckdb = ["dep:duckdb"]
 # Outbox helpers (requires at least one relational feature)
@@ -369,11 +374,23 @@ name = "helpers_postgres"
 path = "tests/helpers_postgres.rs"
 required-features = ["postgres"]
 
+# Postgres + sqlx migrate! via MigrationRunner (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_postgres_sqlx"
+path = "tests/helpers_postgres_sqlx.rs"
+required-features = ["postgres", "sqlx"]
+
 # SQLite typed helpers execute/assert integration (no Docker)
 [[test]]
 name = "helpers_sqlite"
 path = "tests/helpers_sqlite.rs"
 required-features = ["sqlite"]
+
+# SQLite + sqlx pool + migrate! (no Docker)
+[[test]]
+name = "helpers_sqlite_sqlx"
+path = "tests/helpers_sqlite_sqlx.rs"
+required-features = ["sqlite", "sqlx"]
 
 # DuckDB typed helpers execute/assert integration (no Docker)
 [[test]]
