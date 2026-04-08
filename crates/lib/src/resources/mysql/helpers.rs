@@ -6,6 +6,7 @@ use mysql_async::Row;
 use crate::error::{InfrastructureError, ShakedownError};
 use crate::lifecycle::Context;
 use crate::resources::mysql_family;
+use crate::resources::MigrationRunner;
 use crate::resources::MysqlBindings;
 
 /// Facade for Oracle MySQL helpers bound to [`Context`].
@@ -77,5 +78,14 @@ impl<'ctx> MysqlHelpers<'ctx> {
     ) -> Result<Vec<Row>, ShakedownError> {
         let bindings = self.mysql_bindings()?;
         mysql_family::query_all(bindings.connection_url.as_str(), query, params).await
+    }
+
+    /// Run migrations against this scenario's database (same entry style as [`Self::execute`]).
+    pub async fn run_migrations(
+        &self,
+        runner: &(impl MigrationRunner + ?Sized),
+    ) -> Result<(), ShakedownError> {
+        let bindings = self.mysql_bindings()?;
+        bindings.run_migrations(runner).await
     }
 }

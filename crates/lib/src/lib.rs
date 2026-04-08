@@ -70,6 +70,7 @@
 //! you need in `Cargo.toml`: for example `kafka`, `postgres`, `mariadb`, `mysql`, `rabbitmq`,
 //! `sqlite`, `duckdb`, `redis`, `valkey`, `redis-sentinel`, `mongodb`, `nats`, `neo4j`,
 //! `elasticsearch`, `opensearch`, `qdrant`, `weaviate`, `influxdb`, `timescaledb`, `outbox`,
+//! `sqlx` (pools + [`sqlx::migrate::Migrator`] integration with `postgres` / `sqlite`),
 //! `fault-injection`, `load`, `services`, `cluster`, and engine-specific cluster flags such as
 //! `kafka-cluster` or `postgres-cluster`. The full matrix, CI guidance, and operator workflows
 //! are documented in [`README.md`](../README.md).
@@ -350,8 +351,8 @@ pub use crate::diagnostics::ResourceAssertBuilder;
 #[doc(inline)]
 pub use crate::resources::{
     sanitize_nats_subject_prefix, sanitize_redis_key_prefix, sanitize_resource_namespace,
-    BuiltinResource, FakeResource, Isolatable, KafkaBindings, Namespaced, RegisteredResource,
-    Resource,
+    BuiltinResource, FakeResource, Isolatable, KafkaBindings, MigrationRunner, Namespaced,
+    RegisteredResource, Resource,
 };
 
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]

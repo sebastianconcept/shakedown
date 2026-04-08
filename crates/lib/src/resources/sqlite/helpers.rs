@@ -9,6 +9,7 @@ use rusqlite::{Connection, OpenFlags, Params};
 use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
 use crate::helper_prelude::map_backend_error;
 use crate::lifecycle::Context;
+use crate::resources::MigrationRunner;
 use crate::resources::SqliteBindings;
 
 fn open_connection(database_url: &str) -> Result<Connection, rusqlite::Error> {
@@ -191,5 +192,21 @@ impl<'ctx> SqliteHelpers<'ctx> {
         })
         .await
         .map_err(map_backend_error)?
+    }
+
+    /// Run migrations against this scenario's database (same entry style as [`Self::execute`]).
+    pub async fn run_migrations(
+        &self,
+        runner: &(impl MigrationRunner + ?Sized),
+    ) -> Result<(), ShakedownError> {
+        let sqlite_bindings = self.sqlite_bindings()?;
+        sqlite_bindings.run_migrations(runner).await
+    }
+
+    /// Connected [`sqlx::sqlite::SqlitePool`](sqlx::sqlite::SqlitePool) for this scenario (`sqlite` + `sqlx`).
+    #[cfg(feature = "sqlx")]
+    pub async fn sqlite_pool(&self) -> Result<sqlx::sqlite::SqlitePool, ShakedownError> {
+        let sqlite_bindings = self.sqlite_bindings()?;
+        sqlite_bindings.sqlite_pool().await
     }
 }
