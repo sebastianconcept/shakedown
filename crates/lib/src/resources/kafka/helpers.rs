@@ -8,8 +8,9 @@ use rdkafka::message::Message;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout;
 use serde::Serialize;
+use tokio::sync::oneshot;
 
-use crate::error::{InfrastructureError, ShakedownError};
+use crate::error::{InfrastructureError, InternalError, ShakedownError};
 use crate::helper_prelude::{map_backend_error, ConsumedMessage, DEFAULT_HELPER_CONSUME_TIMEOUT};
 use crate::lifecycle::Context;
 use crate::resources::KafkaBindings;
@@ -165,5 +166,135 @@ impl<'ctx> KafkaHelpers<'ctx> {
         timeout: Option<Duration>,
     ) -> Result<ConsumedMessage, ShakedownError> {
         self.consume_until(topic, |_| true, timeout).await
+    }
+
+    /// Subscribe to the scenario-scoped topic **before** producing, then return the first consumed
+    /// message that matches `predicate`.
+    ///
+    /// This helper solves the fresh-topic problem: a message produced before any consumer has
+    /// joined the consumer group may be missed even when `auto.offset.reset = earliest`. By
+    /// subscribing first and waiting for partition assignment before producing, messages are
+    /// guaranteed to be observed by the consumer.
+    ///
+    /// `topic` is the logical name; the full Kafka topic is [`KafkaBindings::topic_namespace`].
+    /// When `timeout` is `None`, uses [`DEFAULT_HELPER_CONSUME_TIMEOUT`] (20 seconds).
+    ///
+    /// See also: [`Self::consume_until`] for consuming from a topic that already has messages.
+    pub async fn produce_and_await(
+        &self,
+        topic: &str,
+        key: impl Into<Vec<u8>>,
+        payload: impl Into<Vec<u8>>,
+        timeout: Option<Duration>,
+    ) -> Result<ConsumedMessage, ShakedownError> {
+        let kafka_bindings = self.kafka_bindings()?.clone();
+        let full_topic = kafka_bindings.topic_namespace(topic);
+        let limit = timeout.unwrap_or(DEFAULT_HELPER_CONSUME_TIMEOUT);
+        let scenario_id = self.context.scenario_id().to_string();
+        let key_bytes = key.into();
+        let payload_bytes = payload.into();
+
+        let full_topic_clone = full_topic.clone();
+        let join_handle = tokio::task::spawn_blocking(move || {
+            let started_at = Instant::now();
+            let deadline = started_at + limit;
+
+            let consumer_group = format!(
+                "shakedown-helpers-produce-and-await-{}",
+                scenario_id.as_str()
+            );
+            let consumer: BaseConsumer = ClientConfig::new()
+                .set(
+                    "bootstrap.servers",
+                    kafka_bindings.bootstrap_servers.as_str(),
+                )
+                .set("group.id", consumer_group.as_str())
+                .set("enable.auto.commit", "false")
+                .set("auto.offset.reset", "earliest")
+                .create()
+                .map_err(map_backend_error)?;
+
+            consumer
+                .subscribe(&[full_topic_clone.as_str()])
+                .map_err(map_backend_error)?;
+
+            // Poll until partition assignment is confirmed before producing. A successful poll
+            // with non-empty assignment means the consumer has joined the group and offsets are
+            // resolved; a message produced now will be seen by this consumer.
+            let assignment_deadline = Instant::now() + limit.min(Duration::from_secs(10));
+            loop {
+                let now = Instant::now();
+                if now >= assignment_deadline {
+                    break;
+                }
+                let remaining = assignment_deadline.saturating_duration_since(now);
+                let poll_duration = remaining.min(Duration::from_millis(200));
+                let _ = consumer.poll(poll_duration);
+
+                let assignment = consumer.assignment().map_err(map_backend_error)?;
+                if assignment.count() > 0 {
+                    break;
+                }
+            }
+
+            // Produce the message now that the consumer has joined.
+            let client_id = format!("shakedown-paa-producer-{}", scenario_id.as_str());
+            let producer: FutureProducer = ClientConfig::new()
+                .set(
+                    "bootstrap.servers",
+                    kafka_bindings.bootstrap_servers.as_str(),
+                )
+                .set("client.id", client_id.as_str())
+                .create()
+                .map_err(map_backend_error)?;
+
+            // Drive `FutureProducer::send` on the runtime without `Handle::block_on` inside
+            // `spawn_blocking` — that pattern can deadlock the multi-thread runtime.
+            let topic_for_producer = full_topic_clone.clone();
+            let (send_tx, send_rx) = oneshot::channel();
+            tokio::spawn(async move {
+                let record = FutureRecord::to(topic_for_producer.as_str())
+                    .key(&key_bytes)
+                    .payload(&payload_bytes);
+                let delivery = producer
+                    .send(record, Timeout::After(Duration::from_secs(60)))
+                    .await;
+                let _ = send_tx.send(delivery);
+            });
+            match send_rx.blocking_recv() {
+                Ok(Ok(_delivery)) => {}
+                Ok(Err((kafka_err, _))) => return Err(map_backend_error(kafka_err)),
+                Err(_) => {
+                    return Err(ShakedownError::Internal(InternalError::Bug(
+                        "kafka produce_and_await: producer send task dropped".to_string(),
+                    )));
+                }
+            }
+
+            // Now poll to consume the message we just produced.
+            while Instant::now() < deadline {
+                let remaining_duration = deadline.saturating_duration_since(Instant::now());
+                let poll_duration = remaining_duration.min(Duration::from_millis(200));
+                if let Some(result) = consumer.poll(poll_duration) {
+                    let message = result.map_err(map_backend_error)?;
+                    let consumed = ConsumedMessage {
+                        key: message.key().map(|slice| slice.to_vec()),
+                        payload: message.payload().map(|slice| slice.to_vec()),
+                        source: message.topic().to_string(),
+                    };
+                    return Ok(consumed);
+                }
+            }
+
+            let elapsed = started_at.elapsed();
+            Err(ShakedownError::HelperTimeout {
+                resource: full_topic_clone,
+                operation: "kafka.produce_and_await",
+                timeout: limit,
+                elapsed,
+            })
+        });
+
+        join_handle.await.map_err(map_backend_error)?
     }
 }

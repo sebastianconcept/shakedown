@@ -44,6 +44,77 @@ impl<'ctx> NatsHelpers<'ctx> {
         Ok(())
     }
 
+    /// Subscribe to the namespaced subject **before** publishing, then return the first received
+    /// message.
+    ///
+    /// This helper solves the fresh-subject problem: a message published before a subscriber
+    /// exists is dropped by the NATS server (core NATS is fire-and-forget). By subscribing first
+    /// and then publishing, the message is guaranteed to be delivered.
+    ///
+    /// `subject` is the logical name; it is prefixed with the scenario namespace via
+    /// [`NatsBindings::subject_namespace`]. When `timeout` is `None`, uses
+    /// [`DEFAULT_HELPER_CONSUME_TIMEOUT`] (20 seconds).
+    ///
+    /// See also: [`Self::subscribe_until`] for consuming from a subject using a predicate.
+    pub async fn publish_and_await(
+        &self,
+        subject: &str,
+        payload: &[u8],
+        timeout: Option<Duration>,
+    ) -> Result<ConsumedMessage, ShakedownError> {
+        let nats_bindings = self.nats_bindings()?;
+        let full_subject = nats_bindings.subject_namespace(subject);
+        let limit = timeout.unwrap_or(DEFAULT_HELPER_CONSUME_TIMEOUT);
+        let started_at = Instant::now();
+        let deadline = started_at + limit;
+
+        let client = async_nats::connect(nats_bindings.connection_url.as_str())
+            .await
+            .map_err(map_backend_error)?;
+
+        // Subscribe before publishing so the subscription is registered with the server.
+        let mut subscription = client
+            .subscribe(full_subject.clone())
+            .await
+            .map_err(map_backend_error)?;
+
+        client
+            .publish(full_subject.clone(), Bytes::copy_from_slice(payload))
+            .await
+            .map_err(map_backend_error)?;
+
+        while Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let wait_slice = remaining.min(Duration::from_millis(200));
+            if wait_slice.is_zero() {
+                break;
+            }
+
+            match tokio::time::timeout(wait_slice, subscription.next()).await {
+                Ok(Some(message)) => {
+                    let consumed = ConsumedMessage {
+                        key: None,
+                        payload: Some(message.payload.to_vec()),
+                        source: message.subject.to_string(),
+                    };
+                    let _ = client.drain().await;
+                    return Ok(consumed);
+                }
+                Ok(None) => break,
+                Err(_) => {}
+            }
+        }
+
+        let _ = client.drain().await;
+        let elapsed = started_at.elapsed();
+        Err(ShakedownError::HelperTimeout {
+            resource: full_subject,
+            operation: "nats.publish_and_await",
+            timeout: limit,
+            elapsed,
+        })
+    }
+
     /// Subscribe to the namespaced subject and collect messages until `predicate` returns true for
     /// the **latest** received message, or until `timeout` elapses.
     ///

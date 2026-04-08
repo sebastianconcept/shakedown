@@ -11,6 +11,12 @@
 //! ```text
 //! cargo test -p shakedown --features rabbitmq --test helpers_rabbit -- --ignored
 //! ```
+//!
+//! Parallel isolation (pair with `--test-threads=2` and filter `parallel_same_logical`):
+//!
+//! ```text
+//! cargo test -p shakedown --features rabbitmq --test helpers_rabbit -- --ignored --test-threads=2 parallel_same_logical
+//! ```
 
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +27,79 @@ use shakedown::ExchangeKind;
 struct OrderCreatedEvent {
     order_id: String,
     sku: String,
+}
+
+#[shakedown::test(resources = [Rabbit])]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features rabbitmq --test helpers_rabbit -- --ignored"]
+async fn rabbit_helpers_publish_and_await_fresh_exchange(ctx: &mut shakedown::Context) {
+    // Given: a fresh exchange/queue where no consumer has declared the topology yet — publishing
+    // before declaring would drop messages. publish_and_await declares topology, subscribes, then
+    // publishes to guarantee delivery.
+
+    let event = OrderCreatedEvent {
+        order_id: "paa-ord-1".to_string(),
+        sku: "SKU-PAA".to_string(),
+    };
+    let payload = serde_json::to_vec(&event).expect("serialize");
+
+    // When: we call publish_and_await on a brand-new exchange and queue.
+    let consumed = ctx
+        .rabbit()
+        .publish_and_await(
+            "paa_events",
+            shakedown::ExchangeKind::Direct,
+            "paa_events",
+            "order.paa",
+            payload,
+            None,
+        )
+        .await
+        .expect("publish_and_await should not lose messages on a fresh exchange");
+
+    // Then: the consumed message routing key and payload round-trip correctly.
+    assert_eq!(consumed.key_str(), Some("order.paa"));
+    let parsed: OrderCreatedEvent = consumed
+        .payload_json()
+        .expect("payload_json should deserialize the published body");
+    assert_eq!(parsed, event);
+}
+
+#[shakedown::test(resources = [Rabbit])]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features rabbitmq --test helpers_rabbit -- --ignored"]
+async fn rabbit_helpers_parallel_same_logical_exchange_a(ctx: &mut shakedown::Context) {
+    let payload = b"parallel-rabbit-a".to_vec();
+    let consumed = ctx
+        .rabbit()
+        .publish_and_await(
+            "shared_logical_ex",
+            ExchangeKind::Direct,
+            "shared_logical_q",
+            "rk.shared",
+            payload.clone(),
+            None,
+        )
+        .await
+        .expect("publish_and_await should isolate by scenario namespace");
+    assert_eq!(consumed.payload.as_deref(), Some(payload.as_slice()));
+}
+
+#[shakedown::test(resources = [Rabbit])]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features rabbitmq --test helpers_rabbit -- --ignored"]
+async fn rabbit_helpers_parallel_same_logical_exchange_b(ctx: &mut shakedown::Context) {
+    let payload = b"parallel-rabbit-b".to_vec();
+    let consumed = ctx
+        .rabbit()
+        .publish_and_await(
+            "shared_logical_ex",
+            ExchangeKind::Direct,
+            "shared_logical_q",
+            "rk.shared",
+            payload.clone(),
+            None,
+        )
+        .await
+        .expect("publish_and_await should isolate by scenario namespace");
+    assert_eq!(consumed.payload.as_deref(), Some(payload.as_slice()));
 }
 
 #[shakedown::test(resources = [Rabbit])]
