@@ -236,6 +236,37 @@ fn performance_assertion_failed_display_includes_fields() {
 }
 
 #[test]
+fn helper_timeout_bus_predicate_helpers_match_produce_and_await_operations() {
+    let kafka = ShakedownError::HelperTimeout {
+        resource: "t".to_string(),
+        operation: "kafka.produce_and_await",
+        timeout: std::time::Duration::from_secs(1),
+        elapsed: std::time::Duration::from_secs(2),
+    };
+    assert!(kafka.is_kafka_produce_and_await_timeout());
+    assert!(!kafka.is_rabbit_publish_and_await_timeout());
+    assert!(!kafka.is_nats_publish_and_await_timeout());
+
+    let rabbit = ShakedownError::HelperTimeout {
+        resource: "q".to_string(),
+        operation: "rabbit.publish_and_await",
+        timeout: std::time::Duration::from_secs(1),
+        elapsed: std::time::Duration::from_secs(2),
+    };
+    assert!(rabbit.is_rabbit_publish_and_await_timeout());
+    assert!(!rabbit.is_kafka_produce_and_await_timeout());
+
+    let nats = ShakedownError::HelperTimeout {
+        resource: "s".to_string(),
+        operation: "nats.publish_and_await",
+        timeout: std::time::Duration::from_secs(1),
+        elapsed: std::time::Duration::from_secs(2),
+    };
+    assert!(nats.is_nats_publish_and_await_timeout());
+    assert!(!nats.is_kafka_produce_and_await_timeout());
+}
+
+#[test]
 fn resource_handle_serialization() {
     use serde_json::to_value;
 

@@ -51,6 +51,14 @@
 //! For full manual control, call [`run_scenario`] with a [`Context`], a scenario id, an async
 //! closure, and an [`EventLog`].
 //!
+//! ## Where to start
+//!
+//! Enable only the Cargo features your scenarios need; keep Docker-backed tests behind
+//! `#[ignore]` in CI unless the job passes `--include-ignored` (Cargo) or `--run-ignored all`
+//! (nextest). **`diagnostics`** is pulled in with Docker-backed resource features unless you set
+//! **`no-diagnostics`**. The six-category **bindings-as-bridge** table, CI split, and parallelism
+//! guidance are in [`README.md`](../README.md).
+//!
 //! ```rust
 //! use shakedown::Context;
 //!

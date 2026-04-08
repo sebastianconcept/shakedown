@@ -289,6 +289,9 @@ impl<'ctx> RabbitHelpers<'ctx> {
     ///
     /// See also: [`Self::declare_topology`] + [`Self::publish`] + [`Self::consume_until`] for
     /// explicit control over each step.
+    ///
+    /// On timeout, returns [`ShakedownError::HelperTimeout`] with `operation` `"rabbit.publish_and_await"`.
+    /// Match with [`ShakedownError::is_rabbit_publish_and_await_timeout`].
     pub async fn publish_and_await(
         &self,
         exchange: &str,

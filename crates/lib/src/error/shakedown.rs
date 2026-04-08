@@ -103,6 +103,9 @@ pub enum ShakedownError {
     /// Helper timed out: resource '{resource}', operation '{operation}', waited {elapsed:?} (limit {timeout:?})
     ///
     /// Cause: a typed helper (Kafka consume, RabbitMQ consume, …) did not observe a matching message within the wall-clock window.
+    /// Message-bus subscribe-before-publish helpers use `operation` values such as `"kafka.produce_and_await"`,
+    /// `"rabbit.publish_and_await"`, and `"nats.publish_and_await"`; see [`ShakedownError::is_kafka_produce_and_await_timeout`]
+    /// and related predicates.
     #[error("Helper timed out: resource '{resource}', operation '{operation}', waited {elapsed:?} (limit {timeout:?})")]
     HelperTimeout {
         /// Resource name or type that triggered the timeout.
@@ -121,6 +124,42 @@ pub enum ShakedownError {
     #[cfg(feature = "load")]
     #[error("{0}")]
     PerformanceAssertionFailed(Box<PerformanceAssertionDetails>),
+}
+
+impl ShakedownError {
+    /// `true` when this is a timeout from [`crate::KafkaHelpers::produce_and_await`] (see `operation`
+    /// field `"kafka.produce_and_await"` on [`ShakedownError::HelperTimeout`]).
+    pub fn is_kafka_produce_and_await_timeout(&self) -> bool {
+        matches!(
+            self,
+            ShakedownError::HelperTimeout {
+                operation: "kafka.produce_and_await",
+                ..
+            }
+        )
+    }
+
+    /// `true` when this is a timeout from `RabbitHelpers::publish_and_await` (`"rabbit.publish_and_await"`).
+    pub fn is_rabbit_publish_and_await_timeout(&self) -> bool {
+        matches!(
+            self,
+            ShakedownError::HelperTimeout {
+                operation: "rabbit.publish_and_await",
+                ..
+            }
+        )
+    }
+
+    /// `true` when this is a timeout from `NatsHelpers::publish_and_await` (`"nats.publish_and_await"`).
+    pub fn is_nats_publish_and_await_timeout(&self) -> bool {
+        matches!(
+            self,
+            ShakedownError::HelperTimeout {
+                operation: "nats.publish_and_await",
+                ..
+            }
+        )
+    }
 }
 
 impl From<ScenarioError> for ShakedownError {
