@@ -12,6 +12,27 @@ This library provides:
 - **Error classification** — structured errors distinguishing scenario vs infrastructure failures
 - **Event logging hooks** — structured event collection for failure timelines (human-readable stderr summary on infrastructure failure; pretty-printed JSON under `target/shakedown/timelines/{scenario_id}.json` for CI and tooling)
 
+## Where to start
+
+- **Minimal features:** add `shakedown` with only the Cargo features your scenarios need (see [Cargo features](#cargo-features) below and [`Cargo features` in the crate root docs](src/lib.rs)). Default `cargo test -p shakedown` stays Docker-free; enabling engines such as `kafka` or `postgres` pulls in Docker-backed resources and, unless you opt out with **`no-diagnostics`**, the **`diagnostics`** feature (bollard) for container observability.
+- **Diagnostics:** `diagnostics` is implied by Docker-backed resource features; set **`no-diagnostics`** when you cannot depend on the Docker socket API — see [Infrastructure diagnostics (bollard)](#infrastructure-diagnostics-bollard).
+- **Bindings vs helpers:** read [Using your existing drivers](#using-your-existing-drivers-bindings-as-bridge) and [Typed helpers](#typed-helpers) (three patterns: bindings-only, helpers, outbox).
+
+## Using your existing drivers (bindings as bridge)
+
+Shakedown does not replace your database drivers or message clients. It **provisions** suite-shared infrastructure and exposes **typed bindings** (`*_bindings()` on [`Context`](src/lifecycle/mod.rs)) and optional **helpers** (`ctx.kafka()`, `ctx.postgres()`, …). Build **your** clients from those connection strings and namespaced logical names so production and tests exercise the same code paths.
+
+| Category | Harness surface | You bring |
+|----------|-----------------|-----------|
+| **SQL** | [`PostgresBindings`](src/resources.rs), [`MariaDbBindings`](src/resources.rs), [`MysqlBindings`](src/resources.rs), [`SqliteBindings`](src/resources.rs); TimescaleDB uses Postgres-shaped [`PostgresBindings`](src/resources.rs) via [`Context::timescaledb_bindings`](src/lifecycle/mod.rs) and [`TimescaledbHelpers`](src/resources/timescaledb/helpers.rs) | `tokio-postgres`, `sqlx`, `rusqlite`, … |
+| **Message buses** | [`KafkaBindings`](src/resources.rs), [`RabbitBindings`](src/resources.rs), [`NatsBindings`](src/resources.rs) | `rdkafka`, `lapin`, `async-nats`, … |
+| **Cache / KV** | [`RedisBindings`](src/resources.rs) (Redis and Valkey share this type) | `redis` crate, … |
+| **Document / graph** | [`MongoBindings`](src/resources.rs), [`Neo4jBindings`](src/resources.rs), [`DuckDbBindings`](src/resources.rs) | Official MongoDB driver, `neo4rs`, `duckdb`, … |
+| **Search / vector** | Elasticsearch, OpenSearch, Qdrant, Weaviate bindings and helpers — see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) | `reqwest`, `qdrant-client`, … |
+| **Time-series / analytical** | [`InfluxDbBindings`](src/resources.rs); TimescaleDB via [`Context::timescaledb_bindings`](src/lifecycle/mod.rs) | Influx HTTP client, SQL client for Timescale |
+
+**Reference data and seeding:** There is no first-party Shakedown seeding trait in this release — load reference data and schema in scenario code using helpers, `*_bindings()` plus your own clients, or `#[shakedown::default_seed]` as you do today; the harness owns isolation and lifecycle, not a shared fixture-file format.
+
 ## Workspace layout
 
 ```text
@@ -123,6 +144,44 @@ Align automation with the same commands as in this section:
 3. **Docker runner:** `just test-all-include-ignored` (or the equivalent `cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored`) with a working Docker socket — covers ignored integration tests and diagnostics. Uses **nextest** when installed, same as `just test`.
 4. **Per-engine vertical smoke (Docker, heavy):** `just test-shakedown-resources-smoke` — all `tests/*_vertical.rs` binaries with `--all-features` and ignored tests enabled; see [Resource smoke coverage](#resource-smoke-coverage).
 5. **Macros only:** `cargo test -p shakedown-macros` when you need trybuild without rebuilding the workspace.
+
+#### CI: nextest vs Cargo and `#[ignore]`
+
+**Warning:** Neither plain `cargo test` nor `cargo nextest run` executes `#[ignore]` tests unless you ask. A job that never passes **`-- --include-ignored`** (Cargo) or **`--run-ignored all`** (nextest) can go **green while skipping every Docker-backed proof** — easy to mistake for full coverage.
+
+| Runner | Run ignored tests (same feature set you compile) |
+|--------|--------------------------------------------------|
+| Cargo | `cargo test -p shakedown --features "kafka,postgres,…" -- --include-ignored` |
+| nextest | `cargo nextest run -p shakedown --features "kafka,postgres,…" --run-ignored all` |
+
+Use **`--include-ignored`** when you want both normal and ignored tests in one invocation; use **`-- --ignored`** only when you intend to run **only** ignored tests.
+
+**Two-job pattern (copy-paste):** keep a **fast** job on every push (no Docker socket required) and a **Docker** job that installs/runs against Docker with explicit ignored-test flags:
+
+```yaml
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fast tests (no Docker)
+        run: cargo test --workspace
+
+  docker_integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker-backed integration tests
+        run: cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite" -- --include-ignored
+```
+
+Swap `cargo test` for `cargo nextest run … --run-ignored all` when you use nextest in CI.
+
+#### Parallelism and host resource pressure
+
+- **Logical isolation:** Scenario-scoped topic prefixes, database names, queue names, and similar fields keep parallel scenarios from **sharing mutable state** when they reuse suite containers — that is the harness contract.
+- **Host pressure:** Many containers plus high `test-threads` still stress CPU, RAM, and the Docker daemon; failures may be OOMs, timeouts, or port exhaustion. Treat those as **environment / accidental** complexity (see Mode 3 in the crate docs), not necessarily application bugs.
+- **Rule of thumb on small runners:** Prefer **`--test-threads=1`** or lower nextest parallelism for heavy Docker suites; split features across jobs; serializing infra tests is often faster than thrashing a constrained VM.
 
 ### `shakedown` library crate
 

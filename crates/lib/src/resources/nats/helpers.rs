@@ -56,6 +56,9 @@ impl<'ctx> NatsHelpers<'ctx> {
     /// [`DEFAULT_HELPER_CONSUME_TIMEOUT`] (20 seconds).
     ///
     /// See also: [`Self::subscribe_until`] for consuming from a subject using a predicate.
+    ///
+    /// On timeout, returns [`ShakedownError::HelperTimeout`] with `operation` `"nats.publish_and_await"`.
+    /// Match with [`ShakedownError::is_nats_publish_and_await_timeout`].
     pub async fn publish_and_await(
         &self,
         subject: &str,

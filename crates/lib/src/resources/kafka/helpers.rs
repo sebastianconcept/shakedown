@@ -5,12 +5,11 @@ use std::time::{Duration, Instant};
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::message::Message;
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::producer::{BaseProducer, BaseRecord, FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
 use serde::Serialize;
-use tokio::sync::oneshot;
 
-use crate::error::{InfrastructureError, InternalError, ShakedownError};
+use crate::error::{InfrastructureError, ShakedownError};
 use crate::helper_prelude::{map_backend_error, ConsumedMessage, DEFAULT_HELPER_CONSUME_TIMEOUT};
 use crate::lifecycle::Context;
 use crate::resources::KafkaBindings;
@@ -180,6 +179,9 @@ impl<'ctx> KafkaHelpers<'ctx> {
     /// When `timeout` is `None`, uses [`DEFAULT_HELPER_CONSUME_TIMEOUT`] (20 seconds).
     ///
     /// See also: [`Self::consume_until`] for consuming from a topic that already has messages.
+    ///
+    /// On timeout, returns [`ShakedownError::HelperTimeout`] with `operation` set to
+    /// `"kafka.produce_and_await"`. Match it with [`ShakedownError::is_kafka_produce_and_await_timeout`].
     pub async fn produce_and_await(
         &self,
         topic: &str,
@@ -237,9 +239,10 @@ impl<'ctx> KafkaHelpers<'ctx> {
                 }
             }
 
-            // Produce the message now that the consumer has joined.
+            // Sync `BaseProducer` keeps all Kafka I/O on this blocking thread (`tokio::spawn` here
+            // can deadlock the runtime).
             let client_id = format!("shakedown-paa-producer-{}", scenario_id.as_str());
-            let producer: FutureProducer = ClientConfig::new()
+            let producer: BaseProducer = ClientConfig::new()
                 .set(
                     "bootstrap.servers",
                     kafka_bindings.bootstrap_servers.as_str(),
@@ -248,28 +251,17 @@ impl<'ctx> KafkaHelpers<'ctx> {
                 .create()
                 .map_err(map_backend_error)?;
 
-            // Drive `FutureProducer::send` on the runtime without `Handle::block_on` inside
-            // `spawn_blocking` — that pattern can deadlock the multi-thread runtime.
-            let topic_for_producer = full_topic_clone.clone();
-            let (send_tx, send_rx) = oneshot::channel();
-            tokio::spawn(async move {
-                let record = FutureRecord::to(topic_for_producer.as_str())
-                    .key(&key_bytes)
-                    .payload(&payload_bytes);
-                let delivery = producer
-                    .send(record, Timeout::After(Duration::from_secs(60)))
-                    .await;
-                let _ = send_tx.send(delivery);
-            });
-            match send_rx.blocking_recv() {
-                Ok(Ok(_delivery)) => {}
-                Ok(Err((kafka_err, _))) => return Err(map_backend_error(kafka_err)),
-                Err(_) => {
-                    return Err(ShakedownError::Internal(InternalError::Bug(
-                        "kafka produce_and_await: producer send task dropped".to_string(),
-                    )));
-                }
-            }
+            let topic_for_producer = full_topic_clone.as_str();
+            producer
+                .send(
+                    BaseRecord::to(topic_for_producer)
+                        .key(&key_bytes)
+                        .payload(&payload_bytes),
+                )
+                .map_err(|(kafka_err, _owned)| map_backend_error(kafka_err))?;
+            producer
+                .flush(Duration::from_secs(60))
+                .map_err(map_backend_error)?;
 
             // Now poll to consume the message we just produced.
             while Instant::now() < deadline {

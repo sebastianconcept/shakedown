@@ -836,6 +836,9 @@ impl KafkaBindings {
     }
 
     /// Return the topic name under this scenario's prefix.
+    ///
+    /// See also [`consumer_group_namespace`](Self::consumer_group_namespace) — consumer groups
+    /// must stay on the same scenario boundary as topics when parallel tests share a broker.
     pub fn topic_namespace(&self, topic_name: &str) -> String {
         format!("{}{}", self.topic_prefix, topic_name)
     }
@@ -953,6 +956,8 @@ impl RabbitBindings {
     }
 
     /// Compose a queue or exchange name under this scenario's prefix (same composition as [`KafkaBindings::topic_namespace`]).
+    ///
+    /// See also [`queue_namespace`](Self::queue_namespace) and [`exchange_namespace`](Self::exchange_namespace).
     pub fn namespaced_name(&self, logical_name: &str) -> String {
         format!("{}{}", self.resource_prefix, logical_name)
     }
@@ -961,6 +966,8 @@ impl RabbitBindings {
     ///
     /// Use this when declaring queues so parallel scenarios don't share the same queue name and
     /// accidentally consume each other's messages.
+    ///
+    /// See also [`exchange_namespace`](Self::exchange_namespace) and [`namespaced_name`](Self::namespaced_name).
     pub fn queue_namespace(&self, queue: &str) -> String {
         format!("{}{}", self.resource_prefix, queue)
     }
@@ -969,6 +976,8 @@ impl RabbitBindings {
     ///
     /// Use this when declaring exchanges so parallel scenarios don't route messages to shared
     /// exchanges unintentionally.
+    ///
+    /// See also [`queue_namespace`](Self::queue_namespace) and [`namespaced_name`](Self::namespaced_name).
     pub fn exchange_namespace(&self, exchange: &str) -> String {
         format!("{}{}", self.resource_prefix, exchange)
     }
@@ -1417,12 +1426,17 @@ pub struct NatsBindings {
     /// Mapped host port for NATS.
     pub port: u16,
     /// Prefix prepended to logical subjects (`shakedown.<scenario>.`).
+    ///
+    /// See also [`subject_namespace`](Self::subject_namespace) for the full subject string.
     pub subject_prefix: String,
 }
 
 #[cfg(feature = "nats")]
 impl NatsBindings {
     /// Full subject for a logical name under this scenario's prefix.
+    ///
+    /// See also [`subject_prefix`](Self::subject_prefix) — JetStream stream and subject wiring
+    /// should stay consistent with this namespace.
     pub fn subject_namespace(&self, logical_subject: &str) -> String {
         format!("{}{}", self.subject_prefix, logical_subject)
     }
