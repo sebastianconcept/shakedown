@@ -2,8 +2,9 @@
 
 use std::time::{Duration, Instant};
 
+use futures_util::StreamExt;
 use lapin::options::{
-    BasicAckOptions, BasicGetOptions, BasicNackOptions, BasicPublishOptions,
+    BasicAckOptions, BasicConsumeOptions, BasicGetOptions, BasicNackOptions, BasicPublishOptions,
     ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
 };
 use lapin::types::{FieldTable, ShortString};
@@ -273,5 +274,153 @@ impl<'ctx> RabbitHelpers<'ctx> {
         timeout: Option<Duration>,
     ) -> Result<ConsumedMessage, ShakedownError> {
         self.consume_until(queue, |_| true, timeout).await
+    }
+
+    /// Declare exchange/queue topology, register a consumer (`basic_consume`) **before**
+    /// `basic_publish`, and return the first delivery.
+    ///
+    /// This helper solves the fresh-exchange/queue problem: a message published before a consumer
+    /// has declared and bound the queue will be dropped. By declaring the topology and registering
+    /// a consumer before publishing, messages are guaranteed to be routed and delivered.
+    ///
+    /// `exchange` and `queue` are logical names; AMQP names are namespaced via
+    /// [`RabbitBindings::namespaced_name`]. `routing_key` is sent as-is.
+    /// When `timeout` is `None`, uses [`DEFAULT_HELPER_CONSUME_TIMEOUT`] (20 seconds).
+    ///
+    /// See also: [`Self::declare_topology`] + [`Self::publish`] + [`Self::consume_until`] for
+    /// explicit control over each step.
+    pub async fn publish_and_await(
+        &self,
+        exchange: &str,
+        exchange_kind: ExchangeKind,
+        queue: &str,
+        routing_key: &str,
+        payload: impl Into<Vec<u8>>,
+        timeout: Option<Duration>,
+    ) -> Result<ConsumedMessage, ShakedownError> {
+        let rabbit_bindings = self.rabbit_bindings()?;
+        let exchange_name = rabbit_bindings.namespaced_name(exchange);
+        let queue_name = rabbit_bindings.namespaced_name(queue);
+        let limit = timeout.unwrap_or(DEFAULT_HELPER_CONSUME_TIMEOUT);
+        let payload_bytes = payload.into();
+        let routing_key_owned = routing_key.to_string();
+        let consumer_tag = format!("shakedown-paa-{}", self.context.scenario_id().as_str());
+
+        // Step 1: Declare topology (exchange + queue + binding).
+        let connection = Connection::connect(
+            rabbit_bindings.amqp_uri.as_str(),
+            ConnectionProperties::default(),
+        )
+        .await
+        .map_err(map_backend_error)?;
+        let channel = connection
+            .create_channel()
+            .await
+            .map_err(map_backend_error)?;
+
+        channel
+            .exchange_declare(
+                exchange_name.as_str().into(),
+                exchange_kind,
+                ExchangeDeclareOptions {
+                    durable: true,
+                    ..ExchangeDeclareOptions::default()
+                },
+                FieldTable::default(),
+            )
+            .await
+            .map_err(map_backend_error)?;
+
+        channel
+            .queue_declare(
+                queue_name.as_str().into(),
+                QueueDeclareOptions {
+                    durable: true,
+                    ..QueueDeclareOptions::default()
+                },
+                FieldTable::default(),
+            )
+            .await
+            .map_err(map_backend_error)?;
+
+        channel
+            .queue_bind(
+                queue_name.as_str().into(),
+                exchange_name.as_str().into(),
+                routing_key_owned.as_str().into(),
+                QueueBindOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(map_backend_error)?;
+
+        // Step 2: Register a consumer (subscribe) before publishing so routing has a ready sink.
+        let mut consumer = channel
+            .basic_consume(
+                ShortString::from(queue_name.as_str()),
+                ShortString::from(consumer_tag.as_str()),
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(map_backend_error)?;
+
+        // Step 3: Publish after the consumer is registered.
+        channel
+            .basic_publish(
+                exchange_name.as_str().into(),
+                routing_key_owned.as_str().into(),
+                BasicPublishOptions::default(),
+                payload_bytes.as_slice(),
+                BasicProperties::default(),
+            )
+            .await
+            .map_err(map_backend_error)?
+            .await
+            .map_err(map_backend_error)?;
+
+        // Step 4: Await the first delivery on the consumer stream.
+        let started_at = Instant::now();
+        let deadline = started_at + limit;
+
+        while Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(remaining, consumer.next()).await {
+                Ok(Some(Ok(delivery))) => {
+                    let delivery_routing_key = delivery.routing_key.as_str();
+                    let consumed = ConsumedMessage {
+                        key: Some(delivery_routing_key.as_bytes().to_vec()),
+                        payload: Some(delivery.data.to_vec()),
+                        source: queue_name.clone(),
+                    };
+                    channel
+                        .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
+                        .await
+                        .map_err(map_backend_error)?;
+                    let _ = connection
+                        .close(200, "shakedown_helpers_publish_and_await_ok".into())
+                        .await;
+                    return Ok(consumed);
+                }
+                Ok(Some(Err(error))) => return Err(map_backend_error(error)),
+                Ok(None) => break,
+                Err(_) => {}
+            }
+        }
+
+        let _ = connection
+            .close(200, "shakedown_helpers_publish_and_await_timeout".into())
+            .await;
+
+        let elapsed = started_at.elapsed();
+        Err(ShakedownError::HelperTimeout {
+            resource: queue_name,
+            operation: "rabbit.publish_and_await",
+            timeout: limit,
+            elapsed,
+        })
     }
 }
