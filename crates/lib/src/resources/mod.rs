@@ -1341,6 +1341,44 @@ impl RedisSentinelBindings {
     pub fn key_namespace(&self, key: &str) -> String {
         format!("{}{}", self.key_prefix, key)
     }
+
+    /// Build a `redis::sentinel::SentinelClient` for the logical master ([`Self::master_name`]),
+    /// using [`Self::sentinel_hosts`] as Sentinel discovery endpoints.
+    ///
+    /// This is the high-level sentinel type that resolves the **current** primary after failovers
+    /// (via `SentinelClient::async_get_client` / sync APIs), unlike a plain `redis::Client` opened
+    /// only to [`Self::connection_url`], which does not track topology.
+    ///
+    /// Requires the **`redis-sentinel`** Cargo feature (redis crate `sentinel` + `tokio-comp`).
+    pub fn sentinel_client(
+        &self,
+    ) -> Result<::redis::sentinel::SentinelClient, crate::error::ShakedownError> {
+        use ::redis::sentinel::SentinelServerType;
+
+        let sentinel_urls: Vec<String> = self
+            .sentinel_hosts
+            .split(',')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .map(|host_port| format!("redis://{host_port}/"))
+            .collect();
+
+        if sentinel_urls.is_empty() {
+            return Err(crate::error::ShakedownError::Infrastructure(
+                InfrastructureError::Backend(Box::new(std::io::Error::other(
+                    "RedisSentinelBindings.sentinel_client: sentinel_hosts has no endpoints",
+                ))),
+            ));
+        }
+
+        ::redis::sentinel::SentinelClient::build(
+            sentinel_urls,
+            self.master_name.clone(),
+            None,
+            SentinelServerType::Master,
+        )
+        .map_err(crate::helper_prelude::map_backend_error)
+    }
 }
 
 #[cfg(feature = "redis-sentinel")]
@@ -2226,6 +2264,10 @@ mod tests {
         };
         // When we compare trait namespace to key_namespace
         assert_eq!(bindings.namespace("k"), bindings.key_namespace("k"));
+        // And sentinel_client builds from comma-separated sentinel endpoints (no I/O)
+        let _master_via_sentinel = bindings
+            .sentinel_client()
+            .expect("SentinelClient::build from harness-shaped sentinel_hosts");
         // And we isolate a sub-context
         let sub = bindings.isolate("s").await.expect("isolate should succeed");
         // Then the key prefix deepens with a colon separator

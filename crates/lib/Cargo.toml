@@ -244,6 +244,7 @@ valkey = [
 # Redis primary + replicas + Sentinel on a suite bridge (`redis` + `cluster`)
 redis-sentinel = [
     "redis",
+    "redis?/sentinel",
     "cluster",
     "shakedown-macros/redis-sentinel",
 ]
