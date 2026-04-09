@@ -49,6 +49,30 @@ pub enum PullPolicy {
 }
 
 /// Overrides the default environment variable name for a harness binding when injecting into a service container.
+///
+/// ## Which mapping do I need?
+///
+/// | Your service reads… | Use |
+/// |---|---|
+/// | Kafka bootstrap / brokers from env | [`EnvMapping::kafka`] |
+/// | A topic name from env (scenario-namespaced) | [`EnvMapping::kafka_topic`] |
+/// | A consumer group id from env (scenario-namespaced) | [`EnvMapping::kafka_consumer_group`] |
+/// | Postgres URL from env | [`EnvMapping::postgres`] |
+/// | MariaDB URL from env | [`EnvMapping::mariadb`] |
+/// | MySQL URL from env | [`EnvMapping::mysql`] |
+/// | RabbitMQ AMQP URL from env | [`EnvMapping::rabbitmq`] |
+/// | Redis / Valkey URL from env | [`EnvMapping::redis`] |
+/// | A registered HTTP mock’s base URL from env | [`EnvMapping::mock_service`] |
+/// | Another registered service’s base URL from env | [`EnvMapping::service`] |
+/// | A named port on another service from env | [`EnvMapping::service_named_port`] |
+///
+/// Optional engines (MongoDB, NATS, Neo4j, Elasticsearch, …) expose matching variants when the
+/// corresponding `shakedown` Cargo features are enabled — same idea: map harness bindings into the
+/// env var names your binary already reads.
+///
+/// If your service uses the default env var names the harness already injects (for example
+/// `DATABASE_URL`, `KAFKA_BOOTSTRAP_SERVERS`), you do not need [`EnvMapping`] — convention injection
+/// covers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum EnvMapping {
