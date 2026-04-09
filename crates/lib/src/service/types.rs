@@ -54,6 +54,18 @@ pub enum PullPolicy {
 pub enum EnvMapping {
     /// Kafka bootstrap / connection string → custom env var name.
     Kafka(String),
+    /// Scenario-namespaced Kafka topic for a logical name ([`crate::KafkaBindings::topic_namespace`]) → env var.
+    ///
+    /// Use when a service subscribes to a logical topic (e.g. `portfolio`) that Shakedown prefixes per scenario.
+    KafkaTopic {
+        env_var: String,
+        logical_topic: String,
+    },
+    /// Scenario-namespaced Kafka consumer group ([`crate::KafkaBindings::consumer_group_namespace`]) → env var.
+    KafkaConsumerGroup {
+        env_var: String,
+        logical_group_id: String,
+    },
     /// Postgres `DATABASE_URL` (or equivalent) → custom env var name.
     Postgres(String),
     /// MariaDB URL → custom env var name.
@@ -115,6 +127,28 @@ impl EnvMapping {
     /// Map Kafka bindings to `environment_variable_name`.
     pub fn kafka(environment_variable_name: impl Into<String>) -> Self {
         Self::Kafka(environment_variable_name.into())
+    }
+
+    /// Map the scenario-namespaced Kafka topic for `logical_topic` to `environment_variable_name`.
+    pub fn kafka_topic(
+        environment_variable_name: impl Into<String>,
+        logical_topic: impl Into<String>,
+    ) -> Self {
+        Self::KafkaTopic {
+            env_var: environment_variable_name.into(),
+            logical_topic: logical_topic.into(),
+        }
+    }
+
+    /// Map the scenario-namespaced consumer group for `logical_group_id` to `environment_variable_name`.
+    pub fn kafka_consumer_group(
+        environment_variable_name: impl Into<String>,
+        logical_group_id: impl Into<String>,
+    ) -> Self {
+        Self::KafkaConsumerGroup {
+            env_var: environment_variable_name.into(),
+            logical_group_id: logical_group_id.into(),
+        }
     }
 
     /// Map Postgres bindings to `environment_variable_name`.
