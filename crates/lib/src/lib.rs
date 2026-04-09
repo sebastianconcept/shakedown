@@ -115,7 +115,8 @@
 //! shakedown/
 //! ├── crates/
 //! │   ├── lib/          # this crate: orchestration engine
-//! │   └── macros/       # procedural macros (shakedown-macros)
+//! │   ├── macros/       # procedural macros (shakedown-macros)
+//! │   └── examples/     # optional adoption scenarios (`shakedown-examples`)
 //! ```
 //!
 //! ## Extension points

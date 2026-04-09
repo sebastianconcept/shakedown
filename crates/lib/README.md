@@ -803,7 +803,7 @@ To use your verifier from tests, call `PublicationVerifier::assert_observed(&you
 
 ### Quick-start (HTTP)
 
-Runnable reference: [`tests/mock_service_http.rs`](tests/mock_service_http.rs).
+Runnable reference: [`tests/mock_service_http.rs`](tests/mock_service_http.rs). For a **full stack** walkthrough (Postgres + Kafka + `HttpMockService::respond_with` + `ServiceUnderTest` + `EnvMapping`), see the `shakedown-examples` crate: [`../examples/tests/service_with_mock.rs`](../examples/tests/service_with_mock.rs) and [`../examples/examples/service_with_mock.rs`](../examples/examples/service_with_mock.rs) (`cargo test -p shakedown-examples --test service_with_mock --features kafka,postgres,mock-services,services -- --ignored`).
 
 ```rust,ignore
 use shakedown::{run_scenario, Context, EventLog, HttpMockService};
@@ -856,7 +856,7 @@ handle.assert_not_called().expect("no calls");
 
 ### Verification and tests
 
-Automated references: [`tests/mock_service_http.rs`](tests/mock_service_http.rs) and [`tests/mock_service_grpc.rs`](tests/mock_service_grpc.rs).
+Automated references: [`tests/mock_service_http.rs`](tests/mock_service_http.rs) and [`tests/mock_service_grpc.rs`](tests/mock_service_grpc.rs). Annotated adoption scenario (resources + mock + service + DB assertions): [`../examples/tests/service_with_mock.rs`](../examples/tests/service_with_mock.rs).
 
 ## Service under test (`services` feature)
 
