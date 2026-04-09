@@ -44,6 +44,13 @@ mod test;
 /// - **`prelude = { ... }`** — statements run on `ctx` after resource registration and before
 ///   [`run_scenario`] (e.g. register HTTP/gRPC mock services, which must complete before the harness
 ///   starts mock listeners).
+/// - **`ignore = true | false`** — optional override for automatic `#[ignore]` on the generated
+///   `#[tokio::test]`. When `resources = [...]` is non-empty, the macro emits `#[ignore]` by default
+///   so Docker-dependent tests are not run by plain `cargo test`. Set `ignore = false` when your CI
+///   always provides Docker and you want these tests to run without `cargo test -- --ignored`. When
+///   `ignore` is omitted: non-empty `resources` implies `#[ignore]`; empty or absent `resources`
+///   does not add `#[ignore]`. A redundant `#[ignore]` on the same function is merged with the
+///   generated attribute (no duplicate `#[ignore]`).
 /// - **Integration with the rest of the harness** — same path as manual `run_scenario` callers:
 ///   outbox assertions, Kafka/DB bindings, Docker diagnostics when features are on, etc.
 ///
