@@ -51,12 +51,12 @@ impl HttpMockServiceResponseBuilder {
         }
     }
 
-    /// Finish with a raw body.
-    pub fn body_bytes(self, body: impl Into<Bytes>) -> HttpMockServiceResponse {
+    /// Finish with a raw body (copied). Accepts `AsRef<[u8]>`, including `b"…"` literals.
+    pub fn body_bytes(self, body: impl AsRef<[u8]>) -> HttpMockServiceResponse {
         HttpMockServiceResponse {
             status: self.status,
             headers: self.headers,
-            body: body.into(),
+            body: Bytes::copy_from_slice(body.as_ref()),
         }
     }
 
@@ -80,5 +80,32 @@ impl HttpMockServiceResponseBuilder {
             headers: self.headers,
             body: Bytes::from(raw),
         })
+    }
+}
+
+#[cfg(test)]
+mod body_bytes_tests {
+    use bytes::Bytes;
+
+    use super::HttpMockServiceResponseBuilder;
+
+    #[test]
+    fn body_bytes_accepts_byte_string_literal() {
+        let response = HttpMockServiceResponseBuilder::new().body_bytes(b"hello");
+        assert_eq!(response.body.as_ref(), b"hello");
+    }
+
+    #[test]
+    fn body_bytes_accepts_vec_slice_and_bytes() {
+        let from_vec = HttpMockServiceResponseBuilder::new().body_bytes(vec![1u8, 2, 3]);
+        assert_eq!(from_vec.body.as_ref(), &[1, 2, 3]);
+
+        let slice: &[u8] = &[4, 5];
+        let from_slice = HttpMockServiceResponseBuilder::new().body_bytes(slice);
+        assert_eq!(from_slice.body.as_ref(), slice);
+
+        let from_bytes =
+            HttpMockServiceResponseBuilder::new().body_bytes(Bytes::from_static(b"ok"));
+        assert_eq!(from_bytes.body.as_ref(), b"ok");
     }
 }
