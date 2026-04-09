@@ -30,8 +30,20 @@ mod test;
 /// that constructs [`shakedown::Context`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html),
 /// an [`shakedown::EventLog`](https://docs.rs/shakedown/latest/shakedown/event/struct.EventLog.html),
 /// optionally pre-registers builtin resources, then runs your body inside
-/// [`shakedown::run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
-/// (full lifecycle: provision → readiness → seed → run → assert → teardown).
+/// [`shakedown::run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html).
+///
+/// # Order of operations
+///
+/// End-to-end, a `#[shakedown::test]` function runs stages in this order:
+///
+/// 1. **`resources`** — builtins from `resources = [...]` are registered on a fresh context (macro expansion).
+/// 2. **`prelude`** — optional `prelude = { ... }` runs next (register HTTP mocks, `ServiceUnderTest`, etc.).
+///    This happens **before** [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
+///    so everything is wired on `ctx` when the harness starts.
+/// 3. **`run_scenario`** then runs **provision** and **readiness** for registered resources, **seed**
+///    (`apply_default_seed`), **mocks** (mock HTTP/gRPC listeners start), **services** (service-under-test
+///    containers start and become healthy), your scenario **body**, the harness **assert** phase, and
+///    finally **teardown**.
 ///
 /// **Unlocks when used:**
 /// - **No wiring boilerplate** — you write only the scenario body; the harness supplies `ctx` and
@@ -42,8 +54,8 @@ mod test;
 ///   …) on `ctx` before your code runs; each name requires the matching feature on the `shakedown`
 ///   dependency (e.g. `kafka` for `Kafka`).
 /// - **`prelude = { ... }`** — statements run on `ctx` after resource registration and before
-///   [`run_scenario`] (e.g. register HTTP/gRPC mock services, which must complete before the harness
-///   starts mock listeners).
+///   [`shakedown::run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
+///   (e.g. register HTTP/gRPC mock services, which must complete before the harness starts mock listeners).
 /// - **`ignore = true | false`** — optional override for automatic `#[ignore]` on the generated
 ///   `#[tokio::test]`. When `resources = [...]` is non-empty, the macro emits `#[ignore]` by default
 ///   so Docker-dependent tests are not run by plain `cargo test`. Set `ignore = false` when your CI

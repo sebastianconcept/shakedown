@@ -130,6 +130,8 @@
 //! alongside this repository.
 
 #![warn(missing_docs)]
+// Many module docs link to feature-gated or external items; keep `cargo doc` warning-clean for CI.
+#![allow(rustdoc::broken_intra_doc_links, rustdoc::private_intra_doc_links)]
 
 mod docker_labels;
 

@@ -1,4 +1,15 @@
 //! HTTP mock service types and implementations.
+//!
+//! ## When to use [`HttpMockService`] vs [`HttpMockServiceTrait`]
+//!
+//! Prefer the declarative [`HttpMockService`] builder (for example [`HttpMockService::on`], [`HttpMockServiceRoutePending::respond_with`], [`HttpMockServiceRoutePending::respond_json`])
+//! when routes are static: fixed methods and paths, known status codes, JSON or byte bodies, and
+//! extra headers. You get compile-time route tables without writing a type that implements the trait.
+//!
+//! Implement [`HttpMockServiceTrait`] when the stub must depend on the incoming request, keep state
+//! across calls, branch on headers or query shape, or coordinate with shared infrastructure through
+//! [`crate::mock_service::types::MockServiceContext`] — behavior that does not fit a fixed declarative
+//! table.
 
 mod request;
 mod response;
