@@ -53,13 +53,19 @@ pub enum RouteMatch {
     Exact(String),
     /// Path pattern where `*` matches exactly one non-empty path segment (see [`RouteMatch::matches`]).
     Glob(String),
+    /// Matches if `path == prefix` or `path` continues the prefix with `/` and more segments (D-4).
+    Prefix(String),
 }
 
 impl RouteMatch {
-    /// Classify a path string: any `*` enables glob semantics for the whole pattern.
+    /// Classify a path string: a trailing `/**` yields [`RouteMatch::Prefix`]; any other `*`
+    /// enables glob semantics for the whole pattern.
     pub(crate) fn for_path(path: impl Into<String>) -> Self {
         let path_string = path.into();
-        if path_string.contains('*') {
+        if path_string.ends_with("/**") {
+            let prefix = path_string[..path_string.len() - 3].to_string();
+            RouteMatch::Prefix(prefix)
+        } else if path_string.contains('*') {
             RouteMatch::Glob(path_string)
         } else {
             RouteMatch::Exact(path_string)
@@ -71,6 +77,11 @@ impl RouteMatch {
         match self {
             RouteMatch::Exact(expected) => expected == path,
             RouteMatch::Glob(pattern) => glob_matches_single_segment(pattern, path),
+            RouteMatch::Prefix(prefix) => {
+                path == prefix.as_str()
+                    || (path.starts_with(prefix.as_str())
+                        && path.as_bytes().get(prefix.len()) == Some(&b'/'))
+            }
         }
     }
 }
@@ -139,7 +150,7 @@ impl HttpMockService {
     }
 
     /// Registers a route for the given HTTP method and path. Path may use `*` for a single-segment
-    /// glob (see [`RouteMatch::Glob`]).
+    /// glob (see [`RouteMatch::Glob`]), or end with `/**` for prefix matching (see [`RouteMatch::Prefix`]).
     pub fn on(
         self,
         method: impl AsRef<str>,
@@ -149,6 +160,20 @@ impl HttpMockService {
             mock_service: self,
             method: normalize_method(method.as_ref()),
             path: path.into(),
+        }
+    }
+
+    /// Like [`HttpMockService::on`], but matches all paths under `prefix` (same as `prefix + "/**"`).
+    pub fn on_prefix(
+        self,
+        method: impl AsRef<str>,
+        prefix: impl Into<String>,
+    ) -> HttpMockServiceRoutePending {
+        let prefix_string = prefix.into();
+        HttpMockServiceRoutePending {
+            mock_service: self,
+            method: normalize_method(method.as_ref()),
+            path: format!("{prefix_string}/**"),
         }
     }
 }

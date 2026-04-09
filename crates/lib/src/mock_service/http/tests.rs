@@ -138,6 +138,61 @@ fn route_match_glob_star_is_single_segment_only() {
     assert!(!RouteMatch::Glob(String::from("/users/*/profile")).matches("/users/a/b/profile"));
 }
 
+#[test]
+fn route_match_for_path_trailing_glob_star_star_yields_prefix() {
+    assert_eq!(
+        RouteMatch::for_path("/api/**"),
+        RouteMatch::Prefix("/api".to_string())
+    );
+}
+
+#[test]
+fn route_match_prefix_d4_exact_and_continuation() {
+    let prefix = RouteMatch::Prefix("/v8/finance/chart".to_string());
+    assert!(prefix.matches("/v8/finance/chart"));
+    assert!(prefix.matches("/v8/finance/chart/AAPL"));
+    assert!(!prefix.matches("/v8/finance/charter"));
+}
+
+#[test]
+fn route_match_prefix_on_get_api_glob_matches_nested_path() {
+    let route_match = RouteMatch::for_path("/api/**");
+    assert!(matches!(route_match, RouteMatch::Prefix(_)));
+    assert!(route_match.matches("/api/foo/bar/baz"));
+}
+
+#[tokio::test]
+async fn on_get_api_glob_responds_for_nested_path() {
+    let mock_service = HttpMockService::new("api")
+        .on("GET", "/api/**")
+        .respond(204);
+    let request = HttpMockServiceRequest {
+        method: String::from("GET"),
+        path: String::from("/api/foo/bar/baz"),
+        query: None,
+        headers: Vec::new(),
+        body: Bytes::new(),
+    };
+    let response = mock_service.handle(request, &ctx()).await;
+    assert_eq!(response.status, 204);
+}
+
+#[tokio::test]
+async fn on_prefix_matches_nested_path() {
+    let mock_service = HttpMockService::new("api")
+        .on_prefix("GET", "/api")
+        .respond(200);
+    let request = HttpMockServiceRequest {
+        method: String::from("GET"),
+        path: String::from("/api/foo/bar/baz"),
+        query: None,
+        headers: Vec::new(),
+        body: Bytes::new(),
+    };
+    let response = mock_service.handle(request, &ctx()).await;
+    assert_eq!(response.status, 200);
+}
+
 #[tokio::test]
 async fn respond_with_declarative_header_set_cookie() {
     let mock_service = HttpMockService::new("api")
