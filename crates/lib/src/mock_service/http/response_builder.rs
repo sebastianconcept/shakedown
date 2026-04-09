@@ -13,8 +13,15 @@ pub struct HttpMockServiceResponseBuilder {
     headers: Vec<(String, String)>,
 }
 
+impl Default for HttpMockServiceResponseBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HttpMockServiceResponseBuilder {
-    pub(crate) fn new() -> Self {
+    /// Starts a builder with status **200** and no headers.
+    pub fn new() -> Self {
         Self {
             status: 200,
             headers: Vec::new(),

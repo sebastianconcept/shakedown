@@ -4,6 +4,7 @@ use bytes::Bytes;
 
 use super::service::{HttpMockService, RouteMatch};
 use super::HttpMockServiceRequest;
+use super::HttpMockServiceResponse;
 use super::HttpMockServiceTrait;
 use crate::mock_service::types::{MockServiceContext, MockServiceResources};
 
@@ -135,4 +136,95 @@ async fn respond_json_sets_content_type() {
 fn route_match_glob_star_is_single_segment_only() {
     assert!(RouteMatch::Glob(String::from("/users/*/profile")).matches("/users/42/profile"));
     assert!(!RouteMatch::Glob(String::from("/users/*/profile")).matches("/users/a/b/profile"));
+}
+
+#[tokio::test]
+async fn respond_with_declarative_header_set_cookie() {
+    let mock_service = HttpMockService::new("api")
+        .on("GET", "/session")
+        .respond_with(
+            HttpMockServiceResponse::builder()
+                .header("set-cookie", "A=B")
+                .body_empty(),
+        );
+    let request = HttpMockServiceRequest {
+        method: String::from("GET"),
+        path: String::from("/session"),
+        query: None,
+        headers: Vec::new(),
+        body: Bytes::new(),
+    };
+    let response = mock_service.handle(request, &ctx()).await;
+    assert_eq!(response.status, 200);
+    assert!(response
+        .headers
+        .iter()
+        .any(|(name, value)| { name == "set-cookie" && value == "A=B" }));
+}
+
+#[tokio::test]
+async fn mixing_respond_respond_json_and_respond_with() {
+    let mock_service = HttpMockService::new("mix")
+        .on("GET", "/plain")
+        .respond(418)
+        .on("POST", "/json")
+        .respond_json(&serde_json::json!({ "k": 2 }))
+        .expect("json")
+        .on("GET", "/custom")
+        .respond_with(
+            HttpMockServiceResponse::builder()
+                .status(203)
+                .header("x-custom", "yes")
+                .body_empty(),
+        );
+
+    let plain = mock_service
+        .handle(
+            HttpMockServiceRequest {
+                method: String::from("GET"),
+                path: String::from("/plain"),
+                query: None,
+                headers: Vec::new(),
+                body: Bytes::new(),
+            },
+            &ctx(),
+        )
+        .await;
+    assert_eq!(plain.status, 418);
+
+    let json_route = mock_service
+        .handle(
+            HttpMockServiceRequest {
+                method: String::from("POST"),
+                path: String::from("/json"),
+                query: None,
+                headers: Vec::new(),
+                body: Bytes::new(),
+            },
+            &ctx(),
+        )
+        .await;
+    assert_eq!(json_route.status, 200);
+    assert!(json_route
+        .headers
+        .iter()
+        .any(|(key, _)| key == "content-type"));
+
+    let custom = mock_service
+        .handle(
+            HttpMockServiceRequest {
+                method: String::from("GET"),
+                path: String::from("/custom"),
+                query: None,
+                headers: Vec::new(),
+                body: Bytes::new(),
+            },
+            &ctx(),
+        )
+        .await;
+    assert_eq!(custom.status, 203);
+    assert!(custom
+        .headers
+        .iter()
+        .any(|(name, value)| { name == "x-custom" && value == "yes" }));
 }

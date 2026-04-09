@@ -176,6 +176,20 @@ impl HttpMockServiceRoutePending {
             .push((self.method, route_match, response));
         Ok(mock_service)
     }
+
+    /// Registers the route with a fully built response (status, headers, body).
+    ///
+    /// Use [`HttpMockServiceResponse::builder`] to set custom headers, then call
+    /// [`HttpMockServiceResponseBuilder::body_empty`], [`HttpMockServiceResponseBuilder::body_bytes`],
+    /// or [`HttpMockServiceResponseBuilder::json`].
+    pub fn respond_with(self, response: HttpMockServiceResponse) -> HttpMockService {
+        let route_match = RouteMatch::for_path(self.path);
+        let mut mock_service = self.mock_service;
+        mock_service
+            .routes
+            .push((self.method, route_match, response));
+        mock_service
+    }
 }
 
 #[async_trait]
