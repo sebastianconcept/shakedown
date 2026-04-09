@@ -94,6 +94,8 @@ impl MappingOverrides {
         for mapping in mappings {
             match mapping {
                 EnvMapping::Kafka(name) => overrides.kafka = Some(name.clone()),
+                EnvMapping::KafkaTopic { .. } => {}
+                EnvMapping::KafkaConsumerGroup { .. } => {}
                 EnvMapping::Postgres(name) => overrides.postgres = Some(name.clone()),
                 EnvMapping::MariaDb(name) => overrides.mariadb = Some(name.clone()),
                 EnvMapping::Mysql(name) => overrides.mysql = Some(name.clone()),
@@ -386,6 +388,24 @@ fn resolve_env_mapping(
         EnvMapping::Kafka(key) => context
             .kafka_bindings()
             .map(|bindings| (key.clone(), kafka_bootstrap_value(bindings))),
+        EnvMapping::KafkaTopic {
+            env_var,
+            logical_topic,
+        } => context.kafka_bindings().map(|bindings| {
+            (
+                env_var.clone(),
+                bindings.topic_namespace(logical_topic.as_str()),
+            )
+        }),
+        EnvMapping::KafkaConsumerGroup {
+            env_var,
+            logical_group_id,
+        } => context.kafka_bindings().map(|bindings| {
+            (
+                env_var.clone(),
+                bindings.consumer_group_namespace(logical_group_id.as_str()),
+            )
+        }),
         #[cfg(feature = "postgres")]
         EnvMapping::Postgres(key) => context.postgres_bindings().map(|bindings| {
             (
