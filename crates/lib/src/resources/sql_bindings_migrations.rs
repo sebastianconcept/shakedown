@@ -32,7 +32,7 @@ impl crate::resources::PostgresBindings {
             .map_err(map_migration_failure)
     }
 
-    /// Open a [`sqlx::postgres::PgPool`](sqlx::postgres::PgPool) for this scenario's database (`postgres` + `sqlx` + Postgres or TimescaleDB bindings).
+    /// Open a [`sqlx::postgres::PgPool`] for this scenario's database (`postgres` + `sqlx` + Postgres or TimescaleDB bindings).
     #[cfg(all(feature = "sqlx", any(feature = "postgres", feature = "timescaledb")))]
     pub async fn pg_pool(&self) -> Result<sqlx::postgres::PgPool, ShakedownError> {
         sqlx::postgres::PgPool::connect(self.connection_url.as_str())
@@ -54,7 +54,7 @@ impl crate::resources::SqliteBindings {
             .map_err(map_migration_failure)
     }
 
-    /// Open a [`sqlx::sqlite::SqlitePool`](sqlx::sqlite::SqlitePool) for this scenario's database (`sqlite` + `sqlx`).
+    /// Open a [`sqlx::sqlite::SqlitePool`] for this scenario's database (`sqlite` + `sqlx`).
     ///
     /// Uses URI connection options so that Shakedown's `file:…?mode=memory&cache=shared` in-memory
     /// URIs open against the **same** named database as the rusqlite connection held by the harness.

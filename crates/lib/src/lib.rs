@@ -131,7 +131,9 @@
 //! alongside this repository.
 
 #![warn(missing_docs)]
-// Many module docs link to feature-gated or external items; keep `cargo doc` warning-clean for CI.
+// Crate docs and module docs link to feature-gated items, optional dependencies (e.g. `sqlx`), and
+// re-exports that are absent under `cargo doc`'s default feature set. Fixing every link for every
+// feature matrix is not practical; keep rustdoc warning-clean for the common doc build.
 #![allow(rustdoc::broken_intra_doc_links, rustdoc::private_intra_doc_links)]
 
 mod docker_labels;

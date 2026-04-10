@@ -1,5 +1,17 @@
 use proc_macro2::TokenStream;
 use quote::quote;
+use syn::parse2;
+
+fn item_fn_from_expanded(expanded: TokenStream) -> syn::ItemFn {
+    parse2(expanded).expect("macro expansion should parse as ItemFn")
+}
+
+fn ignore_attribute_count(item: &syn::ItemFn) -> usize {
+    item.attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("ignore"))
+        .count()
+}
 
 #[test]
 fn empty_attribute_parses_as_no_resources_and_no_prelude() {
@@ -36,80 +48,92 @@ fn duplicate_resources_argument_is_rejected() {
 }
 
 #[test]
+fn duplicate_ignore_argument_is_rejected() {
+    // Given duplicate `ignore` keys in the attribute
+    let attr: TokenStream = quote!(resources = [Fake], ignore = true, ignore = false);
+    // When parsed as test attribute arguments
+    let result = super::parse_test_attr(attr);
+    // Then parsing fails
+    assert!(result.is_err());
+}
+
+#[test]
 fn ignore_false_parses() {
+    // Given `resources` and `ignore = false`
     let attr: TokenStream = quote!(resources = [Fake], ignore = false);
+    // When parsed as test attribute arguments
     let parsed = super::parse_test_attr(attr).expect("parse");
+    // Then `ignore` is false
     assert_eq!(parsed.ignore, Some(false));
 }
 
 #[test]
 fn expand_resources_emits_single_ignore() {
+    // Given the macro attribute requests a Docker-backed resource
     let attr: TokenStream = quote!(resources = [Fake]);
     let item: TokenStream = quote! {
         async fn scenario_auto(ctx: &mut Context) {}
     };
+    // When the test macro expands
     let expanded = super::expand(attr, item);
-    let rendered = expanded.to_string();
-    assert!(
-        rendered.contains("ignore"),
-        "expected #[ignore] in expansion: {rendered}"
-    );
+    let item_fn = item_fn_from_expanded(expanded);
+    // Then exactly one `#[ignore]` is present on the generated test function
+    assert_eq!(ignore_attribute_count(&item_fn), 1);
 }
 
 #[test]
 fn expand_resources_with_manual_ignore_is_idempotent() {
+    // Given resources and a manual `#[ignore]` on the scenario function
     let attr: TokenStream = quote!(resources = [Fake]);
     let item: TokenStream = quote! {
         #[ignore]
         async fn scenario_manual(ctx: &mut Context) {}
     };
+    // When the macro expands
     let expanded = super::expand(attr, item);
-    let rendered = expanded.to_string();
-    let ignore_count = rendered.matches("ignore").count();
-    assert_eq!(
-        ignore_count, 1,
-        "expected exactly one ignore attribute, got {ignore_count} in: {rendered}"
-    );
+    let item_fn = item_fn_from_expanded(expanded);
+    // Then the expansion still has exactly one `ignore` attribute (no duplicate)
+    assert_eq!(ignore_attribute_count(&item_fn), 1);
 }
 
 #[test]
 fn expand_resources_with_ignore_false_suppresses_auto_ignore() {
+    // Given `ignore = false` with resources
     let attr: TokenStream = quote!(resources = [Fake], ignore = false);
     let item: TokenStream = quote! {
         async fn scenario_ci(ctx: &mut Context) {}
     };
+    // When the macro expands
     let expanded = super::expand(attr, item);
-    let rendered = expanded.to_string();
-    assert!(
-        !rendered.contains("ignore"),
-        "expected no #[ignore] when ignore = false: {rendered}"
-    );
+    let item_fn = item_fn_from_expanded(expanded);
+    // Then no `#[ignore]` is emitted
+    assert_eq!(ignore_attribute_count(&item_fn), 0);
 }
 
 #[test]
 fn expand_no_resources_does_not_emit_ignore() {
+    // Given no attribute arguments
     let attr = TokenStream::new();
     let item: TokenStream = quote! {
         async fn scenario_plain(ctx: &mut Context) {}
     };
+    // When the macro expands
     let expanded = super::expand(attr, item);
-    let rendered = expanded.to_string();
-    assert!(
-        !rendered.contains("ignore"),
-        "expected no #[ignore] without resources: {rendered}"
-    );
+    let item_fn = item_fn_from_expanded(expanded);
+    // Then there is no `#[ignore]`
+    assert_eq!(ignore_attribute_count(&item_fn), 0);
 }
 
 #[test]
 fn expand_empty_resources_list_does_not_emit_ignore() {
+    // Given an empty `resources` list
     let attr: TokenStream = quote!(resources = []);
     let item: TokenStream = quote! {
         async fn scenario_empty_resources(ctx: &mut Context) {}
     };
+    // When the macro expands
     let expanded = super::expand(attr, item);
-    let rendered = expanded.to_string();
-    assert!(
-        !rendered.contains("ignore"),
-        "expected no #[ignore] when resources list is empty: {rendered}"
-    );
+    let item_fn = item_fn_from_expanded(expanded);
+    // Then there is no `#[ignore]`
+    assert_eq!(ignore_attribute_count(&item_fn), 0);
 }

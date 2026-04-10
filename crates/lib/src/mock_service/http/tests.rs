@@ -193,6 +193,67 @@ async fn on_prefix_matches_nested_path() {
     assert_eq!(response.status, 200);
 }
 
+#[test]
+fn route_match_for_path_root_double_star_is_catch_all_not_empty_prefix() {
+    // Given the literal pattern `"/**"` (e.g. `on_prefix("", …)` → `"/**"`)
+    // When it is classified for routing
+    // Then we use CatchAll instead of Prefix("") so the stub does not match almost every path
+    assert_eq!(RouteMatch::for_path("/**"), RouteMatch::CatchAll);
+}
+
+#[test]
+fn route_match_catch_all_matches_any_path() {
+    // Given a CatchAll route (root wildcard)
+    let catch_all = RouteMatch::CatchAll;
+    // When various request paths are matched
+    // Then every path matches
+    assert!(catch_all.matches(""));
+    assert!(catch_all.matches("/"));
+    assert!(catch_all.matches("/a/b/c"));
+}
+
+#[tokio::test]
+async fn on_get_root_glob_responds_for_any_path() {
+    // Given a declarative route registered as `GET /**`
+    let mock_service = HttpMockService::new("root").on("GET", "/**").respond(222);
+    // When a nested path is requested
+    let response = mock_service
+        .handle(
+            HttpMockServiceRequest {
+                method: String::from("GET"),
+                path: String::from("/nested/path"),
+                query: None,
+                headers: Vec::new(),
+                body: Bytes::new(),
+            },
+            &ctx(),
+        )
+        .await;
+    // Then the catch-all route handles it
+    assert_eq!(response.status, 222);
+}
+
+#[tokio::test]
+async fn on_prefix_empty_string_registers_root_catch_all() {
+    // Given `on_prefix` with an empty prefix (pattern becomes `"/**"`)
+    let mock_service = HttpMockService::new("root")
+        .on_prefix("GET", "")
+        .respond(201);
+    let response = mock_service
+        .handle(
+            HttpMockServiceRequest {
+                method: String::from("GET"),
+                path: String::from("/v1/anything"),
+                query: None,
+                headers: Vec::new(),
+                body: Bytes::new(),
+            },
+            &ctx(),
+        )
+        .await;
+    assert_eq!(response.status, 201);
+}
+
 #[tokio::test]
 async fn respond_with_declarative_header_set_cookie() {
     let mock_service = HttpMockService::new("api")

@@ -91,21 +91,25 @@ mod body_bytes_tests {
 
     #[test]
     fn body_bytes_accepts_byte_string_literal() {
+        // Given a response builder
+        // When `body_bytes` is called with a byte string literal
         let response = HttpMockServiceResponseBuilder::new().body_bytes(b"hello");
+        // Then the body matches those bytes
         assert_eq!(response.body.as_ref(), b"hello");
     }
 
     #[test]
     fn body_bytes_accepts_vec_slice_and_bytes() {
+        // Given a response builder
+        // When `body_bytes` is given a `Vec`, a slice, or `Bytes`
         let from_vec = HttpMockServiceResponseBuilder::new().body_bytes(vec![1u8, 2, 3]);
-        assert_eq!(from_vec.body.as_ref(), &[1, 2, 3]);
-
         let slice: &[u8] = &[4, 5];
         let from_slice = HttpMockServiceResponseBuilder::new().body_bytes(slice);
-        assert_eq!(from_slice.body.as_ref(), slice);
-
         let from_bytes =
             HttpMockServiceResponseBuilder::new().body_bytes(Bytes::from_static(b"ok"));
+        // Then each body is copied into the response as expected
+        assert_eq!(from_vec.body.as_ref(), &[1, 2, 3]);
+        assert_eq!(from_slice.body.as_ref(), slice);
         assert_eq!(from_bytes.body.as_ref(), b"ok");
     }
 }
