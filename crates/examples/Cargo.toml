@@ -25,8 +25,10 @@ shakedown = { path = "../lib", default-features = false, features = [
     "services",
 ] }
 
-# Names align with `shakedown` feature flags so callers can run:
-# `cargo check -p shakedown-examples --example service_with_mock --features kafka,postgres,mock-services,services`
+# Marker features only: they keep documented `cargo … --features kafka,postgres,…` commands valid
+# Cargo invocations and mirror `shakedown` flag names in README snippets. They do **not** toggle the
+# path dependency — `shakedown` is already built with the needed features under `[dependencies]`
+# above. Optional deps could wire these later; today they are documentation / CLI ergonomics.
 [features]
 default = []
 kafka = []

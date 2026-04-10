@@ -1,5 +1,10 @@
 //! Shared steps for the **service + mock + Postgres + Kafka** adoption walkthrough.
 //!
+//! This crate’s `[features]` in `Cargo.toml` are **marker flags** so commands like
+//! `cargo test -p shakedown-examples --features kafka,…` stay valid and match `shakedown`’s feature
+//! names in docs; they do not change how the `shakedown` path dependency is built (that is fixed in
+//! `Cargo.toml`).
+//!
 //! The canonical macro-driven entry point is the integration test `tests/service_with_mock.rs`.
 //! `examples/service_with_mock.rs` runs the same phases via [`shakedown::run_scenario`] for
 //! `cargo check --example` / `cargo run --example` workflows.

@@ -55,16 +55,24 @@ pub enum RouteMatch {
     Glob(String),
     /// Matches if `path == prefix` or `path` continues the prefix with `/` and more segments (D-4).
     Prefix(String),
+    /// Matches every path. Used only for the literal pattern `"/**"` (root catch-all), not for empty
+    /// [`RouteMatch::Prefix`] — an empty prefix would incorrectly match almost all paths.
+    CatchAll,
 }
 
 impl RouteMatch {
-    /// Classify a path string: a trailing `/**` yields [`RouteMatch::Prefix`]; any other `*`
-    /// enables glob semantics for the whole pattern.
+    /// Classify a path string: a trailing `/**` yields [`RouteMatch::Prefix`] with the prefix
+    /// stripped, or [`RouteMatch::CatchAll`] when the pattern is exactly `"/**"` (see [`HttpMockService::on_prefix`]
+    /// with an empty prefix). Any other `*` enables glob semantics for the whole pattern.
     pub(crate) fn for_path(path: impl Into<String>) -> Self {
         let path_string = path.into();
         if path_string.ends_with("/**") {
             let prefix = path_string[..path_string.len() - 3].to_string();
-            RouteMatch::Prefix(prefix)
+            if prefix.is_empty() {
+                RouteMatch::CatchAll
+            } else {
+                RouteMatch::Prefix(prefix)
+            }
         } else if path_string.contains('*') {
             RouteMatch::Glob(path_string)
         } else {
@@ -82,6 +90,7 @@ impl RouteMatch {
                     || (path.starts_with(prefix.as_str())
                         && path.as_bytes().get(prefix.len()) == Some(&b'/'))
             }
+            RouteMatch::CatchAll => true,
         }
     }
 }

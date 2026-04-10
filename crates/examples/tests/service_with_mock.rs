@@ -23,7 +23,7 @@
 #[shakedown::test(
     resources = [Postgres, Kafka],
     prelude = {
-        shakedown_examples::register_adoption_example_prelude(ctx)
+        shakedown_examples::register_adoption_example_prelude(&mut ctx)
             .expect("register mock + service under test");
     }
 )]
