@@ -5224,6 +5224,7 @@ name = "shakedown-examples"
 version = "0.1.0"
 dependencies = [
  "reqwest 0.11.27",
+ "serde_json",
  "shakedown",
  "tokio",
 ]
