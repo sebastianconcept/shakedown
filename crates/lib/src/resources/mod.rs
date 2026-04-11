@@ -858,6 +858,54 @@ impl KafkaBindings {
     }
 }
 
+#[cfg(feature = "kafka")]
+impl KafkaBindings {
+    /// Returns an [`rdkafka::ClientConfig`] pre-filled with `bootstrap.servers` and a
+    /// `message.timeout.ms` of `5000` suitable for tests.
+    ///
+    /// Use this as a starting point when you need a custom producer (for example for the
+    /// transactional outbox pattern):
+    ///
+    /// ```rust,no_run
+    /// use shakedown::rdkafka::producer::FutureProducer;
+    /// # fn example(bindings: &shakedown::KafkaBindings) {
+    /// let producer: FutureProducer = bindings
+    ///     .client_config()
+    ///     .set("acks", "all")
+    ///     .create()
+    ///     .expect("producer");
+    /// # }
+    /// ```
+    pub fn client_config(&self) -> rdkafka::config::ClientConfig {
+        let mut configuration = rdkafka::config::ClientConfig::new();
+        configuration.set("bootstrap.servers", self.bootstrap_servers.as_str());
+        configuration.set("message.timeout.ms", "5000");
+        configuration
+    }
+
+    /// Convenience: creates a [`rdkafka::producer::FutureProducer`] from [`Self::client_config`].
+    ///
+    /// Equivalent to `bindings.client_config().create()`. For custom settings, use
+    /// [`Self::client_config`] directly and call `.set(...)` before `.create()`.
+    pub fn future_producer(
+        &self,
+    ) -> Result<rdkafka::producer::FutureProducer, InfrastructureError> {
+        Self::future_producer_from_client_config(self.client_config())
+    }
+
+    /// Builds a [`rdkafka::producer::FutureProducer`] from a fully configured [`rdkafka::ClientConfig`].
+    ///
+    /// Used by [`Self::future_producer`] and unit tests that need to exercise error paths without
+    /// mutating [`KafkaBindings`] invariants.
+    pub(crate) fn future_producer_from_client_config(
+        configuration: rdkafka::config::ClientConfig,
+    ) -> Result<rdkafka::producer::FutureProducer, InfrastructureError> {
+        configuration.create().map_err(|error| {
+            InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
+        })
+    }
+}
+
 impl Namespaced for KafkaBindings {
     /// Return `name` prefixed with this scenario's Kafka topic prefix.
     fn namespace(&self, name: &str) -> String {

@@ -15,14 +15,50 @@
 //! ```text
 //! cargo test -p shakedown --features kafka --test helpers_kafka -- --ignored --test-threads=2 parallel_same_logical_topic
 //! ```
+//!
+//! `KafkaBindings::future_producer` round-trip (produce then `consume_one`):
+//!
+//! ```text
+//! cargo test -p shakedown --features kafka --test helpers_kafka -- --ignored kafka_bindings_future_producer_round_trip
+//! ```
 
 use serde::{Deserialize, Serialize};
+use shakedown::rdkafka::producer::FutureRecord;
+use shakedown::rdkafka::util::Timeout;
+use std::time::Duration;
 
 /// Domain-style payload for JSON produce/consume round-trips.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct OrderEvent {
     order_id: String,
     amount_cents: u32,
+}
+
+#[shakedown::test(resources = [Kafka])]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features kafka --test helpers_kafka -- --ignored"]
+async fn kafka_bindings_future_producer_round_trip(ctx: &mut shakedown::Context) {
+    let bindings = ctx.kafka_bindings().expect("kafka bindings");
+    let producer = bindings.future_producer().expect("future_producer");
+    let payload = br#"{"fp":true}"#;
+    let full_topic = bindings.topic_namespace("fp_roundtrip");
+    producer
+        .send(
+            FutureRecord::to(full_topic.as_str())
+                .key("fp-key")
+                .payload(payload.as_slice()),
+            Timeout::After(Duration::from_secs(60)),
+        )
+        .await
+        .expect("delivery");
+
+    let consumed = ctx
+        .kafka()
+        .consume_one("fp_roundtrip", None)
+        .await
+        .expect("consume_one after future_producer send");
+
+    assert_eq!(consumed.key_str(), Some("fp-key"));
+    assert_eq!(consumed.payload.as_deref(), Some(payload.as_slice()));
 }
 
 #[shakedown::test(resources = [Kafka])]

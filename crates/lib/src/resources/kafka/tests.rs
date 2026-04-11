@@ -1,6 +1,28 @@
 use crate::resources::KafkaBindings;
 
 #[test]
+fn client_config_has_bootstrap_servers() {
+    let bindings = KafkaBindings::new("localhost:19092", "shakedown_test_");
+    let configuration = bindings.client_config();
+    assert_eq!(
+        configuration.get("bootstrap.servers"),
+        Some("localhost:19092")
+    );
+    assert_eq!(configuration.get("message.timeout.ms"), Some("5000"));
+}
+
+#[test]
+fn future_producer_returns_err_when_client_config_is_invalid() {
+    // Empty bootstrap does not fail `create()` in current librdkafka (connection is lazy).
+    // Invalid numeric properties are rejected when the native config is built.
+    let bindings = KafkaBindings::new("127.0.0.1:9092", "p_");
+    let mut configuration = bindings.client_config();
+    configuration.set("message.timeout.ms", "not_a_number");
+    assert!(KafkaBindings::future_producer_from_client_config(configuration).is_err());
+    assert!(bindings.future_producer().is_ok());
+}
+
+#[test]
 fn kafka_bindings_topic_namespace() {
     let bindings = KafkaBindings::new("localhost:9092", "shakedown_test");
     assert_eq!(bindings.bootstrap_servers, "localhost:9092");
