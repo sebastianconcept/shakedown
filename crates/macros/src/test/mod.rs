@@ -12,11 +12,14 @@ use crate::resource_registration::{
 use crate::signature::first_parameter_is_ctx_mut_context;
 
 /// `#[shakedown::test]` attribute: optional `resources = [Fake, Kafka, ...]`, `prelude = { ... }`,
-/// and `ignore = true | false` (overrides auto-`#[ignore]` when `resources` is non-empty).
+/// `migrations = "…"` (stages a sqlx migration tree path relative to the test crate's `CARGO_MANIFEST_DIR`;
+/// applied in `run_scenario` after seed when `shakedown` is built with `postgres` + `sqlx`), and
+/// `ignore = true | false` (overrides auto-`#[ignore]` when `resources` is non-empty).
 pub(super) struct TestAttrArgs {
     pub(super) resources: Option<Vec<ResourceSpec>>,
     pub(super) prelude: Option<syn::Block>,
     pub(super) ignore: Option<bool>,
+    pub(super) migrations: Option<syn::LitStr>,
 }
 
 impl Parse for TestAttrArgs {
@@ -24,6 +27,7 @@ impl Parse for TestAttrArgs {
         let mut resources = None;
         let mut prelude = None;
         let mut ignore = None;
+        let mut migrations = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -44,6 +48,14 @@ impl Parse for TestAttrArgs {
                     ));
                 }
                 prelude = Some(input.parse::<syn::Block>()?);
+            } else if key == "migrations" {
+                if migrations.is_some() {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        "duplicate `migrations` attribute argument",
+                    ));
+                }
+                migrations = Some(input.parse::<syn::LitStr>()?);
             } else if key == "ignore" {
                 if ignore.is_some() {
                     return Err(syn::Error::new(
@@ -56,7 +68,7 @@ impl Parse for TestAttrArgs {
             } else {
                 return Err(syn::Error::new(
                     key.span(),
-                    "unknown attribute argument (supported: `resources = [ ... ]`, `prelude = { ... }`, `ignore = true | false`)",
+                    "unknown attribute argument (supported: `resources = [ ... ]`, `prelude = { ... }`, `migrations = \"…\"`, `ignore = true | false`)",
                 ));
             }
             if !input.is_empty() {
@@ -68,6 +80,7 @@ impl Parse for TestAttrArgs {
             resources,
             prelude,
             ignore,
+            migrations,
         })
     }
 }
@@ -78,6 +91,7 @@ pub(super) fn parse_test_attr(attr: TokenStream) -> syn::Result<TestAttrArgs> {
             resources: None,
             prelude: None,
             ignore: None,
+            migrations: None,
         });
     }
     syn::parse2(attr)
@@ -93,8 +107,10 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(args) => args,
         Err(e) => return e.to_compile_error(),
     };
+
     let resources_list = test_attr.resources;
     let prelude_block = test_attr.prelude;
+    let migrations_lit = test_attr.migrations;
 
     let has_resources = resources_list
         .as_ref()
@@ -128,12 +144,12 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let func_name = func.sig.ident.to_string();
 
-    let resources_registration = match resources_list {
+    let resources_registration = match &resources_list {
         None => quote! {},
         Some(resource_names) => {
             let mut registrations = Vec::new();
 
-            for resource_ident in &resource_names {
+            for resource_ident in resource_names {
                 let reg = build_resource_registration(resource_ident);
                 match reg {
                     Ok(code) => registrations.push(code),
@@ -149,6 +165,31 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
         }
+    };
+
+    if let Some(ref migrations_lit) = migrations_lit {
+        let has_postgres = resources_list.as_ref().is_some_and(|resource_specs| {
+            resource_specs
+                .iter()
+                .any(|resource_spec| resource_spec.ident == "Postgres")
+        });
+        if !has_postgres {
+            return syn::Error::new(
+                migrations_lit.span(),
+                "`migrations` requires `resources = [Postgres, ...]` so the scenario has a Postgres database to migrate",
+            )
+            .to_compile_error();
+        }
+    }
+
+    let migrations_tokens = match &migrations_lit {
+        Some(path_lit) => quote! {
+            ctx.set_pending_postgres_sqlx_migrations_path(
+                ::std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/", #path_lit))
+                    .to_path_buf(),
+            );
+        },
+        None => quote! {},
     };
 
     let prelude_tokens = match &prelude_block {
@@ -180,6 +221,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             #resources_registration
 
             {
+                #migrations_tokens
                 #prelude_tokens
             }
 

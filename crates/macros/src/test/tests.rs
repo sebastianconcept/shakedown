@@ -23,6 +23,7 @@ fn empty_attribute_parses_as_no_resources_and_no_prelude() {
     assert!(parsed.resources.is_none());
     assert!(parsed.prelude.is_none());
     assert!(parsed.ignore.is_none());
+    assert!(parsed.migrations.is_none());
 }
 
 #[test]
@@ -136,4 +137,87 @@ fn expand_empty_resources_list_does_not_emit_ignore() {
     let item_fn = item_fn_from_expanded(expanded);
     // Then there is no `#[ignore]`
     assert_eq!(ignore_attribute_count(&item_fn), 0);
+}
+
+#[test]
+fn migrations_attribute_parses() {
+    let attr: TokenStream = quote!(migrations = "./migrations");
+    let parsed = super::parse_test_attr(attr).expect("parse");
+    assert_eq!(
+        parsed.migrations.as_ref().expect("migrations").value(),
+        "./migrations"
+    );
+}
+
+#[test]
+fn duplicate_migrations_attribute_is_error() {
+    let attr: TokenStream = quote!(migrations = "./a", migrations = "./b");
+    assert!(super::parse_test_attr(attr).is_err());
+}
+
+#[test]
+fn migrations_with_resources_parses() {
+    let attr: TokenStream = quote!(resources = [Postgres], migrations = "./migrations");
+    let parsed = super::parse_test_attr(attr).expect("parse");
+    assert_eq!(
+        parsed
+            .resources
+            .as_ref()
+            .expect("resources")
+            .first()
+            .expect("one")
+            .ident
+            .to_string(),
+        "Postgres"
+    );
+    assert_eq!(
+        parsed.migrations.as_ref().expect("m").value(),
+        "./migrations"
+    );
+}
+
+#[test]
+fn expand_unknown_resource_with_migrations_reports_unknown_resource() {
+    let attr: TokenStream = quote!(resources = [NotARealResource], migrations = "./migrations");
+    let item: TokenStream = quote! {
+        async fn scenario_unknown(ctx: &mut Context) {}
+    };
+    let expanded = super::expand(attr, item);
+    let rendered = expanded.to_string();
+    assert!(
+        rendered.contains("unknown resource type"),
+        "expected unknown resource error, got: {rendered}"
+    );
+}
+
+#[test]
+fn expand_migrations_emits_set_pending_postgres_sqlx_migrations_path() {
+    let attr: TokenStream = quote!(resources = [Postgres], migrations = "./migrations");
+    let item: TokenStream = quote! {
+        async fn scenario_migrations(ctx: &mut Context) {}
+    };
+    let expanded = super::expand(attr, item);
+    let rendered = expanded.to_string();
+    assert!(
+        rendered.contains("set_pending_postgres_sqlx_migrations_path"),
+        "expected pending migrations setter, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("CARGO_MANIFEST_DIR"),
+        "expected manifest-relative path, got: {rendered}"
+    );
+}
+
+#[test]
+fn migrations_without_postgres_reports_error() {
+    let attr: TokenStream = quote!(resources = [Fake], migrations = "./migrations");
+    let item: TokenStream = quote! {
+        async fn scenario_migrations(ctx: &mut Context) {}
+    };
+    let expanded = super::expand(attr, item);
+    let rendered = expanded.to_string();
+    assert!(
+        rendered.contains("`migrations` requires `resources = [Postgres"),
+        "expected migrations-without-postgres error, got: {rendered}"
+    );
 }

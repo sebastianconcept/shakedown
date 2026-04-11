@@ -381,6 +381,12 @@ name = "helpers_postgres_sqlx"
 path = "tests/helpers_postgres_sqlx.rs"
 required-features = ["postgres", "sqlx"]
 
+# `#[shakedown::test(migrations = "...")]` end-to-end (Docker); ignored unless --ignored
+[[test]]
+name = "helpers_postgres_migrations_macro"
+path = "tests/helpers_postgres_migrations_macro.rs"
+required-features = ["postgres", "sqlx"]
+
 # SQLite typed helpers execute/assert integration (no Docker)
 [[test]]
 name = "helpers_sqlite"
