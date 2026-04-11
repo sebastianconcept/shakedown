@@ -224,6 +224,35 @@ impl HttpMockServiceRoutePending {
             .push((self.method, route_match, response));
         mock_service
     }
+
+    /// Registers the route with a fixed status, headers, and raw body.
+    ///
+    /// Headers are `(name, value)` pairs; names are stored lowercased (see
+    /// [`HttpMockServiceResponseBuilder::header`]).
+    ///
+    /// For complex responses, use [`Self::respond_with`] with
+    /// [`HttpMockServiceResponse::builder`].
+    ///
+    /// ```rust,no_run
+    /// use shakedown::HttpMockService;
+    ///
+    /// let mock = HttpMockService::new("api")
+    ///     .on("GET", "/v1/data")
+    ///     .respond_with_headers(200, &[("content-type", "application/json")], br#"{"ok":true}"#);
+    /// ```
+    pub fn respond_with_headers(
+        self,
+        status: u16,
+        headers: &[(&str, &str)],
+        body: impl AsRef<[u8]>,
+    ) -> HttpMockService {
+        let mut builder = HttpMockServiceResponse::builder().status(status);
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let response = builder.body_bytes(body);
+        self.respond_with(response)
+    }
 }
 
 #[async_trait]
