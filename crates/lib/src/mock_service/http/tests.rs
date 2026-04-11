@@ -279,6 +279,81 @@ async fn respond_with_declarative_header_set_cookie() {
 }
 
 #[tokio::test]
+async fn respond_with_headers_sets_status_headers_body() {
+    let mock_service = HttpMockService::new("api")
+        .on("GET", "/v1/data")
+        .respond_with_headers(
+            201,
+            &[
+                ("content-type", "application/json"),
+                ("x-request-id", "abc"),
+            ],
+            br#"{"ok":true}"#,
+        );
+    let request = HttpMockServiceRequest {
+        method: String::from("GET"),
+        path: String::from("/v1/data"),
+        query: None,
+        headers: Vec::new(),
+        body: Bytes::new(),
+    };
+    let response = mock_service.handle(request, &ctx()).await;
+    assert_eq!(response.status, 201);
+    assert!(response
+        .headers
+        .iter()
+        .any(|(key, value)| { key == "content-type" && value == "application/json" }));
+    assert!(response
+        .headers
+        .iter()
+        .any(|(key, value)| { key == "x-request-id" && value == "abc" }));
+    assert_eq!(response.body.as_ref(), br#"{"ok":true}"#);
+}
+
+#[tokio::test]
+async fn respond_with_headers_does_not_affect_other_routes() {
+    let mock_service = HttpMockService::new("api")
+        .on("GET", "/with-headers")
+        .respond_with_headers(200, &[("x-mode", "short")], b"short")
+        .on("GET", "/plain")
+        .respond(418);
+
+    let short = mock_service
+        .handle(
+            HttpMockServiceRequest {
+                method: String::from("GET"),
+                path: String::from("/with-headers"),
+                query: None,
+                headers: Vec::new(),
+                body: Bytes::new(),
+            },
+            &ctx(),
+        )
+        .await;
+    assert_eq!(short.status, 200);
+    assert!(short
+        .headers
+        .iter()
+        .any(|(name, value)| { name == "x-mode" && value == "short" }));
+    assert_eq!(short.body.as_ref(), b"short");
+
+    let plain = mock_service
+        .handle(
+            HttpMockServiceRequest {
+                method: String::from("GET"),
+                path: String::from("/plain"),
+                query: None,
+                headers: Vec::new(),
+                body: Bytes::new(),
+            },
+            &ctx(),
+        )
+        .await;
+    assert_eq!(plain.status, 418);
+    assert!(plain.headers.is_empty());
+}
+
+#[tokio::test]
 async fn mixing_respond_respond_json_and_respond_with() {
     let mock_service = HttpMockService::new("mix")
         .on("GET", "/plain")

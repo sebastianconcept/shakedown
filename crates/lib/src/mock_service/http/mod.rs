@@ -2,7 +2,7 @@
 //!
 //! ## When to use [`HttpMockService`] vs [`HttpMockServiceTrait`]
 //!
-//! Prefer the declarative [`HttpMockService`] builder (for example [`HttpMockService::on`], [`HttpMockServiceRoutePending::respond_with`], [`HttpMockServiceRoutePending::respond_json`])
+//! Prefer the declarative [`HttpMockService`] builder (for example [`HttpMockService::on`], [`HttpMockServiceRoutePending::respond_with`], [`HttpMockServiceRoutePending::respond_with_headers`], [`HttpMockServiceRoutePending::respond_json`])
 //! when routes are static: fixed methods and paths, known status codes, JSON or byte bodies, and
 //! extra headers. You get compile-time route tables without writing a type that implements the trait.
 //!
