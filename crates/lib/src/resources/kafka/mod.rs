@@ -63,6 +63,69 @@
 //! # }
 //! ```
 //!
+//! ## Topic namespacing and the outbox pattern
+//!
+//! Shakedown prefixes Kafka topic names per scenario (for example `shakedown_{scenario_id}_input`)
+//! so parallel tests do not collide on the broker. The **transactional outbox** pattern stores a
+//! destination topic name in a database column; a publisher later reads that column and produces
+//! to the named topic. If the outbox row contains only the **logical** name (`"input"`) while the
+//! publisher sends to that literal string, the message may go to a topic **without** Shakedown’s
+//! prefix—bypassing the scenario namespace and breaking isolation.
+//!
+//! ### Pattern A (recommended): inject the namespaced topic
+//!
+//! Use `EnvMapping::kafka_topic` on `ServiceUnderTest` (see the `services` feature) so the service
+//! receives the **full** topic name (including the scenario prefix) in an environment variable. The
+//! service should write that value into the outbox column; the publisher then targets the same
+//! namespaced topic that the harness and helpers use.
+//!
+//! The string injected for a logical topic is the same as [`KafkaBindings::topic_namespace`]
+//! for that name—your test can assert the pipeline using the logical topic on helpers while
+//! trusting that the env-injected name matches:
+//!
+//! ```rust,no_run
+//! # use shakedown::Context;
+//! # use std::time::Duration;
+//! # async fn example(ctx: &mut Context) -> Result<(), shakedown::ShakedownError> {
+//! let bindings = ctx.kafka_bindings().expect("Kafka resource registered for this scenario");
+//! let _namespaced_topic = bindings.topic_namespace("input");
+//! // Same string the harness injects when you use `EnvMapping::kafka_topic("INPUT_TOPIC", "input")`.
+//! let _consumed = ctx
+//!     .kafka()
+//!     .consume_one("input", Some(Duration::from_secs(20)))
+//!     .await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! With the `services` feature, wire the service container like this (not run as a doctest here
+//! because `EnvMapping` requires `services`):
+//!
+//! ```ignore
+//! use shakedown::{EnvMapping, ServiceUnderTest};
+//!
+//! let _spec = ServiceUnderTest::docker("myservice:latest")
+//!     .env_mapping(EnvMapping::kafka_topic("INPUT_TOPIC", "input"))
+//!     .build()
+//!     .expect("service spec");
+//! ```
+//!
+//! ### Pattern B: literal topic names
+//!
+//! If topic names are compile-time constants and the publisher always targets those fixed names,
+//! you may keep literal topic strings in the outbox and rely on **database-level** isolation: a
+//! scenario-scoped database ensures outbox rows do not leak across parallel runs. Kafka topic
+//! isolation for that fixed name is then weaker unless you serialize tests or accept shared topics;
+//! this can be acceptable for narrow tests or when only one scenario touches the topic.
+//!
+//! ### Decision guide
+//!
+//! - Prefer **Pattern A** when the service reads topic names from **configuration** (for example
+//!   12-factor env vars): inject the namespaced name once via `EnvMapping::kafka_topic` and keep a
+//!   single source of truth for the harness, the outbox, and the publisher.
+//! - Use **Pattern B** when topic names are **fixed in code** and changing them is impractical;
+//!   treat the scenario database as the isolation boundary and accept the Kafka naming trade-off.
+//!
 //! ## Inheriting the pinned `rdkafka` version
 //!
 //! Shakedown pins `rdkafka` at **`=0.38`** to guarantee a reproducible build. When the `kafka`
