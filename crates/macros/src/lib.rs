@@ -37,10 +37,18 @@ mod test;
 /// End-to-end, a `#[shakedown::test]` function runs stages in this order:
 ///
 /// 1. **`resources`** — builtins from `resources = [...]` are registered on a fresh context (macro expansion).
-/// 2. **`prelude`** — optional `prelude = { ... }` runs next (register HTTP mocks, `ServiceUnderTest`, etc.).
+/// 2. **`migrations`** — optional `migrations = "./migrations"` runs **after** resource registration and
+///    **before** the prelude: it stages a path (relative to the **test crate's** `CARGO_MANIFEST_DIR`) on
+///    [`Context`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html) via
+///    [`set_pending_postgres_sqlx_migrations_path`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html#method.set_pending_postgres_sqlx_migrations_path).
+///    [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html) applies the sqlx
+///    migration tree **after** each resource's `apply_default_seed` and **before** mock services start — still
+///    ordered within the harness seed phase, so Postgres is ready and default seed ran first. Requires
+///    `resources = [Postgres, ...]` and the `postgres` + `sqlx` features on `shakedown`.
+/// 3. **`prelude`** — optional `prelude = { ... }` runs next (register HTTP mocks, `ServiceUnderTest`, etc.).
 ///    This happens **before** [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
 ///    so everything is wired on `ctx` when the harness starts.
-/// 3. **`run_scenario`** then runs **provision** and **readiness** for registered resources, **seed**
+/// 4. **`run_scenario`** then runs **provision** and **readiness** for registered resources, **seed**
 ///    (`apply_default_seed`), **mocks** (mock HTTP/gRPC listeners start), **services** (service-under-test
 ///    containers start and become healthy), your scenario **body**, the harness **assert** phase, and
 ///    finally **teardown**.

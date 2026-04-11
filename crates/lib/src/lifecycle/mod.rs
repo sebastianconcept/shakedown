@@ -274,6 +274,12 @@ pub struct Context {
     /// Postgres bindings when a Postgres resource populated them (`postgres` feature).
     #[cfg(feature = "postgres")]
     postgres_bindings: Option<PostgresBindings>,
+    /// On-disk sqlx migration tree, staged by `#[shakedown::test(migrations = "...")]` (`postgres` + `sqlx`).
+    ///
+    /// Applied in [`run_scenario`] after [`Resource::apply_default_seed`](crate::resources::Resource::apply_default_seed)
+    /// and before mock services / the scenario run phase, so the database schema exists before containers that depend on it start.
+    #[cfg(all(feature = "postgres", feature = "sqlx"))]
+    pending_postgres_sqlx_migrations_path: Option<std::path::PathBuf>,
     /// MariaDB bindings when a MariaDB resource populated them (`mariadb` feature).
     #[cfg(feature = "mariadb")]
     mariadb_bindings: Option<MariaDBBindings>,
@@ -434,6 +440,8 @@ impl Context {
             rabbit_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
+            #[cfg(all(feature = "postgres", feature = "sqlx"))]
+            pending_postgres_sqlx_migrations_path: None,
             #[cfg(feature = "mariadb")]
             mariadb_bindings: None,
             #[cfg(feature = "mysql")]
@@ -541,6 +549,8 @@ impl Context {
             rabbit_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
+            #[cfg(all(feature = "postgres", feature = "sqlx"))]
+            pending_postgres_sqlx_migrations_path: None,
             #[cfg(feature = "mariadb")]
             mariadb_bindings: None,
             #[cfg(feature = "mysql")]
@@ -648,6 +658,8 @@ impl Context {
             rabbit_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
+            #[cfg(all(feature = "postgres", feature = "sqlx"))]
+            pending_postgres_sqlx_migrations_path: None,
             #[cfg(feature = "mariadb")]
             mariadb_bindings: None,
             #[cfg(feature = "mysql")]
@@ -975,6 +987,29 @@ impl Context {
     #[cfg(feature = "postgres")]
     pub fn postgres_bindings(&self) -> Option<&PostgresBindings> {
         self.postgres_bindings.as_ref()
+    }
+
+    /// Stages a sqlx migration tree to apply in [`run_scenario`] (`postgres` + `sqlx`).
+    ///
+    /// The `#[shakedown::test(migrations = "./migrations")]` macro expands to a call that passes
+    /// `Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/", ...)).to_path_buf()` from the **test
+    /// crate** so the path resolves relative to that crate.
+    ///
+    /// ```rust,no_run
+    /// # use shakedown::Context;
+    /// let mut ctx = Context::new();
+    /// ctx.set_pending_postgres_sqlx_migrations_path(std::path::PathBuf::from("/tmp/migrations"));
+    /// ```
+    #[cfg(all(feature = "postgres", feature = "sqlx"))]
+    pub fn set_pending_postgres_sqlx_migrations_path(&mut self, path: std::path::PathBuf) {
+        self.pending_postgres_sqlx_migrations_path = Some(path);
+    }
+
+    #[cfg(all(feature = "postgres", feature = "sqlx"))]
+    pub(crate) fn take_pending_postgres_sqlx_migrations_path(
+        &mut self,
+    ) -> Option<std::path::PathBuf> {
+        self.pending_postgres_sqlx_migrations_path.take()
     }
 
     /// Set MariaDB bindings for this scenario (typically after MariaDB provision).
@@ -3652,6 +3687,104 @@ where
             );
             emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
             return Err(e.into());
+        }
+    }
+
+    #[cfg(all(feature = "postgres", feature = "sqlx"))]
+    if let Some(migrations_path) = ctx.take_pending_postgres_sqlx_migrations_path() {
+        event_log.append_raw(
+            EventLevel::Info,
+            "lifecycle",
+            "Applying sqlx migrations from #[shakedown::test(migrations = ...)]",
+        );
+        let migrator = match sqlx::migrate::Migrator::new(migrations_path).await {
+            Ok(migrator) => migrator,
+            Err(source) => {
+                let error =
+                    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(source)));
+                event_log.append_raw(
+                    EventLevel::Error,
+                    "lifecycle",
+                    format!("sqlx Migrator::new failed: {error}"),
+                );
+                teardown_all_resources(ctx).await;
+                #[cfg(all(
+                    any(
+                        feature = "kafka",
+                        feature = "rabbitmq",
+                        feature = "postgres",
+                        feature = "mariadb",
+                        feature = "mysql",
+                        feature = "redis",
+                        feature = "valkey",
+                        feature = "mongodb",
+                        feature = "nats",
+                        feature = "neo4j",
+                        feature = "elasticsearch",
+                        feature = "opensearch",
+                        feature = "qdrant",
+                        feature = "weaviate",
+                        feature = "influxdb",
+                        feature = "timescaledb",
+                        feature = "services",
+                    ),
+                    not(feature = "no-diagnostics"),
+                ))]
+                shakedown_merge_diagnostics!(
+                    docker_events_monitor,
+                    resource_stats_monitor,
+                    container_logs_monitor,
+                    event_log
+                );
+                crate::timeline::emit_failure_timeline_for_shakedown_error(
+                    event_log,
+                    scenario_id.as_str(),
+                    &error,
+                );
+                return Err(error);
+            }
+        };
+        if let Err(error) = ctx.postgres().run_migrations(&migrator).await {
+            event_log.append_raw(
+                EventLevel::Error,
+                "lifecycle",
+                format!("sqlx migrations failed: {error}"),
+            );
+            teardown_all_resources(ctx).await;
+            #[cfg(all(
+                any(
+                    feature = "kafka",
+                    feature = "rabbitmq",
+                    feature = "postgres",
+                    feature = "mariadb",
+                    feature = "mysql",
+                    feature = "redis",
+                    feature = "valkey",
+                    feature = "mongodb",
+                    feature = "nats",
+                    feature = "neo4j",
+                    feature = "elasticsearch",
+                    feature = "opensearch",
+                    feature = "qdrant",
+                    feature = "weaviate",
+                    feature = "influxdb",
+                    feature = "timescaledb",
+                    feature = "services",
+                ),
+                not(feature = "no-diagnostics"),
+            ))]
+            shakedown_merge_diagnostics!(
+                docker_events_monitor,
+                resource_stats_monitor,
+                container_logs_monitor,
+                event_log
+            );
+            crate::timeline::emit_failure_timeline_for_shakedown_error(
+                event_log,
+                scenario_id.as_str(),
+                &error,
+            );
+            return Err(error);
         }
     }
 

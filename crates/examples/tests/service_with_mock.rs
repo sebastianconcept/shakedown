@@ -28,5 +28,9 @@
     }
 )]
 async fn service_with_mock(ctx: &mut shakedown::Context) {
+    // Given Postgres and Kafka are provisioned for the scenario and the prelude registered the
+    // quote mock and whoami service-under-test with env mappings.
+    // When we run the shared adoption example body (HTTP client checks, Postgres helpers, health).
     shakedown_examples::adoption_example_body(ctx).await;
+    // Then all assertions inside adoption_example_body completed without panic.
 }

@@ -45,7 +45,11 @@ pub fn register_adoption_example_prelude(ctx: &mut Context) -> shakedown::Result
 
 /// **Scenario body**: HTTP assertions against the running container, then relational assertions
 /// via Postgres helpers on the same scenario-scoped database the harness provisioned.
+///
+/// Structured with Given / When / Then comments for the adoption walkthrough (same narrative as
+/// integration tests that call this function).
 pub async fn adoption_example_body(ctx: &mut Context) {
+    // Given the app and mock are reachable on loopback after readiness.
     let base_url = ctx
         .service_url("app")
         .expect("service base URL after readiness; register ServiceUnderTest before run_scenario");
@@ -63,11 +67,14 @@ pub async fn adoption_example_body(ctx: &mut Context) {
     let mock_base_url = ctx
         .mock_service_url("quote-api")
         .expect("mock base URL after lifecycle started the stub");
+
+    // When we hit the declarative mock for a quoted path.
     let quote_response = client
         .get(format!("{mock_base_url}/v1/quote/AAPL"))
         .send()
         .await
         .expect("GET /v1/quote/AAPL on declarative mock");
+    // Then the response status and configured headers match the mock.
     assert_eq!(quote_response.status(), reqwest::StatusCode::OK);
     assert_eq!(
         quote_response
@@ -86,6 +93,7 @@ pub async fn adoption_example_body(ctx: &mut Context) {
         "Set-Cookie from respond_with should be visible to the client"
     );
 
+    // When we GET the app root and the env echo endpoint.
     let root = client.get(&base_url).send().await.expect("GET /");
     assert_eq!(root.status(), reqwest::StatusCode::OK);
 
@@ -94,6 +102,7 @@ pub async fn adoption_example_body(ctx: &mut Context) {
     assert_eq!(env_response.status(), reqwest::StatusCode::OK);
     let body = env_response.text().await.expect("whoami body");
 
+    // Then env mappings and DATABASE_URL (with host rewrite) appear in the whoami body.
     assert!(
         body.contains("MY_KAFKA_TOPIC=") && body.contains("QUOTE_API_BASE_URL="),
         "whoami should echo renamed bindings from EnvMapping::kafka_topic and EnvMapping::mock_service: {body}"
@@ -103,6 +112,7 @@ pub async fn adoption_example_body(ctx: &mut Context) {
         "Postgres convention injection should still reach the container (rewritten for Docker): {body}"
     );
 
+    // When we create a table, insert a row, and assert it exists on the scenario database.
     ctx.postgres()
         .execute(
             "CREATE TABLE adoption_demo (id SERIAL PRIMARY KEY, label TEXT NOT NULL)",
@@ -125,6 +135,7 @@ pub async fn adoption_example_body(ctx: &mut Context) {
         .await
         .expect("row should exist after insert");
 
+    // Then the registered service still reports healthy.
     let handle = ctx
         .service_handle("app")
         .expect("service handle after lifecycle");

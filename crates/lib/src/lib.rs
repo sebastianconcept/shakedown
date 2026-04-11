@@ -549,6 +549,14 @@ pub use mongodb;
 #[cfg(feature = "rabbitmq")]
 pub use lapin;
 
+/// Re-export the pinned `sqlx` crate so consumers inherit the exact version used internally.
+///
+/// Enable the `sqlx` feature and write `use shakedown::sqlx::…` (for example
+/// `sqlx::migrate::Migrator` with `#[shakedown::test]` and `migrations = "…"`) instead of
+/// declaring a separate `sqlx` dependency.
+#[cfg(feature = "sqlx")]
+pub use sqlx;
+
 #[cfg(test)]
 mod tests {
     use crate::error::{
