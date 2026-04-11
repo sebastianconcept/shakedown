@@ -8,9 +8,15 @@
 //! The canonical macro-driven entry point is the integration test `tests/service_with_mock.rs`.
 //! `examples/service_with_mock.rs` runs the same phases via [`shakedown::run_scenario`] for
 //! `cargo check --example` / `cargo run --example` workflows.
+//!
+//! **Sections in [`adoption_example_body`]:** HTTP client checks against the declarative mock and
+//! `traefik/whoami`, env echo proving [`EnvMapping`] (including namespaced Kafka topic names), a
+//! Kafka `produce_json` → `consume_one` round-trip on the logical `events` topic, then Postgres
+//! helpers on the scenario database and a final service health check.
 
 use std::time::Duration;
 
+use serde_json::json;
 use shakedown::{
     Context, EnvMapping, HealthCheck, HttpMockService, HttpMockServiceResponse, ServiceUnderTest,
     HOST_DOCKER_INTERNAL,
@@ -43,8 +49,9 @@ pub fn register_adoption_example_prelude(ctx: &mut Context) -> shakedown::Result
     Ok(())
 }
 
-/// **Scenario body**: HTTP assertions against the running container, then relational assertions
-/// via Postgres helpers on the same scenario-scoped database the harness provisioned.
+/// **Scenario body**: HTTP checks against the mock and service-under-test, assertions that env
+/// mappings (including Kafka topic namespacing) reach the container, a Kafka JSON produce/consume
+/// round-trip, then relational assertions via Postgres helpers on the harness-provisioned database.
 ///
 /// Structured with Given / When / Then comments for the adoption walkthrough (same narrative as
 /// integration tests that call this function).
@@ -102,15 +109,53 @@ pub async fn adoption_example_body(ctx: &mut Context) {
     assert_eq!(env_response.status(), reqwest::StatusCode::OK);
     let body = env_response.text().await.expect("whoami body");
 
+    let expected_kafka_topic = ctx
+        .kafka_bindings()
+        .expect("kafka bindings after provision")
+        .topic_namespace("events");
+    assert_ne!(
+        expected_kafka_topic.as_str(),
+        "events",
+        "logical topic name must be scenario-namespaced for isolation"
+    );
+
     // Then env mappings and DATABASE_URL (with host rewrite) appear in the whoami body.
     assert!(
-        body.contains("MY_KAFKA_TOPIC=") && body.contains("QUOTE_API_BASE_URL="),
-        "whoami should echo renamed bindings from EnvMapping::kafka_topic and EnvMapping::mock_service: {body}"
+        body.contains("QUOTE_API_BASE_URL="),
+        "whoami should echo mock base URL from EnvMapping::mock_service: {body}"
+    );
+    let kafka_topic_from_env = body
+        .split("MY_KAFKA_TOPIC=")
+        .nth(1)
+        .expect("MY_KAFKA_TOPIC in whoami body")
+        .lines()
+        .next()
+        .expect("MY_KAFKA_TOPIC value")
+        .trim_end_matches('\r');
+    assert_eq!(
+        kafka_topic_from_env, expected_kafka_topic.as_str(),
+        "EnvMapping::kafka_topic should inject the namespaced topic (not the bare logical name 'events')"
     );
     assert!(
         body.contains("DATABASE_URL=") && body.contains(HOST_DOCKER_INTERNAL),
         "Postgres convention injection should still reach the container (rewritten for Docker): {body}"
     );
+
+    // When we publish JSON to the logical "events" topic and read it back with the typed helpers.
+    let kafka_payload = json!({"demo": "kafka-round-trip", "n": 1});
+    ctx.kafka()
+        .produce_json("events", "test-key", &kafka_payload)
+        .await
+        .expect("produce_json to scenario-scoped events topic");
+    let consumed = ctx
+        .kafka()
+        .consume_one("events", Some(Duration::from_secs(30)))
+        .await
+        .expect("consume_one from events");
+    let consumed_json = consumed
+        .payload_json::<serde_json::Value>()
+        .expect("JSON payload round-trip");
+    assert_eq!(consumed_json, kafka_payload);
 
     // When we create a table, insert a row, and assert it exists on the scenario database.
     ctx.postgres()

@@ -1,5 +1,6 @@
-//! Same adoption flow as `tests/service_with_mock.rs`, expanded **without** the attribute macro so
-//! you can `cargo run --example service_with_mock` or type-check with:
+//! Same adoption flow as `tests/service_with_mock.rs` (mock + SUT + env mappings + Kafka
+//! produce/consume + Postgres), expanded **without** the attribute macro so you can
+//! `cargo run --example service_with_mock` or type-check with:
 //!
 //! ```text
 //! cargo check -p shakedown-examples --example service_with_mock --features kafka,postgres,mock-services,services

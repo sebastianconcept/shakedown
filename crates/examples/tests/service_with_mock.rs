@@ -11,8 +11,11 @@
 //!    and custom headers, then register [`shakedown::ServiceUnderTest`] with
 //!    [`EnvMapping::kafka_topic`](shakedown::EnvMapping::kafka_topic) and
 //!    [`EnvMapping::mock_service`](shakedown::EnvMapping::mock_service).
-//! 3. **Body** — HTTP checks against `traefik/whoami` plus Postgres helper assertions on the same
-//!    scenario database.
+//! 3. **Body** — HTTP checks against the mock and `traefik/whoami`, including env echo that the
+//!    namespaced Kafka topic for logical `events` matches what [`EnvMapping::kafka_topic`] injects;
+//!    a Kafka [`produce_json`](shakedown::KafkaHelpers::produce_json) →
+//!    [`consume_one`](shakedown::KafkaHelpers::consume_one) JSON round-trip; then
+//!    Postgres helper assertions and a service health check.
 //!
 //! With Docker available:
 //!
