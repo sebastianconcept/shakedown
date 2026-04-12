@@ -11,6 +11,7 @@
 //! [`crate::mock_service::types::MockServiceContext`] — behavior that does not fit a fixed declarative
 //! table.
 
+mod http_status;
 mod request;
 mod response;
 mod response_builder;
@@ -23,6 +24,9 @@ mod tests;
 use async_trait::async_trait;
 
 use crate::mock_service::types::MockServiceContext;
+/// Re-export for route builders that take [`HttpMockStatus`] (`StatusCode::OK.into()`).
+pub use ::http::{Method, StatusCode};
+pub use http_status::HttpMockStatus;
 pub use request::HttpMockServiceRequest;
 pub use response::HttpMockServiceResponse;
 pub use response_builder::HttpMockServiceResponseBuilder;

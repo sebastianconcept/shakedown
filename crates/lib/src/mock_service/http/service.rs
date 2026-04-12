@@ -9,15 +9,15 @@
 //! use std::sync::Arc;
 //!
 //! use shakedown::mock_service::{
-//!     HttpMockService, HttpMockServiceRequest, HttpMockServiceTrait, MockServiceContext,
-//!     MockServiceResources,
+//!     HttpMockService, HttpMockServiceRequest, HttpMockServiceTrait, Method, MockServiceContext,
+//!     MockServiceResources, StatusCode,
 //! };
 //!
 //! # #[tokio::main]
 //! # async fn main() {
 //! let mock = HttpMockService::new("api")
 //!     .on("GET", "/health")
-//!     .respond(204);
+//!     .respond(StatusCode::NO_CONTENT.into());
 //!
 //! let ctx = MockServiceContext::new(
 //!     "scenario-1",
@@ -26,7 +26,7 @@
 //! );
 //!
 //! let req = HttpMockServiceRequest {
-//!     method: "GET".to_string(),
+//!     method: Method::GET,
 //!     path: "/health".to_string(),
 //!     query: None,
 //!     headers: vec![],
@@ -34,7 +34,7 @@
 //! };
 //!
 //! let resp = mock.handle(req, &ctx).await;
-//! assert_eq!(resp.status, 204);
+//! assert_eq!(resp.status, StatusCode::NO_CONTENT);
 //! # }
 //! ```
 
@@ -42,6 +42,9 @@ use async_trait::async_trait;
 use serde::Serialize;
 
 use super::super::types::{MockServiceContext, MockServiceError};
+use http::StatusCode;
+
+use super::http_status::HttpMockStatus;
 use super::request::HttpMockServiceRequest;
 use super::response::HttpMockServiceResponse;
 use super::HttpMockServiceTrait;
@@ -143,7 +146,7 @@ impl HttpMockService {
         Self {
             name: name.into(),
             routes: Vec::new(),
-            default_response: HttpMockServiceResponse::status(404),
+            default_response: HttpMockServiceResponse::status(StatusCode::NOT_FOUND),
         }
     }
 
@@ -153,8 +156,8 @@ impl HttpMockService {
     }
 
     /// Sets the fallback response when no route matches (default **404**).
-    pub fn default_response(mut self, status: u16) -> Self {
-        self.default_response = HttpMockServiceResponse::status(status);
+    pub fn default_response(mut self, status: HttpMockStatus) -> Self {
+        self.default_response = HttpMockServiceResponse::status(status.into_inner());
         self
     }
 
@@ -189,13 +192,13 @@ impl HttpMockService {
 
 impl HttpMockServiceRoutePending {
     /// Empty body with the given status.
-    pub fn respond(self, status: u16) -> HttpMockService {
+    pub fn respond(self, status: HttpMockStatus) -> HttpMockService {
         let route_match = RouteMatch::for_path(self.path);
         let mut mock_service = self.mock_service;
         mock_service.routes.push((
             self.method,
             route_match,
-            HttpMockServiceResponse::status(status),
+            HttpMockServiceResponse::status(status.into_inner()),
         ));
         mock_service
     }
@@ -234,19 +237,19 @@ impl HttpMockServiceRoutePending {
     /// [`HttpMockServiceResponse::builder`].
     ///
     /// ```rust,no_run
-    /// use shakedown::HttpMockService;
+    /// use shakedown::{HttpMockService, StatusCode};
     ///
     /// let mock = HttpMockService::new("api")
     ///     .on("GET", "/v1/data")
-    ///     .respond_with_headers(200, &[("content-type", "application/json")], br#"{"ok":true}"#);
+    ///     .respond_with_headers(StatusCode::OK.into(), &[("content-type", "application/json")], br#"{"ok":true}"#);
     /// ```
     pub fn respond_with_headers(
         self,
-        status: u16,
+        status: HttpMockStatus,
         headers: &[(&str, &str)],
         body: impl AsRef<[u8]>,
     ) -> HttpMockService {
-        let mut builder = HttpMockServiceResponse::builder().status(status);
+        let mut builder = HttpMockServiceResponse::builder().status(status.into_inner());
         for (name, value) in headers {
             builder = builder.header(*name, *value);
         }
@@ -262,7 +265,7 @@ impl HttpMockServiceTrait for HttpMockService {
         request: HttpMockServiceRequest,
         _context: &MockServiceContext,
     ) -> HttpMockServiceResponse {
-        let method = normalize_method(request.method());
+        let method = normalize_method(request.method().as_str());
         let path = request.path();
         for (registered_method, route_match, response) in &self.routes {
             if registered_method != &method {

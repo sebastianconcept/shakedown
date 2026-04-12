@@ -1,12 +1,12 @@
 //! Docker Engine `/events` stream classification into [`crate::event::InfraEvent`] records.
 //!
-//! **What:** a filtered subscription to container-scoped engine events (stop, die, health, OOM,
+//! Shakedown diagnostics correlates daemon-level signals with scenario phases for
+//! failure timelines and root-cause hints.
+//!
+//! A filtered subscription to container-scoped engine events (stop, die, health, OOM,
 //! restart, …) mapped into Shakedown’s [`crate::event::DockerEventKind`] and [`crate::event::InfraSeverity`].
 //!
-//! **Why:** correlates daemon-level signals with scenario phases for timelines and root-cause hints
-//! without polling `docker events` manually.
-//!
-//! **How:** [`DockerEventsMonitor::spawn`] runs alongside stats and logs; [`push_lifecycle_phase`]
+//! [`DockerEventsMonitor::spawn`] runs alongside stats and logs; [`push_lifecycle_phase`]
 //! updates phase/scenario on the watch channel; [`DockerEventsMonitor::shutdown_and_drain`] appends
 //! buffered records to [`crate::event::EventLog`].
 

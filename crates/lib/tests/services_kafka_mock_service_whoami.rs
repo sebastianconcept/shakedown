@@ -19,7 +19,7 @@ use shakedown::event::{InfraEvent, LogEntry};
 use shakedown::{
     render_failure_timeline, run_scenario, BuiltinResource, Context, EventLog,
     FailureTimelineOptions, HealthCheck, HttpMockService, KafkaResource, ServiceUnderTest,
-    HOST_DOCKER_INTERNAL,
+    StatusCode, HOST_DOCKER_INTERNAL,
 };
 
 #[tokio::test]
@@ -34,8 +34,8 @@ async fn kafka_http_mock_service_whoami_env_injection_and_diagnostics() {
 
     let order_gateway_stub = HttpMockService::new("order-gateway")
         .on("GET", "/health")
-        .respond(200)
-        .default_response(404);
+        .respond(StatusCode::OK.into())
+        .default_response(StatusCode::NOT_FOUND.into());
     context
         .register_http_mock_service("order-gateway", order_gateway_stub)
         .expect("register_http_mock_service");

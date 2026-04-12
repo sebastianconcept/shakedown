@@ -1,6 +1,7 @@
 //! Fluent builder for [`super::response::HttpMockServiceResponse`].
 
 use bytes::Bytes;
+use http::StatusCode;
 use serde::Serialize;
 
 use super::super::types::MockServiceError;
@@ -9,7 +10,7 @@ use super::response::HttpMockServiceResponse;
 /// Fluent builder for [`HttpMockServiceResponse`].
 #[derive(Debug)]
 pub struct HttpMockServiceResponseBuilder {
-    status: u16,
+    status: StatusCode,
     headers: Vec<(String, String)>,
 }
 
@@ -23,13 +24,13 @@ impl HttpMockServiceResponseBuilder {
     /// Starts a builder with status **200** and no headers.
     pub fn new() -> Self {
         Self {
-            status: 200,
+            status: StatusCode::OK,
             headers: Vec::new(),
         }
     }
 
     /// Set the HTTP status code.
-    pub fn status(mut self, status_code: u16) -> Self {
+    pub fn status(mut self, status_code: StatusCode) -> Self {
         self.status = status_code;
         self
     }

@@ -1,18 +1,135 @@
 //! Toxiproxy control-plane helpers for fault-injection scenarios (`fault-injection` feature).
 //!
-//! **Why:** proving that a service handles network failures correctly — broker timeouts,
+//! Proving that a service handles network failures correctly — broker timeouts,
 //! slow downstream APIs, connection resets — requires injecting those faults at the network layer
 //! without modifying the service under test. Shakedown owns the Toxiproxy integration directly
-//! so fault semantics are reliable and version-controlled alongside your scenarios.
+//! so fault semantics are easy to setup, reliable and version-controlled alongside your scenarios.
 //!
-//! **How:** register a [`crate::resources::ToxiproxyResource`] on your [`crate::lifecycle::Context`]
+//! Register a [`crate::resources::ToxiproxyResource`] on your [`crate::lifecycle::Context`]
 //! and use [`FaultHandle`] inside `#[shakedown::faulty_test]` to add toxics, reset proxies, and
-//! remove faults. The harness installs the handle automatically when Toxiproxy provisions
+//! remove faults. Shakedown installs the handle automatically when Toxiproxy provisions
 //! successfully.
 //!
 //! Toxic add/remove and proxy reset enqueue [`crate::event::Event`] values on an internal
-//! channel. The harness drains that channel into the caller-owned [`crate::event::EventLog`] after
+//! channel. Shakedown drains that channel into the caller-owned [`crate::event::EventLog`] after
 //! the scenario body so failure timelines correlate faults with infrastructure and harness signals.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! #[shakedown::faulty_test(resources = [Toxiproxy])]
+//! async fn inject_latency(ctx: &mut shakedown::Context) {
+//!     let faults = ctx.fault_handle_mut().expect("FaultHandle after Toxiproxy provisions");
+//!     faults
+//!         .create_proxy("edge", "127.0.0.1:0", "127.0.0.1:9092")
+//!         .await
+//!         .expect("create proxy");
+//!     let toxic = shakedown::Toxic {
+//!         kind: shakedown::ToxicKind::Latency {
+//!             latency: 200,
+//!             jitter: 0,
+//!         },
+//!         name: "lag".to_string(),
+//!         toxicity: 1.0,
+//!         direction: shakedown::StreamDirection::Downstream,
+//!     };
+//!     faults.add_toxic("edge", &toxic).await.expect("add toxic");
+//!     // ... exercise the system through the proxy ...
+//!     faults.remove_toxic("edge", "lag").await.expect("remove toxic");
+//! }
+//! ```
+//!
+//! ## Stream direction ([`StreamDirection`])
+//!
+//! Toxiproxy splits each proxied connection into two named streams (same names as the HTTP API).
+//! Re-exported from `noxious`, the variants mean:
+//!
+//! - **[`StreamDirection::Upstream`]** — toxics apply to **client → upstream** traffic (from the
+//!   process connecting to the proxy’s listen address **toward** the `upstream` target you passed to
+//!   [`FaultHandle::create_proxy`]). Use this to stress **outbound** behaviour (slow sends, timeouts on
+//!   the request path).
+//! - **[`StreamDirection::Downstream`]** — toxics apply to **upstream → client** traffic (responses
+//!   and data coming **back** from the dependency). Use this to stress **inbound** behaviour (slow
+//!   reads, broker lag visible to the client).
+//!
+//! Pick the stream that matches the failure you are simulating; symmetric toxics such as latency
+//! still only affect one direction at a time unless you add two toxics.
+//!
+//! ## Composition with resources and the service under test
+//!
+//! There is **more than one way** to put traffic through Toxiproxy; what the harness does for you
+//! depends on the resource and on [`crate::lifecycle::ScenarioKind`].
+//!
+//! ### Where wiring happens
+//!
+//! During **[`crate::lifecycle::run_scenario`]** provision, after **each** resource finishes
+//! provisioning, the lifecycle may rewrite resource handles and [`crate::lifecycle::Context`]
+//! bindings before the next resource runs. When the **`kafka`** and **`fault-injection`** features
+//! are enabled, Kafka bootstrap URLs can be rewritten to a pass-through proxy listen address so
+//! every later consumer of [`crate::lifecycle::Context::kafka_bindings`] — including service
+//! container env mapping when you use [`crate::service::EnvMapping::Kafka`] — sees the **proxied**
+//! bootstrap, not the broker’s direct address.
+//!
+//! [`FaultHandle`] is installed when a [`crate::resources::ToxiproxyResource`] provision yields
+//! handles (so you can call [`crate::lifecycle::Context::fault_handle_mut`] in the scenario body).
+//!
+//! ### Automatic Kafka path (first-party harness wiring)
+//!
+//! This is **not** a sample pattern you copy from the docs — the lifecycle **implements** it when
+//! the features and resources line up (proxy name, handle rewrites, and bindings updates are all
+//! in-tree). You use the same [`FaultHandle::add_toxic`] API as for any other proxy; the special
+//! part is that you **did not** call [`FaultHandle::create_proxy`] for `shakedown_kafka` yourself.
+//!
+//! When **all** of the following hold:
+//!
+//! - [`crate::lifecycle::ScenarioKind::Faulty`] (use `#[shakedown::faulty_test]`),
+//! - both **Kafka** and **Toxiproxy** are registered on the context, and
+//! - the `kafka` + `fault-injection` features are on,
+//!
+//! the harness creates a Toxiproxy proxy named **`shakedown_kafka`** (listen on an ephemeral port,
+//! upstream set to the broker’s real bootstrap). It updates Kafka [`crate::error::ResourceHandle`]
+//! metadata and scenario [`crate::resources::KafkaBindings`] so the bootstrap string is the **proxy
+//! listen** address. Your **service under test** does not need a special image: inject Kafka with
+//! [`crate::service::EnvMapping::Kafka`] as usual; it receives the proxied URL like any other
+//! scenario. Add toxics on **`shakedown_kafka`** via [`FaultHandle::add_toxic`].
+//!
+//! If Kafka provisions **before** Toxiproxy in registration order, bindings may be **deferred** until
+//! Toxiproxy appears; the harness fills in the proxy once both exist.
+//!
+//! ### Normal scenarios, or Kafka without a rewrite
+//!
+//! With [`crate::lifecycle::ScenarioKind::Normal`], or if Toxiproxy is absent, Kafka keeps the
+//! **direct** broker bootstrap (even if Toxiproxy is registered for other use). See
+//! `tests/fault_injection_kafka.rs` (`normal_kafka_bootstrap_stays_direct_with_toxiproxy_registered`).
+//!
+//! ### Bring-your-own proxy (manual composition)
+//!
+//! For dependencies **without** a built-in rewrite (Postgres, HTTP APIs, a second TCP hop, …), or
+//! when you want a custom topology, call [`FaultHandle::create_proxy`] yourself and point the
+//! service at the proxy **listen** address via explicit [`crate::service::ServiceUnderTest::env`]
+//! (or your own prelude). That is the **same Toxiproxy mechanism** as Kafka, but **you** own proxy
+//! creation and URL injection instead of the harness.
+//!
+//! ### MongoDB replica set (cluster)
+//!
+//! With **`mongodb-cluster`** and fault injection, Shakedown can build an **inter-node Toxiproxy
+//! mesh** between replica-set members (see [`crate::cluster`] and the Mongo replica set wiring).
+//! That is a **separate** composition from the Kafka bootstrap rewrite; you may use one, the other,
+//! or both depending on resources registered.
+//!
+//! ### Diagram (Kafka fault path)
+//!
+//! ```text
+//!   Client (SUT, tests, helpers)          Toxiproxy suite          Kafka broker
+//!
+//!        connect to bootstrap          ┌──────────────────┐       ┌─────────────┐
+//!        from kafka_bindings()    ──►  │listen (ephemeral)│ ───►  │ upstream    │
+//!        or EnvMapping::Kafka          │ proxy shakedown_ │       │ (real host) │
+//!                                      │ kafka            │       └─────────────┘
+//!                                      └──────────────────┘
+//!                                                 ▲
+//!                                    toxics via FaultHandle on this proxy name
+//! ```
 //!
 //! # Book reference
 //!
@@ -24,7 +141,11 @@ use std::sync::mpsc::SyncSender;
 
 use displaydoc::Display;
 use noxious_client::Client as ToxiproxyClient;
-pub use noxious_client::{StreamDirection, Toxic, ToxicKind};
+
+/// Which half of the proxied connection a toxic applies to; see **[`crate::fault_injection`]** for
+/// when to use [`StreamDirection::Upstream`] vs [`StreamDirection::Downstream`].
+pub use noxious_client::StreamDirection;
+pub use noxious_client::{Toxic, ToxicKind};
 
 use crate::event::Event;
 
@@ -59,14 +180,14 @@ pub enum Error {
 
 /// Handle for controlling Toxiproxy proxies and toxics for one scenario run.
 ///
-/// **What:** Wraps the Toxiproxy HTTP client, per-proxy listen/upstream bookkeeping, and an optional
+/// Wraps the Toxiproxy HTTP client, per-proxy listen/upstream bookkeeping, and an optional
 /// channel sender for fault [`Event`] rows.
 ///
-/// **Why:** Scenarios call `add_toxic` / `remove_toxic` without touching raw HTTP; events must reach
+/// Scenarios call `add_toxic` / `remove_toxic` without touching raw HTTP; events must reach
 /// the scenario [`crate::event::EventLog`] without `unsafe` pointers to caller-owned memory.
 ///
-/// **How:** Constructed by the harness with [`FaultHandle::new`]; before the run phase,
-/// [`FaultHandle::set_event_sender`] wires the sender half of an `mpsc` pair. The harness drains the
+/// Constructed by Shakedown with [`FaultHandle::new`]; before the run phase,
+/// [`FaultHandle::set_event_sender`] wires the sender half of an `mpsc` pair. Shakedown drains the
 /// receiver into the log after the scenario body. [`crate::lifecycle::Context::clear_fault_handle`]
 /// drops the handle at teardown.
 #[cfg_attr(docsrs, doc(cfg(feature = "fault-injection")))]

@@ -1,11 +1,11 @@
 //! Publication observation types and the [`PublicationVerifier`] trait.
 //!
-//! **Why:** proving that a message was written to the outbox table is not enough — the relay must
-//! also have published it to the broker and the broker must have delivered it to a consumer. This
+//! Proving that a message was written to the outbox database table (or collection) is not enough — the relay must
+//! also have published it to the message bus and the bus must have delivered it to a consumer. This
 //! module closes that observability gap with a uniform assertion surface regardless of which
 //! message bus your service uses.
 //!
-//! **How:** after asserting outbox row state with the [`crate::outbox`] helpers, obtain a
+//! After asserting outbox row state with the [`crate::outbox`] helpers, obtain a
 //! verifier for your bus (e.g. [`KafkaPublicationVerifier`] when the `kafka` feature is enabled)
 //! and call `verifier.observe(spec).await` to assert that the expected messages arrived within the
 //! configured timeout. Feature-gated implementations are provided for Kafka, RabbitMQ, NATS, and

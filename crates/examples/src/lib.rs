@@ -19,7 +19,7 @@ use std::time::Duration;
 use serde_json::json;
 use shakedown::{
     Context, EnvMapping, HealthCheck, HttpMockService, HttpMockServiceResponse, ServiceUnderTest,
-    HOST_DOCKER_INTERNAL,
+    StatusCode, HOST_DOCKER_INTERNAL,
 };
 
 /// **Prelude** (runs after resources are registered, before the scenario body): register the
@@ -29,12 +29,12 @@ pub fn register_adoption_example_prelude(ctx: &mut Context) -> shakedown::Result
         .on_prefix("GET", "/v1/quote")
         .respond_with(
             HttpMockServiceResponse::builder()
-                .status(200)
+                .status(StatusCode::OK)
                 .header("set-cookie", "session=demo; Path=/")
                 .header("x-custom-header", "shakedown-example")
                 .body_bytes(br#"{"symbol":"DEMO","price":42}"#),
         )
-        .default_response(404);
+        .default_response(StatusCode::NOT_FOUND.into());
     ctx.register_http_mock_service("quote-api", quote_stub)?;
 
     let specification = ServiceUnderTest::docker("traefik/whoami:v1.10")

@@ -1,16 +1,15 @@
 //! Infrastructure diagnostics via the Docker Engine API ([`bollard`]).
 //!
-//! **What:** read-only observation of containers the harness already started—resource stats, log
-//! streaming, and engine events—plus optional resource budget assertions. This module never creates,
-//! starts, or stops containers.
+//! This module never creates, starts, or stops containers. Instead, it provides read-only observation of containers
+//! that shakedown has already started (resource stats, log streaming, and engine events) plus optional resource budget assertions.
 //!
-//! **Why:** operators need correlated infra signals in [`crate::event::EventLog`] and failure
-//! timelines without ad hoc `docker` CLI in tests.
+//! Shakedown diagnostics gives you correlated infra signals in [`crate::event::EventLog`] and failure
+//! timelines with better ergonomics than ad hoc `docker` CLI usage in tests.
 //!
-//! **How:** when a Docker-backed resource feature is active (`kafka`, `rabbitmq`, `postgres`, `mariadb`, `mysql`)
+//! When a Docker-backed resource feature is active (`kafka`, `rabbitmq`, `postgres`, `mariadb`, `mysql`)
 //! or `services`, `diagnostics` is enabled, and `no-diagnostics` is off, [`try_connect`] / [`suite_diagnostics_handle`]
 //! provide a shared client; [`crate::lifecycle::run_scenario`] spawns background tasks and merges their
-//! output during diagnostic shutdown. Use `no-diagnostics` to compile out observability entirely.
+//! output during diagnostic shutdown.
 
 mod connection;
 

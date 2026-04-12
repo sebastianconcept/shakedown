@@ -1,15 +1,16 @@
 //! Error types for the Shakedown harness.
 //!
-//! **Why:** when a scenario fails, knowing *why* it failed matters as much as knowing *that* it
+//! When a scenario fails, knowing *why* it failed matters as much as knowing *that* it
 //! failed. A bug in your service logic, a flaky container startup, and a framework bug all require
-//! different responses. A typed hierarchy lets callers classify failures without string matching
-//! and lets the failure timeline surface the right root-cause hint automatically.
+//! different responses. A typed hierarchy lets callers know how to react fast instead of having to
+//! understand that after interpreting many logs filtered by string matching.
+//! It also lets the failure timeline surface the right root-cause hint automatically.
 //!
-//! **How:** lifecycle and resource APIs return `Result<_, ShakedownError>`. The top-level
+//! Shakedown lifecycle and resource APIs return `Result<_, ShakedownError>`. The top-level
 //! [`ShakedownError`] wraps [`ScenarioError`] (your logic/assertions failed),
 //! [`InfrastructureError`] (provision or readiness failed), or [`InternalError`] (framework bug).
 //! Use `.map_err(OuterError::Variant)?` at call sites so the conversion point is visible for
-//! causability tracing — never `.map_err(..::from)?`.
+//! an ergonomic causability tracing; avoiding `.map_err(..::from)?` that would hide the error source in a false convenience.
 //!
 //! # Book reference
 //!

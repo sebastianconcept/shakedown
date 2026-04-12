@@ -1,13 +1,13 @@
 //! Docker socket connection and process-wide handle for infrastructure diagnostics.
 //!
-//! **What:** [`try_connect`] probes the local Engine, [`suite_diagnostics_handle`] caches a
-//! successful [`DiagnosticsHandle`] for the rest of the process, and [`DiagnosticsHandle`] exposes the
+//! [`try_connect`] probes the local Engine, [`suite_diagnostics_handle`] caches a
+//! successful [`DiagnosticsHandle`] for the rest of the process, and exposes the
 //! underlying [`bollard::Docker`] client for stats, logs, and events.
 //!
-//! **Why:** diagnostics must degrade gracefully when Docker is missing or unreachable (CI without
-//! Docker, wrong `DOCKER_HOST`); a single client avoids connection storms across parallel tests.
+//! Shakedown diagnostics must degrade gracefully when Docker is missing or unreachable (CI without
+//! Docker, wrong `DOCKER_HOST`). By using a single client, we avoid connection storms across parallel tests.
 //!
-//! **How:** the lifecycle and integration tests call [`suite_diagnostics_handle`] before spawning
+//! The shakedown lifecycle and integration tests call [`suite_diagnostics_handle`] before spawning
 //! monitors; failures log a warning and yield [`None`] so scenarios still run without infra enrichment.
 
 #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]
@@ -21,10 +21,11 @@ use bollard::Docker;
 
 /// Connected Docker Engine client used for read-only diagnostics (stats, logs, events).
 ///
-/// Exists so the harness reuses one [`bollard::Docker`] per process when the socket is available,
-/// instead of reconnecting for every list or stream call.
+/// Exists so the shakedown reuses one [`bollard::Docker`] per process when the socket is available,
+/// instead of reconnecting for every list or stream call. When the socket is not available,
+/// we return [`None`] so scenarios still run without infra enrichment.
 ///
-/// Obtained from [`try_connect`] or the cached [`suite_diagnostics_handle`]. With `no-diagnostics`,
+/// Obtained from [`try_connect`] or the cached [`suite_diagnostics_handle`]. When `no-diagnostics` is enabled,
 /// this type is a zero-sized placeholder and is never constructed with a real client.
 pub struct DiagnosticsHandle {
     #[cfg(all(feature = "diagnostics", not(feature = "no-diagnostics")))]

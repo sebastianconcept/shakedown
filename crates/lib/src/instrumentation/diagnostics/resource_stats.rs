@@ -1,12 +1,12 @@
 //! Periodic container stats polling into bounded [`crate::event::InfraEvent::ResourceSample`] rings.
 //!
-//! **What:** lists Shakedown-labeled running containers, calls `/containers/{id}/stats`, and stores
+//! From this module we can list Shakedown-labeled running containers, call `/containers/{id}/stats`, and store
 //! recent CPU, memory, and network samples per container id in a [`super::ring_buffer::RingBuffer`].
 //!
-//! **Why:** fixed memory while still supporting resource assertions and failure snapshots (see
+//! This gives us a fixed memory overhead while still supporting resource assertions and failure timelines (see
 //! [`super::assertions::ResourceAssertBuilder`]).
 //!
-//! **How:** [`ResourceStatsMonitor::spawn`] runs for the scenario; [`SharedResourceStatsRings`] is
+//! [`ResourceStatsMonitor::spawn`] runs for the scenario; [`SharedResourceStatsRings`] is
 //! installed on [`crate::lifecycle::Context`] for assertions; [`ResourceStatsMonitor::shutdown_and_drain`]
 //! flushes rings into [`crate::event::EventLog`]. Tune interval and depth via [`StatsConfig::from_env`].
 

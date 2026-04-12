@@ -1,10 +1,10 @@
 //! Scenario lifecycle types and execution.
 //!
-//! **Why:** integration tests need a reproducible, phase-ordered harness that provisions real
+//! Integration tests need a reproducible, phase-ordered harness that provisions real
 //! infrastructure, seeds data, runs your scenario body, asserts outcomes, and tears everything
 //! down — even when the scenario panics or an infrastructure step fails.
 //!
-//! **How:** call [`run_scenario`] (or use `#[shakedown::test]`) passing a [`Context`] with
+//! Call [`run_scenario`] (or use `#[shakedown::test]`) passing a [`Context`] with
 //! registered resources. The harness drives the six phases in order and classifies any failure as
 //! a [`crate::error::ScenarioError`] (your logic/assertions) or an
 //! [`crate::error::InfrastructureError`] (provision/readiness) so you always know whether to fix
@@ -375,6 +375,9 @@ pub struct Context {
     /// HTTP mock service server tasks: shutdown channel + join handle (paired with names for timeline messages).
     #[cfg(feature = "mock-services")]
     http_mock_service_servers: Vec<(String, HttpMockServiceServer)>,
+    /// Local address HTTP and gRPC mock listeners bind to; port is always ephemeral (`0`). Defaults to loopback.
+    #[cfg(feature = "mock-services")]
+    mock_service_bind_ip: std::net::IpAddr,
     /// gRPC mock services registered before [`run_scenario`] starts tonic servers (after seed).
     #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
     pending_grpc_mock_services: Vec<(String, Arc<dyn GrpcMockServiceTrait>)>,
@@ -519,6 +522,8 @@ impl Context {
             grpc_mock_service_servers: Vec::new(),
             #[cfg(feature = "mock-services")]
             mock_service_servers_phase_complete: false,
+            #[cfg(feature = "mock-services")]
+            mock_service_bind_ip: std::net::Ipv4Addr::LOCALHOST.into(),
             #[cfg(feature = "services")]
             services: HashMap::new(),
             #[cfg(feature = "cluster")]
@@ -628,6 +633,8 @@ impl Context {
             grpc_mock_service_servers: Vec::new(),
             #[cfg(feature = "mock-services")]
             mock_service_servers_phase_complete: false,
+            #[cfg(feature = "mock-services")]
+            mock_service_bind_ip: std::net::Ipv4Addr::LOCALHOST.into(),
             #[cfg(feature = "services")]
             services: HashMap::new(),
             #[cfg(feature = "cluster")]
@@ -737,6 +744,8 @@ impl Context {
             grpc_mock_service_servers: Vec::new(),
             #[cfg(feature = "mock-services")]
             mock_service_servers_phase_complete: false,
+            #[cfg(feature = "mock-services")]
+            mock_service_bind_ip: std::net::Ipv4Addr::LOCALHOST.into(),
             #[cfg(feature = "services")]
             services: HashMap::new(),
             #[cfg(feature = "cluster")]
@@ -990,6 +999,8 @@ impl Context {
     }
 
     /// Stages a sqlx migration tree to apply in [`run_scenario`] (`postgres` + `sqlx`).
+    /// Calling this method does not run migrations immediately; the harness applies them during
+    /// [`run_scenario`] after default seed and before mock services.
     ///
     /// The `#[shakedown::test(migrations = "./migrations")]` macro expands to a call that passes
     /// `Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/", ...)).to_path_buf()` from the **test
@@ -1190,6 +1201,15 @@ impl Context {
     #[cfg(feature = "timescaledb")]
     pub fn timescaledb_bindings(&self) -> Option<&PostgresBindings> {
         self.timescaledb_bindings.as_ref()
+    }
+
+    /// Set the local IP address HTTP and gRPC mock listeners bind to (port is always ephemeral).
+    ///
+    /// Defaults to [`std::net::Ipv4Addr::LOCALHOST`]. Call before [`run_scenario`], for example
+    /// `Ipv4Addr::UNSPECIFIED` (`0.0.0.0`) when something on the host network must dial the stub.
+    #[cfg(feature = "mock-services")]
+    pub fn set_mock_service_bind_ip(&mut self, ip: std::net::IpAddr) {
+        self.mock_service_bind_ip = ip;
     }
 
     /// Register an HTTP mock service server to be started after the seed phase of [`run_scenario`].
@@ -3097,6 +3117,7 @@ async fn start_and_readiness_mock_services(
             scenario_id_string.clone(),
             Arc::clone(&resources),
             None,
+            ctx.mock_service_bind_ip,
         )
         .await
         {
@@ -3138,6 +3159,7 @@ async fn start_and_readiness_mock_services(
                 scenario_id_string.clone(),
                 Arc::clone(&resources),
                 None,
+                ctx.mock_service_bind_ip,
             )
             .await
             {

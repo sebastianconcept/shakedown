@@ -48,7 +48,7 @@ pub enum PullPolicy {
     Never,
 }
 
-/// Overrides the default environment variable name for a harness binding when injecting into a service container.
+/// Overrides the default environment variable name for the Shakedown binding when injecting into a service container.
 ///
 /// ## Which mapping do I need?
 ///
@@ -70,7 +70,7 @@ pub enum PullPolicy {
 /// corresponding `shakedown` Cargo features are enabled — same idea: map harness bindings into the
 /// env var names your binary already reads.
 ///
-/// If your service uses the default env var names the harness already injects (for example
+/// If your service uses the default env var names Shakedown already injects (for example
 /// `DATABASE_URL`, `KAFKA_BOOTSTRAP_SERVERS`), you do not need [`EnvMapping`] — convention injection
 /// covers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
