@@ -703,8 +703,12 @@ impl Resource for FakeResource {
 
 mod migration_runner;
 mod sql_bindings_migrations;
+#[cfg(any(feature = "mariadb", feature = "mysql"))]
+pub(crate) mod sql_seed;
+pub(crate) mod user_seed;
 
 pub use migration_runner::MigrationRunner;
+pub use user_seed::{map_seed_error, UserSeedFn};
 
 /// Shared reqwest client for Elasticsearch/OpenSearch HTTP APIs (`elasticsearch` / `opensearch` features).
 #[cfg(any(feature = "elasticsearch", feature = "opensearch"))]

@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_elasticsearch_index_prefix, Resource, ResourceHandle};
+use crate::resources::user_seed::WeaviateUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_elasticsearch_index_prefix, Resource, ResourceHandle, WeaviateBindings,
+};
 use async_trait::async_trait;
 use std::sync::OnceLock;
 use testcontainers::core::IntoContainerPort;
@@ -109,7 +112,6 @@ async fn delete_classes_with_prefix(rest_url: &str, class_prefix: &str) -> Resul
 ///
 /// Default tag **`1.28.2`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_WEAVIATE_IMAGE_TAG`.
 /// The container enables anonymous access (`AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true`) for local test runs without auth setup.
-#[derive(Debug)]
 pub struct WeaviateResource {
     image_tag: Option<String>,
     holds_suite_ref: bool,
@@ -117,6 +119,22 @@ pub struct WeaviateResource {
     port: Option<u16>,
     rest_url: String,
     class_prefix: String,
+    user_seed: Option<WeaviateUserSeedFn>,
+}
+
+impl std::fmt::Debug for WeaviateResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WeaviateResource")
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("rest_url", &self.rest_url)
+            .field("class_prefix", &self.class_prefix)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for WeaviateResource {
@@ -135,6 +153,7 @@ impl WeaviateResource {
             port: None,
             rest_url: String::new(),
             class_prefix: String::new(),
+            user_seed: None,
         }
     }
 
@@ -157,6 +176,26 @@ impl WeaviateResource {
 
     fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
         InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
+    }
+
+    pub fn set_seed(&mut self, seed: WeaviateUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn weaviate_bindings(&self) -> Result<WeaviateBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        Ok(WeaviateBindings {
+            rest_url: self.rest_url.clone(),
+            host: host.to_string(),
+            port,
+            class_prefix: self.class_prefix.clone(),
+        })
     }
 }
 
@@ -287,6 +326,10 @@ impl Resource for WeaviateResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.weaviate_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

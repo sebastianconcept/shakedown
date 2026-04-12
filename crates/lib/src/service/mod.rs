@@ -14,8 +14,9 @@
 //!
 //! If the scenario also declares infrastructure resources, [`crate::lifecycle::run_scenario`] runs
 //! **[`crate::lifecycle::Phase::Seed`]** first: default seeding on those resources and any
-//! database migrations you configure (for example `migrations = \".../sql/migrations"` on [`crate::test`] with
-//! Postgres and the `sqlx` feature, or migrations in your prelude). Mock services and the
+//! database migrations you configure on the resource (for example `Postgres(migrations = \"./migrations\")`
+//! on [`crate::test`], or [`crate::PostgresResource::with_migrations_path`](crate::PostgresResource::with_migrations_path)
+//! in a prelude). Mock services and the
 //! service-under-test container start after that setup.
 //!
 //! # Book reference

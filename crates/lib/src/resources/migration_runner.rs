@@ -51,6 +51,7 @@ pub(crate) fn map_migration_failure(
 ///
 /// Supports:
 /// - `postgresql://` / `postgres://` — requires the `postgres` Cargo feature.
+/// - `mysql://` — MariaDB and MySQL scenario URLs; requires the `mariadb` and/or `mysql` Cargo feature.
 /// - `sqlite:` or `file:` URIs — requires the `sqlite` Cargo feature. Shakedown's
 ///   in-memory SQLite bindings use `file:<name>?mode=memory&cache=shared` URIs, so both
 ///   schemes are recognised as SQLite for transparent integration.
@@ -106,8 +107,27 @@ impl MigrationRunner for sqlx::migrate::Migrator {
                 )));
             }
         }
+        if lower.starts_with("mysql://") {
+            #[cfg(any(feature = "mariadb", feature = "mysql"))]
+            {
+                let pool = sqlx::mysql::MySqlPool::connect(connection_url)
+                    .await
+                    .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> {
+                        Box::new(error)
+                    })?;
+                return self.run(&pool).await.map_err(
+                    |error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) },
+                );
+            }
+            #[cfg(not(any(feature = "mariadb", feature = "mysql")))]
+            {
+                return Err(Box::new(std::io::Error::other(
+                    "sqlx Migrator: mysql URLs require the `mariadb` and/or `mysql` Cargo feature",
+                )));
+            }
+        }
         Err(Box::new(std::io::Error::other(format!(
-            "sqlx Migrator: unsupported connection URL scheme (expected postgres/postgresql, sqlite, or file): {}",
+            "sqlx Migrator: unsupported connection URL scheme (expected postgres/postgresql, mysql, sqlite, or file): {}",
             connection_url.split('?').next().unwrap_or(connection_url)
         ))))
     }

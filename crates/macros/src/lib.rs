@@ -37,18 +37,15 @@ mod test;
 /// End-to-end, a `#[shakedown::test]` function runs stages in this order:
 ///
 /// 1. **`resources`** — builtins from `resources = [...]` are registered on a fresh context (macro expansion).
-/// 2. **`migrations`** (optional) — **Macro-time staging only:** after resource registration and before the
-///    prelude block, the expansion calls
-///    [`set_pending_postgres_sqlx_migrations_path`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html#method.set_pending_postgres_sqlx_migrations_path)
-///    with a path relative to the **test crate's** `CARGO_MANIFEST_DIR` (for example
-///    `migrations = "./migrations"`). No SQL runs here. **Harness-time application:** inside
-///    [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html), the harness applies
-///    that sqlx migration tree **after** each resource's `apply_default_seed` and **before** mock services
-///    start. Requires `resources = [Postgres, ...]` and the `postgres` + `sqlx` features on `shakedown`.
-/// 3. **`prelude`** — optional `prelude = { ... }` runs next (register HTTP mocks, `ServiceUnderTest`, etc.).
+///    SQL resources can declare schema and static seed files here, e.g.
+///    `Postgres(migrations = "./migrations", seed = "./seed.sql")` — paths are relative to the test crate's
+///    `CARGO_MANIFEST_DIR` and are wired into [`shakedown::PostgresResource::with_migrations_path`](https://docs.rs/shakedown/latest/shakedown/struct.PostgresResource.html).
+///    Migrations run inside each resource's [`Resource::apply_default_seed`](https://docs.rs/shakedown/latest/shakedown/trait.Resource.html#tymethod.apply_default_seed)
+///    (before programmatic [`set_seed`](https://docs.rs/shakedown/latest/shakedown/struct.PostgresResource.html#method.set_seed) closures).
+/// 2. **`prelude`** — optional `prelude = { ... }` runs next (register HTTP mocks, `ServiceUnderTest`, etc.).
 ///    This happens **before** [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
 ///    so everything is wired on `ctx` when the harness starts.
-/// 4. **`run_scenario`** then runs **provision** and **readiness** for registered resources, **seed**
+/// 3. **`run_scenario`** then runs **provision** and **readiness** for registered resources, **seed**
 ///    (`apply_default_seed`), **mocks** (mock HTTP/gRPC listeners start), **services** (service-under-test
 ///    containers start and become healthy), your scenario **body**, the harness **assert** phase, and
 ///    finally **teardown**.
@@ -64,11 +61,6 @@ mod test;
 /// - **`prelude = { ... }`** — statements run on `ctx` after resource registration and before
 ///   [`shakedown::run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
 ///   (e.g. register HTTP/gRPC mock services, which must complete before the harness starts mock listeners).
-/// - **`migrations = "…"`** — stages a sqlx migrations directory on `ctx` (macro expansion); requires
-///   `resources = [Postgres, …]` and the `shakedown` dependency with **`postgres` and `sqlx`** features enabled
-///   (the expanded code calls `set_pending_postgres_sqlx_migrations_path`, which exists only with both).
-///   Path is relative to the test crate's `CARGO_MANIFEST_DIR`. Actual migration execution happens later inside
-///   `run_scenario`, not during the prelude (see **Order of operations** above).
 /// - **`ignore = true | false`** — optional override for automatic `#[ignore]` on the generated
 ///   `#[tokio::test]`. When `resources = [...]` is non-empty, the macro emits `#[ignore]` by default
 ///   so Docker-dependent tests are not run by plain `cargo test`. Set `ignore = false` when your CI

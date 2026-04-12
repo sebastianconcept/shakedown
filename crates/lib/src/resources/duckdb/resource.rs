@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{duckdb_named_memory_database_path, Resource, ResourceHandle};
+use crate::resources::user_seed::DuckDbUserSeedFn;
+use crate::resources::{
+    duckdb_named_memory_database_path, map_seed_error, DuckDbBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
 use duckdb::Connection;
 use std::path::Path;
@@ -15,16 +18,41 @@ const RESOURCE_NAME: &str = "duckdb";
 ///
 /// `duckdb::Connection` is not [`Sync`]; it is wrapped in [`Arc`] [`Mutex`] so [`BuiltinResource`]
 /// remains [`Sync`].
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct DuckDbResource {
     connection: Option<Arc<Mutex<Connection>>>,
     database_url: String,
+    user_seed: Option<DuckDbUserSeedFn>,
+}
+
+impl std::fmt::Debug for DuckDbResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DuckDbResource")
+            .field("connection", &self.connection.as_ref().map(|_| "<open>"))
+            .field("database_url", &self.database_url)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl DuckDbResource {
     /// New DuckDB resource (connection opened on [`Resource::provision`]).
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn set_seed(&mut self, seed: DuckDbUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn duckdb_bindings(&self) -> Result<DuckDbBindings, InfrastructureError> {
+        if self.database_url.is_empty() {
+            return Err(InfrastructureError::NotProvisioned(RESOURCE_NAME.into()));
+        }
+        Ok(DuckDbBindings {
+            database_url: self.database_url.clone(),
+        })
     }
 }
 
@@ -96,6 +124,10 @@ impl Resource for DuckDbResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.duckdb_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

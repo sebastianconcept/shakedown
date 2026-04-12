@@ -3,7 +3,21 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
+use syn::spanned::Spanned;
 use syn::{bracketed, parenthesized, Expr, Ident, Token};
+
+fn path_string_literal(expr: &Expr, key: &str) -> syn::Result<syn::LitStr> {
+    match expr {
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(lit),
+            ..
+        }) => Ok(lit.clone()),
+        _ => Err(syn::Error::new(
+            expr.span(),
+            format!("`{key}` must be a string literal path (e.g. `\"./migrations\"`)"),
+        )),
+    }
+}
 
 /// A single resource specification that can include configuration.
 ///
@@ -100,16 +114,47 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Postgres" => {
-            if spec.config.is_some() {
-                return Err(syn::Error::new(
-                    spec.ident.span(),
-                    "Postgres resource does not support configuration",
-                ));
+            let mut builder = quote! { ::shakedown::PostgresResource::new() };
+            if let Some(config) = &spec.config {
+                for (key, value) in config {
+                    match key.to_string().as_str() {
+                        "migrations" => {
+                            let lit = path_string_literal(value, "migrations")?;
+                            builder = quote! {
+                                #builder.with_migrations_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
+                        "seed" => {
+                            let lit = path_string_literal(value, "seed")?;
+                            builder = quote! {
+                                #builder.with_seed_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
+                        _ => {
+                            return Err(syn::Error::new(
+                                key.span(),
+                                "unknown Postgres configuration key; valid keys are `migrations` or `seed`",
+                            ));
+                        }
+                    }
+                }
             }
             return Ok(quote! {
-                ctx.register_builtin(::shakedown::BuiltinResource::Postgres(
-                    ::shakedown::PostgresResource::new(),
-                ));
+                ctx.register_builtin(::shakedown::BuiltinResource::Postgres(#builder));
             });
         }
         "PostgresReplicaSet" => {
@@ -127,10 +172,36 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                         "version" => {
                             builder_tokens = quote! { #builder_tokens.with_image_tag(#value) };
                         }
+                        "migrations" => {
+                            let lit = path_string_literal(value, "migrations")?;
+                            builder_tokens = quote! {
+                                #builder_tokens.with_migrations_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
+                        "seed" => {
+                            let lit = path_string_literal(value, "seed")?;
+                            builder_tokens = quote! {
+                                #builder_tokens.with_seed_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
                         _ => {
                             return Err(syn::Error::new(
                                 key.span(),
-                                format!("unknown PostgresReplicaSet configuration key `{}`; valid keys are `image_tag` or `version`", key)
+                                format!("unknown PostgresReplicaSet configuration key `{}`; valid keys are `image_tag`, `version`, `migrations`, or `seed`", key)
                             ));
                         }
                     }
@@ -147,29 +218,91 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "MariaDB" => {
-            if spec.config.is_some() {
-                return Err(syn::Error::new(
-                    spec.ident.span(),
-                    "MariaDB resource does not support configuration",
-                ));
+            let mut builder = quote! { ::shakedown::MariaDBResource::new() };
+            if let Some(config) = &spec.config {
+                for (key, value) in config {
+                    match key.to_string().as_str() {
+                        "migrations" => {
+                            let lit = path_string_literal(value, "migrations")?;
+                            builder = quote! {
+                                #builder.with_migrations_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
+                        "seed" => {
+                            let lit = path_string_literal(value, "seed")?;
+                            builder = quote! {
+                                #builder.with_seed_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
+                        _ => {
+                            return Err(syn::Error::new(
+                                key.span(),
+                                "unknown MariaDB configuration key; valid keys are `migrations` or `seed`",
+                            ));
+                        }
+                    }
+                }
             }
             return Ok(quote! {
-                ctx.register_builtin(::shakedown::BuiltinResource::MariaDB(
-                    ::shakedown::MariaDBResource::new(),
-                ));
+                ctx.register_builtin(::shakedown::BuiltinResource::MariaDB(#builder));
             });
         }
         "Mysql" => {
-            if spec.config.is_some() {
-                return Err(syn::Error::new(
-                    spec.ident.span(),
-                    "Mysql resource does not support configuration",
-                ));
+            let mut builder = quote! { ::shakedown::MysqlResource::new() };
+            if let Some(config) = &spec.config {
+                for (key, value) in config {
+                    match key.to_string().as_str() {
+                        "migrations" => {
+                            let lit = path_string_literal(value, "migrations")?;
+                            builder = quote! {
+                                #builder.with_migrations_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
+                        "seed" => {
+                            let lit = path_string_literal(value, "seed")?;
+                            builder = quote! {
+                                #builder.with_seed_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
+                        _ => {
+                            return Err(syn::Error::new(
+                                key.span(),
+                                "unknown Mysql configuration key; valid keys are `migrations` or `seed`",
+                            ));
+                        }
+                    }
+                }
             }
             return Ok(quote! {
-                ctx.register_builtin(::shakedown::BuiltinResource::Mysql(
-                    ::shakedown::MysqlResource::new(),
-                ));
+                ctx.register_builtin(::shakedown::BuiltinResource::Mysql(#builder));
             });
         }
         "Sqlite" => {
@@ -496,16 +629,47 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Timescaledb" => {
-            if spec.config.is_some() {
-                return Err(syn::Error::new(
-                    spec.ident.span(),
-                    "Timescaledb resource does not support configuration",
-                ));
+            let mut builder = quote! { ::shakedown::TimescaledbResource::new() };
+            if let Some(config) = &spec.config {
+                for (key, value) in config {
+                    match key.to_string().as_str() {
+                        "migrations" => {
+                            let lit = path_string_literal(value, "migrations")?;
+                            builder = quote! {
+                                #builder.with_migrations_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
+                        "seed" => {
+                            let lit = path_string_literal(value, "seed")?;
+                            builder = quote! {
+                                #builder.with_seed_path(
+                                    ::std::path::Path::new(::std::concat!(
+                                        ::std::env!("CARGO_MANIFEST_DIR"),
+                                        "/",
+                                        #lit
+                                    ))
+                                    .to_path_buf()
+                                )
+                            };
+                        }
+                        _ => {
+                            return Err(syn::Error::new(
+                                key.span(),
+                                "unknown Timescaledb configuration key; valid keys are `migrations` or `seed`",
+                            ));
+                        }
+                    }
+                }
             }
             return Ok(quote! {
-                ctx.register_builtin(::shakedown::BuiltinResource::Timescaledb(
-                    ::shakedown::TimescaledbResource::new(),
-                ));
+                ctx.register_builtin(::shakedown::BuiltinResource::Timescaledb(#builder));
             });
         }
         "Toxiproxy" => {

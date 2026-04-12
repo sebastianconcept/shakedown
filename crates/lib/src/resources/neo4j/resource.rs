@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_neo4j_database_name, Resource, ResourceHandle};
+use crate::resources::user_seed::Neo4jUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_neo4j_database_name, Neo4jBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
 use neo4rs::{query, ConfigBuilder, Graph};
 use std::sync::OnceLock;
@@ -102,7 +105,6 @@ async fn run_return_one_default_db(host: &str, bolt_port: u16) -> Result<(), Inf
 /// Override with [`Self::with_image_tag`] or `SHAKEDOWN_NEO4J_IMAGE_TAG`. Community Edition images
 /// do not support multiple databases — provisioning fails unless you use a single shared DB
 /// (not supported by this resource).
-#[derive(Debug)]
 pub struct Neo4jResource {
     image_tag: Option<String>,
     holds_suite_ref: bool,
@@ -112,6 +114,24 @@ pub struct Neo4jResource {
     username: String,
     password: String,
     database_name: String,
+    user_seed: Option<Neo4jUserSeedFn>,
+}
+
+impl std::fmt::Debug for Neo4jResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Neo4jResource")
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("bolt_port", &self.bolt_port)
+            .field("http_port", &self.http_port)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("database_name", &self.database_name)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for Neo4jResource {
@@ -132,6 +152,7 @@ impl Neo4jResource {
             username: SUITE_USER.to_string(),
             password: SUITE_PASSWORD.to_string(),
             database_name: String::new(),
+            user_seed: None,
         }
         .with_image_tag_from_env()
     }
@@ -155,6 +176,41 @@ impl Neo4jResource {
 
     fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
         InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
+    }
+
+    pub fn set_seed(&mut self, seed: Neo4jUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn neo4j_bindings(&self) -> Result<Neo4jBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned("neo4j".into()))?;
+        let bolt_port = self
+            .bolt_port
+            .ok_or_else(|| InfrastructureError::NotProvisioned("neo4j".into()))?;
+        let http_port = self
+            .http_port
+            .ok_or_else(|| InfrastructureError::NotProvisioned("neo4j".into()))?;
+        let bolt_url = format!(
+            "bolt://{}:{}@{}:{}",
+            self.username, self.password, host, bolt_port
+        );
+        let http_url = format!(
+            "http://{}:{}@{}:{}",
+            self.username, self.password, host, http_port
+        );
+        Ok(Neo4jBindings {
+            bolt_url,
+            http_url,
+            host: host.to_string(),
+            port: bolt_port,
+            http_port,
+            username: self.username.clone(),
+            password: self.password.clone(),
+            database: self.database_name.clone(),
+        })
     }
 }
 
@@ -306,6 +362,10 @@ impl Resource for Neo4jResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.neo4j_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_sql_database_name, Resource, ResourceHandle};
+use crate::resources::user_seed::InfluxDbUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_sql_database_name, InfluxDbBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
 use std::sync::OnceLock;
 use testcontainers::core::IntoContainerPort;
@@ -197,7 +200,6 @@ async fn delete_bucket_by_id(
 /// Default tag **`2`**. Override with [`Self::with_image_tag`] or **`SHAKEDOWN_INFLUXDB_IMAGE_TAG`**
 /// via [`Self::with_image_tag_from_env`]. Container init uses fixed org **`shakedown`** and admin
 /// token **`shakedown-admin-token`** (see `DOCKER_INFLUXDB_INIT_*` env in [`Resource::provision`]).
-#[derive(Debug)]
 pub struct InfluxDbResource {
     image_repository: String,
     image_tag: Option<String>,
@@ -210,6 +212,26 @@ pub struct InfluxDbResource {
     token: String,
     bucket_name: String,
     bucket_id: String,
+    user_seed: Option<InfluxDbUserSeedFn>,
+}
+
+impl std::fmt::Debug for InfluxDbResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("InfluxDbResource")
+            .field("image_repository", &self.image_repository)
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("url", &self.url)
+            .field("organization", &self.organization)
+            .field("token", &"<redacted>")
+            .field("bucket_name", &self.bucket_name)
+            .field("bucket_id", &self.bucket_id)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for InfluxDbResource {
@@ -232,6 +254,7 @@ impl InfluxDbResource {
             token: SUITE_ADMIN_TOKEN.to_string(),
             bucket_name: String::new(),
             bucket_id: String::new(),
+            user_seed: None,
         }
     }
 
@@ -254,6 +277,28 @@ impl InfluxDbResource {
 
     fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
         InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
+    }
+
+    pub fn set_seed(&mut self, seed: InfluxDbUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn influxdb_bindings(&self) -> Result<InfluxDbBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        Ok(InfluxDbBindings {
+            url: self.url.clone(),
+            host: host.to_string(),
+            port,
+            token: self.token.clone(),
+            organization: self.organization.clone(),
+            bucket: self.bucket_name.clone(),
+        })
     }
 }
 
@@ -396,6 +441,10 @@ impl Resource for InfluxDbResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.influxdb_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

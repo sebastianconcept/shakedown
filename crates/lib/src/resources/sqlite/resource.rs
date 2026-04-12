@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sqlite_named_memory_uri, Resource, ResourceHandle};
+use crate::resources::user_seed::SqliteUserSeedFn;
+use crate::resources::{
+    map_seed_error, sqlite_named_memory_uri, Resource, ResourceHandle, SqliteBindings,
+};
 use async_trait::async_trait;
 use rusqlite::{Connection, OpenFlags};
 use std::sync::{Arc, Mutex};
@@ -16,17 +19,42 @@ const RESOURCE_NAME: &str = "sqlite";
 /// remains [`Sync`] and readiness can use [`tokio::task::spawn_blocking`] (works on the default
 /// single-threaded Tokio test executor used by `#[tokio::test]`).
 #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct SqliteResource {
     connection: Option<Arc<Mutex<Connection>>>,
     /// Retained for debugging; matches metadata `database_url`.
     database_url: String,
+    user_seed: Option<SqliteUserSeedFn>,
+}
+
+impl std::fmt::Debug for SqliteResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SqliteResource")
+            .field("connection", &self.connection.as_ref().map(|_| "<open>"))
+            .field("database_url", &self.database_url)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl SqliteResource {
     /// New SQLite resource (connection opened on [`Resource::provision`]).
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn set_seed(&mut self, seed: SqliteUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn sqlite_bindings(&self) -> Result<SqliteBindings, InfrastructureError> {
+        if self.database_url.is_empty() {
+            return Err(InfrastructureError::NotProvisioned(RESOURCE_NAME.into()));
+        }
+        Ok(SqliteBindings {
+            database_url: self.database_url.clone(),
+        })
     }
 }
 
@@ -104,6 +132,10 @@ impl Resource for SqliteResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.sqlite_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

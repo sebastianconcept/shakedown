@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_nats_subject_prefix, Resource, ResourceHandle};
+use crate::resources::user_seed::NatsUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_nats_subject_prefix, NatsBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
 use std::sync::OnceLock;
 use testcontainers::core::{Image, ImageExt};
@@ -44,7 +47,6 @@ fn image_fingerprint(image: &Nats, tag_override: &Option<String>) -> String {
 /// Default image tag is **`2`** (`nats:2`). Override with [`Self::with_image_tag`] or
 /// `SHAKEDOWN_NATS_IMAGE_TAG`.
 #[cfg_attr(docsrs, doc(cfg(feature = "nats")))]
-#[derive(Debug)]
 pub struct NatsResource {
     image: Nats,
     image_tag: Option<String>,
@@ -53,6 +55,26 @@ pub struct NatsResource {
     port: Option<u16>,
     connection_url: Option<String>,
     subject_prefix: String,
+    user_seed: Option<NatsUserSeedFn>,
+}
+
+impl std::fmt::Debug for NatsResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NatsResource")
+            .field("image", &self.image)
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field(
+                "connection_url",
+                &self.connection_url.as_ref().map(|_| "<url>"),
+            )
+            .field("subject_prefix", &self.subject_prefix)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for NatsResource {
@@ -72,6 +94,7 @@ impl NatsResource {
             port: None,
             connection_url: None,
             subject_prefix: String::new(),
+            user_seed: None,
         }
         .with_image_tag_from_env()
     }
@@ -91,6 +114,30 @@ impl NatsResource {
             }
         }
         self
+    }
+
+    pub fn set_seed(&mut self, seed: NatsUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn nats_bindings(&self) -> Result<NatsBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned("nats".into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned("nats".into()))?;
+        let connection_url = self
+            .connection_url
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned("nats".into()))?;
+        Ok(NatsBindings {
+            connection_url: connection_url.to_string(),
+            host: host.to_string(),
+            port,
+            subject_prefix: self.subject_prefix.clone(),
+        })
     }
 
     fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
@@ -226,6 +273,10 @@ impl Resource for NatsResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.nats_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

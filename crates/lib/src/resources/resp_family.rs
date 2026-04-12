@@ -15,7 +15,8 @@
 //! Mismatched image fingerprints while the Shakedown server is running return an error (one image per
 //! process).
 
-use super::{sanitize_redis_key_prefix, Resource, ResourceHandle};
+use super::user_seed::RedisUserSeedFn;
+use super::{map_seed_error, sanitize_redis_key_prefix, RedisBindings, Resource, ResourceHandle};
 use crate::error::{InfrastructureError, ScenarioId};
 use async_trait::async_trait;
 use testcontainers::core::Image;
@@ -54,6 +55,7 @@ where
     port: Option<u16>,
     connection_url: Option<String>,
     key_prefix: String,
+    user_seed: Option<RedisUserSeedFn>,
 }
 
 impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> std::fmt::Debug
@@ -63,6 +65,7 @@ impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> std::fmt::Debug
         f.debug_struct("RespResource")
             .field("engine", &self.engine)
             .field("image_tag", &self.image_tag)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
             .finish_non_exhaustive()
     }
 }
@@ -87,7 +90,33 @@ impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> RespResource<I>
             port: None,
             connection_url: None,
             key_prefix: String::new(),
+            user_seed: None,
         }
+    }
+
+    /// User-provided async seed ([`Resource::apply_default_seed`]) after readiness.
+    pub fn set_seed(&mut self, seed: RedisUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn redis_bindings(&self) -> Result<RedisBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned(self.engine.into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned(self.engine.into()))?;
+        let connection_url = self
+            .connection_url
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned(self.engine.into()))?;
+        Ok(RedisBindings {
+            connection_url: connection_url.to_string(),
+            host: host.to_string(),
+            port,
+            key_prefix: self.key_prefix.clone(),
+        })
     }
 
     /// Override the image tag (full `name:tag` is `Image::name` + this tag).
@@ -315,6 +344,10 @@ impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> Resource for Re
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.redis_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

@@ -552,8 +552,9 @@ pub use lapin;
 /// Re-export the pinned `sqlx` crate so consumers inherit the exact version used internally.
 ///
 /// Enable the `sqlx` feature and write `use shakedown::sqlx::…` (for example
-/// `sqlx::migrate::Migrator` with `#[shakedown::test]` and `migrations = "…"`) instead of
-/// declaring a separate `sqlx` dependency.
+/// `sqlx::migrate::Migrator` with `Postgres(migrations = "…")` on `#[shakedown::test]` or
+/// [`crate::PostgresResource::with_migrations_path`](crate::PostgresResource::with_migrations_path)
+/// instead of declaring a separate `sqlx` dependency.
 #[cfg(feature = "sqlx")]
 pub use sqlx;
 

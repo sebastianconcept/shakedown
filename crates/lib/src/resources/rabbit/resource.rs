@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_rabbit_resource_prefix, Resource, ResourceHandle};
+use crate::resources::user_seed::RabbitUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_rabbit_resource_prefix, RabbitBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
 use lapin::{types::ShortString, Connection, ConnectionProperties};
 use std::sync::OnceLock;
@@ -39,7 +42,6 @@ fn image_fingerprint(image: &RabbitMq, tag_override: &Option<String>) -> String 
 /// [`RabbitResource`] instances reuse it. The last successful [`Resource::teardown`] removes the
 /// container when the refcount reaches zero.
 #[cfg_attr(docsrs, doc(cfg(feature = "rabbitmq")))]
-#[derive(Debug)]
 pub struct RabbitResource {
     image: RabbitMq,
     image_tag: Option<String>,
@@ -51,6 +53,26 @@ pub struct RabbitResource {
     vhost: String,
     amqp_uri: Option<String>,
     resource_prefix: String,
+    user_seed: Option<RabbitUserSeedFn>,
+}
+
+impl std::fmt::Debug for RabbitResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RabbitResource")
+            .field("image", &self.image)
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("vhost", &self.vhost)
+            .field("amqp_uri", &self.amqp_uri.as_ref().map(|_| "<uri>"))
+            .field("resource_prefix", &self.resource_prefix)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for RabbitResource {
@@ -73,6 +95,7 @@ impl RabbitResource {
             vhost: "/".to_string(),
             amqp_uri: None,
             resource_prefix: String::new(),
+            user_seed: None,
         }
     }
 
@@ -99,6 +122,33 @@ impl RabbitResource {
 
     fn build_amqp_uri(host: &str, port: u16, username: &str, password: &str) -> String {
         format!("amqp://{username}:{password}@{host}:{port}")
+    }
+
+    pub fn set_seed(&mut self, seed: RabbitUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn rabbit_bindings(&self) -> Result<RabbitBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned("rabbitmq".into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned("rabbitmq".into()))?;
+        let amqp_uri = self
+            .amqp_uri
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned("rabbitmq".into()))?;
+        Ok(RabbitBindings::new(
+            amqp_uri,
+            host,
+            port,
+            self.username.as_str(),
+            self.password.as_str(),
+            self.vhost.as_str(),
+            self.resource_prefix.as_str(),
+        ))
     }
 }
 
@@ -240,6 +290,10 @@ impl Resource for RabbitResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.rabbit_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 
