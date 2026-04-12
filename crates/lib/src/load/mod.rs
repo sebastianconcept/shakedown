@@ -1,11 +1,11 @@
 //! Load and soak testing: phased arrival rates, metrics, assertions, and baselines (`load` feature).
 //!
-//! **Why:** correctness tests prove a service behaves correctly for one request; load tests prove
+//! Correctness tests prove a service behaves correctly for one request; load tests prove
 //! it behaves correctly under sustained traffic. Shakedown reuses the same container lifecycle,
 //! resource provisioning, and failure timeline for load scenarios so you do not need a separate
 //! tool or separate infrastructure setup.
 //!
-//! **How:** build a [`types::LoadProfile`] with [`types::LoadProfile::open_model`], register it
+//! Build a [`types::LoadProfile`] with [`types::LoadProfile::open_model`], register it
 //! via [`crate::lifecycle::Context::start_load`] to receive a [`handle::LoadHandle`], then drive
 //! requests inside the load body. After the run, chain [`LoadMetricsAssertBuilder`] calls to
 //! express SLO budgets (p99 latency, error rate, throughput). Persist baselines with

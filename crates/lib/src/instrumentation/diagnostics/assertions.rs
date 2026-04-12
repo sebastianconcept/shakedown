@@ -1,13 +1,28 @@
 //! Resource budget assertions using diagnostics stats rings on [`crate::lifecycle::Context`].
 //!
-//! **What:** [`ResourceAssertBuilder`] evaluates peak memory and average CPU from collected
+//! [`ResourceAssertBuilder`] evaluates peak memory and average CPU from collected
 //! [`crate::event::InfraEvent::ResourceSample`] values for a container name.
 //!
-//! **Why:** scenarios get a typed, fail-fast way to assert infra stayed within bounds without parsing
+//! Shakedown scenarios get a typed, fail-fast way to assert infra stayed within bounds without parsing
 //! `docker stats` or raw cgroup output.
 //!
-//! **How:** call [`crate::lifecycle::Context::assert_resource`] during run or assert phase when
+//! Call [`crate::lifecycle::Context::assert_resource`] during run or assert phase when
 //! diagnostics attached rings; failures return [`crate::error::ShakedownError::ResourceAssertionFailed`].
+//!
+//! # Example
+//!
+//! `assert_resource` is only on [`Context`] when a Docker-backed resource feature and `diagnostics`
+//! are enabled (not `no-diagnostics`). With that, a typical check looks like:
+//!
+//! ```rust,ignore
+//! async fn scenario(ctx: &mut shakedown::Context) -> Result<(), shakedown::ShakedownError> {
+//!     let container_name = "my-service";
+//!     ctx.assert_resource(container_name)
+//!         .peak_memory_under(256 * 1024 * 1024)?;
+//!     ctx.assert_resource(container_name).avg_cpu_under(80.0)?;
+//!     Ok(())
+//! }
+//! ```
 
 use crate::error::{InternalError, ShakedownError};
 use crate::event::InfraEvent;

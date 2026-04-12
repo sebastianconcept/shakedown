@@ -1,12 +1,12 @@
 //! Transactional outbox helpers for scenario databases.
 //!
-//! **Why:** services that write domain events to a relational outbox table and then publish them
-//! to a message bus are hard to test end-to-end. This module provisions the canonical
+//! Services that write domain events to an outbox database table (or collection) and then publish them
+//! to a message bus can be cumbersome to test end-to-end. This module provisions a shakedown
 //! `outbox_event` table (or MongoDB collection), exposes row-state assertions (`assert_pending`,
 //! `assert_sent`, …), and integrates with [`crate::publication`] so you can verify the full
-//! pipeline — database write → outbox poll → broker publication — in a single scenario.
+//! pipeline — database write → outbox poll → broker publication — ergonomically in a single scenario.
 //!
-//! **How:** call `ctx.setup_outbox()` inside your seed or scenario body to create the outbox
+//! Call `ctx.setup_outbox()` inside your seed or scenario body to create the outbox
 //! table for the active relational binding. Use the row-state assertion helpers to check that your
 //! service's outbox relay processed each event correctly. Pair with a
 //! [`crate::publication::PublicationVerifier`] to confirm delivery reached the broker.
@@ -15,7 +15,7 @@
 //! `SELECT FOR UPDATE SKIP LOCKED` or other claim-locking semantics; they only read the latest
 //! matching row for observability-style checks.
 //!
-//! [`OutboxError`] is defined in `outbox/error.rs` (crate-private) and re-exported at the crate
+//! [`OutboxError`] is defined in `outbox/error.rs` (crate-private) and re-exported at the shakedown crate
 //! root as [`crate::OutboxError`].
 //!
 //! # Book reference

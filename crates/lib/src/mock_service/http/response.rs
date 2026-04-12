@@ -12,7 +12,7 @@ use super::response_builder::HttpMockServiceResponseBuilder;
 #[derive(Debug, Clone)]
 pub struct HttpMockServiceResponse {
     /// HTTP status code.
-    pub status: u16,
+    pub status: StatusCode,
     /// Response headers as `(name, value)` pairs.
     pub headers: Vec<(String, String)>,
     /// Raw response body bytes.
@@ -23,14 +23,14 @@ impl HttpMockServiceResponse {
     /// `200 OK` with an empty body.
     pub fn ok() -> Self {
         Self {
-            status: 200,
+            status: StatusCode::OK,
             headers: Vec::new(),
             body: Bytes::new(),
         }
     }
 
     /// Empty body with the given status code.
-    pub fn status(status_code: u16) -> Self {
+    pub fn status(status_code: StatusCode) -> Self {
         Self {
             status: status_code,
             headers: Vec::new(),
@@ -44,7 +44,7 @@ impl HttpMockServiceResponse {
             message: source.to_string(),
         })?;
         Ok(Self {
-            status: 200,
+            status: StatusCode::OK,
             headers: vec![(
                 String::from("content-type"),
                 String::from("application/json"),

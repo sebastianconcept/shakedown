@@ -1,10 +1,10 @@
 //! Procedural macros for the `shakedown` test harness.
 //!
-//! **What:** attributes and helpers that expand into `#[tokio::test]` async tests wired to
+//! Attributes and helpers that expand into `#[tokio::test]` async tests wired to
 //! [`shakedown::run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html),
 //! plus optional compile-time resource registration.
 //!
-//! **Why:** tests should not duplicate `Context::new`, `EventLog::new`, and scenario wiring in every
+//! Tests should not duplicate `Context::new`, `EventLog::new`, and scenario wiring in every
 //! function.
 //!
 //! **Macros (public API):**
@@ -26,7 +26,7 @@ mod test;
 
 /// Declarative entry point for a **normal** Shakedown scenario test.
 ///
-/// **What:** An attribute you place on an `async fn` so the macro expands it into a `#[tokio::test]`
+/// An attribute you place on an `async fn` so the macro expands it into a `#[tokio::test]`
 /// that constructs [`shakedown::Context`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html),
 /// an [`shakedown::EventLog`](https://docs.rs/shakedown/latest/shakedown/event/struct.EventLog.html),
 /// optionally pre-registers builtin resources, then runs your body inside
@@ -37,14 +37,14 @@ mod test;
 /// End-to-end, a `#[shakedown::test]` function runs stages in this order:
 ///
 /// 1. **`resources`** — builtins from `resources = [...]` are registered on a fresh context (macro expansion).
-/// 2. **`migrations`** — optional `migrations = "./migrations"` runs **after** resource registration and
-///    **before** the prelude: it stages a path (relative to the **test crate's** `CARGO_MANIFEST_DIR`) on
-///    [`Context`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html) via
-///    [`set_pending_postgres_sqlx_migrations_path`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html#method.set_pending_postgres_sqlx_migrations_path).
-///    [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html) applies the sqlx
-///    migration tree **after** each resource's `apply_default_seed` and **before** mock services start — still
-///    ordered within the harness seed phase, so Postgres is ready and default seed ran first. Requires
-///    `resources = [Postgres, ...]` and the `postgres` + `sqlx` features on `shakedown`.
+/// 2. **`migrations`** (optional) — **Macro-time staging only:** after resource registration and before the
+///    prelude block, the expansion calls
+///    [`set_pending_postgres_sqlx_migrations_path`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html#method.set_pending_postgres_sqlx_migrations_path)
+///    with a path relative to the **test crate's** `CARGO_MANIFEST_DIR` (for example
+///    `migrations = "./migrations"`). No SQL runs here. **Harness-time application:** inside
+///    [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html), the harness applies
+///    that sqlx migration tree **after** each resource's `apply_default_seed` and **before** mock services
+///    start. Requires `resources = [Postgres, ...]` and the `postgres` + `sqlx` features on `shakedown`.
 /// 3. **`prelude`** — optional `prelude = { ... }` runs next (register HTTP mocks, `ServiceUnderTest`, etc.).
 ///    This happens **before** [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
 ///    so everything is wired on `ctx` when the harness starts.
@@ -64,6 +64,11 @@ mod test;
 /// - **`prelude = { ... }`** — statements run on `ctx` after resource registration and before
 ///   [`shakedown::run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
 ///   (e.g. register HTTP/gRPC mock services, which must complete before the harness starts mock listeners).
+/// - **`migrations = "…"`** — stages a sqlx migrations directory on `ctx` (macro expansion); requires
+///   `resources = [Postgres, …]` and the `shakedown` dependency with **`postgres` and `sqlx`** features enabled
+///   (the expanded code calls `set_pending_postgres_sqlx_migrations_path`, which exists only with both).
+///   Path is relative to the test crate's `CARGO_MANIFEST_DIR`. Actual migration execution happens later inside
+///   `run_scenario`, not during the prelude (see **Order of operations** above).
 /// - **`ignore = true | false`** — optional override for automatic `#[ignore]` on the generated
 ///   `#[tokio::test]`. When `resources = [...]` is non-empty, the macro emits `#[ignore]` by default
 ///   so Docker-dependent tests are not run by plain `cargo test`. Set `ignore = false` when your CI
@@ -109,8 +114,8 @@ pub fn test(attr: ProcMacroTokenStream, item: ProcMacroTokenStream) -> ProcMacro
 
 /// Declarative entry point for a **fault-oriented** Shakedown scenario test.
 ///
-/// **What:** Same expansion as [`test`] — `#[tokio::test]`, fresh `Context` and `EventLog`, optional
-/// `resources = [ ... ]`, then `run_scenario` — except the harness sets
+/// Same expansion as [`test`] — `#[tokio::test]`, fresh `Context` and `EventLog`, optional
+/// `resources = [ ... ]`, then `run_scenario` — except the Shakedown sets
 /// [`shakedown::ScenarioKind::Faulty`](https://docs.rs/shakedown/latest/shakedown/enum.ScenarioKind.html)
 /// on the context **before** the scenario runs.
 ///
@@ -136,13 +141,12 @@ pub fn faulty_test(attr: ProcMacroTokenStream, item: ProcMacroTokenStream) -> Pr
 
 /// Placeholder attribute for **resource self-registration** (not implemented yet).
 ///
-/// **What:** A no-op attribute that expands to its input item unchanged. It exists so API shape can be
+/// A no-op attribute that expands to its input item unchanged. It exists so API shape can be
 /// reserved early.
 ///
-/// **Unlocks when used (today):** nothing — the item is emitted as-is. Use only if you want to
-/// annotate types or modules in preparation for future harness integration.
+/// Use only if you want to annotate types or modules in preparation for future Shakedown integration.
 ///
-/// **Will unlock (planned):** attaching metadata to `Resource` implementations so the harness can
+/// Will unlock (planned): attaching metadata to `Resource` implementations so the Shakedown can
 /// discover and register them without listing every type in `resources = [...]` at the test site.
 #[proc_macro_attribute]
 pub fn register_resource(
@@ -154,9 +158,9 @@ pub fn register_resource(
 
 /// Minimal **function-like** proc-macro used for crate smoke tests and examples.
 ///
-/// **What:** Expands to the string literal `"Hello, shakedown!"` (no configurable input).
+/// Expands to the string literal `"Hello, shakedown!"` (no configurable input).
 ///
-/// **Unlocks when used:** a quick compile-time check that the `shakedown-macros` crate is linked
+/// Unlocks when used: a quick compile-time check that the `shakedown-macros` crate is linked
 /// and procedural macros resolve correctly; not intended for production scenario code.
 #[proc_macro]
 pub fn default_greeting(_input: ProcMacroTokenStream) -> ProcMacroTokenStream {

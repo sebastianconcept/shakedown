@@ -38,4 +38,9 @@ pub enum MockServiceError {
         /// Builder or framework detail.
         message: String,
     },
+    /// HTTP status code {code} is not valid (see `http::StatusCode`)
+    InvalidHttpStatus {
+        /// Raw value that `http::StatusCode::from_u16` rejected
+        code: u16,
+    },
 }

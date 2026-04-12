@@ -1,14 +1,15 @@
 //! Inbound HTTP request presented to an [`super::super::HttpMockServiceTrait`].
 
 use bytes::Bytes;
+use http::Method;
 
 use super::super::types::MockServiceError;
 
 /// Inbound HTTP request presented to an [`super::super::HttpMockServiceTrait`].
 #[derive(Debug, Clone)]
 pub struct HttpMockServiceRequest {
-    /// HTTP method (uppercase by convention, e.g. `GET`).
-    pub method: String,
+    /// HTTP method (see [`Method`]).
+    pub method: Method,
     /// Path without query string (e.g. `/v1/orders`).
     pub path: String,
     /// Raw query string without `?`, if any.
@@ -20,9 +21,9 @@ pub struct HttpMockServiceRequest {
 }
 
 impl HttpMockServiceRequest {
-    /// HTTP method as a string slice.
-    pub fn method(&self) -> &str {
-        self.method.as_str()
+    /// HTTP method from the wire (standard methods use uppercase spellings, e.g. [`Method::GET`]).
+    pub fn method(&self) -> &Method {
+        &self.method
     }
 
     /// URL path as a string slice.
@@ -60,7 +61,7 @@ impl HttpMockServiceRequest {
 
     /// Builds a [`HttpMockServiceRequest`] from `http` crate parts and body (optional interop, D-brief-8).
     pub fn from_http_parts(parts: http::request::Parts, body: Bytes) -> Self {
-        let method = parts.method.as_str().to_owned();
+        let method = parts.method;
         let path = parts.uri.path().to_owned();
         let query = parts.uri.query().map(str::to_owned);
         let mut headers = Vec::new();

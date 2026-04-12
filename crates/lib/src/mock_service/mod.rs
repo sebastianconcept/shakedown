@@ -1,12 +1,12 @@
 //! Service virtualization for integration tests — HTTP and gRPC mock services.
 //!
-//! **Why:** a service under test often calls external APIs (payment processors, inventory
+//! A service under test often calls external APIs (payment processors, inventory
 //! services, notification gateways) that are unavailable in a test environment. Replacing those
 //! dependencies with trait mocks swaps serialization and real HTTP error handling for fake ones,
-//! masking the bugs you most want to catch. Mock services run as real local servers on real
+//! masking the bugs you most want to catch. Shakedown mock services run as real local servers on real
 //! network ports so your service's HTTP client hits the same code path it would in production.
 //!
-//! **How:** create an [`HttpMockService`] (or [`GrpcMockService`] with the `grpc-mock-services`
+//! Create an [`HttpMockService`] (or [`GrpcMockService`] with the `grpc-mock-services`
 //! feature), register scenario-specific routes or handlers, then inject its URL into the service
 //! container via [`crate::service::EnvMapping`]. The harness starts and stops the mock server as
 //! part of the normal lifecycle. After the scenario, assert call counts and request bodies through
@@ -37,7 +37,8 @@ pub use handle::{MockServiceHandle, RecordedCall, RecordedExchange};
 
 pub use http::{
     HttpMockService, HttpMockServiceRequest, HttpMockServiceResponse,
-    HttpMockServiceResponseBuilder, HttpMockServiceRoutePending, RouteMatch,
+    HttpMockServiceResponseBuilder, HttpMockServiceRoutePending, HttpMockStatus, Method,
+    RouteMatch, StatusCode,
 };
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]

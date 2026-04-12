@@ -1,4 +1,4 @@
-//! Declarative gRPC mock service (`GrpcMockService`) implementing [`GrpcMockServiceTrait`](super::super::GrpcMockServiceTrait).
+//! Declarative gRPC mock service (`GrpcMockService`) implementing [`GrpcMockServiceTrait`](super::GrpcMockServiceTrait).
 //!
 //! Use it in integration tests or scenarios to stand in for a real gRPC backend with fixed unary
 //! responses (no real server logic), so callers see predictable protobuf payloads and status codes.

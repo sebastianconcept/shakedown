@@ -1,11 +1,11 @@
 //! Observability during scenarios: structured event log, failure timeline, and Docker diagnostics.
 //!
-//! **Why:** when a scenario fails it is critical to know whether the failure is essential
+//! When a scenario fails it is critical to know whether the failure is essential
 //! complexity (a real bug in your code) or accidental complexity (an infrastructure issue in the
 //! test setup). Without phase-tagged infrastructure events a red test always raises the question
 //! "was that real or flaky?" — eroding confidence in the entire test suite.
 //!
-//! **How:** the harness automatically collects timestamped [`event::Event`] values from every
+//! Shakedown automatically collects timestamped [`event::Event`] values from every
 //! participant (resources, bridges, faults, services) into an [`event::EventLog`]. On failure the
 //! [`timeline`] module renders a correlated, human-readable summary ordered by timestamp and
 //! tagged with the active lifecycle phase. When Docker-backed resources or `services` are enabled,

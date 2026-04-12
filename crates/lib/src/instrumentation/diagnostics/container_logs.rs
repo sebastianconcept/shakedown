@@ -1,12 +1,10 @@
 //! Container stdout/stderr streaming into [`crate::event::InfraEvent::ContainerLog`] records.
 //!
-//! **What:** a background supervisor that discovers Shakedown-labeled running containers and tails
+//! Shakedown diagnostics captures application output for debugging and failure timelines without shelling out to
+//! `docker logs`. Hence, this is a background supervisor that discovers Shakedown-labeled running containers and tails
 //! their logs via [`Docker::logs`] into an in-memory sink.
 //!
-//! **Why:** captures application output for debugging and failure timelines without shelling out to
-//! `docker logs`.
-//!
-//! **How:** spawned from [`crate::lifecycle`] when diagnostics connect; each new container id gets a
+//! Spawned from [`crate::lifecycle`] when diagnostics connect; each new container id gets a
 //! follow task; [`ContainerLogsMonitor::shutdown_and_drain`] merges buffered lines into
 //! [`crate::event::EventLog`] at teardown, ordered by timestamp.
 

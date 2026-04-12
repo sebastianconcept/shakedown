@@ -1,16 +1,22 @@
 //! Service-under-test lifecycle management (`services` feature).
 //!
-//! **Why:** testing a service in isolation with mocked dependencies misses serialization bugs,
-//! real error-handling paths, and emergent behaviour at service boundaries. Running the real
-//! service binary in Docker during a scenario exercises the same code path that production does,
-//! without requiring the full service mesh.
+//! Testing a service in isolation with mocked dependencies misses serialization bugs,
+//! real error-handling paths, and emergent behaviour at service boundaries. With Shakedown's ServiceUnderTest,
+//! you are running the real service binary in Docker during a scenario and it exercises
+//! the same code path that production does without requiring the full service mesh.
 //!
-//! **How:** build a [`ServiceUnderTest`] with the Docker image, environment variables, and
+//! Build a [`ServiceUnderTest`] with the Docker image, environment variables, and
 //! dependency order, then register it on [`crate::lifecycle::Context`] before calling
-//! [`crate::lifecycle::run_scenario`]. The harness starts the container, waits for the
+//! [`crate::lifecycle::run_scenario`]. Shakedown starts the container, waits for the
 //! [`HealthCheck`] to pass, injects resource URLs via [`EnvMapping`], and stops the container
 //! during teardown. Access the service's runtime URL from the scenario body via
 //! `ctx.service_url("my-service")`.
+//!
+//! If the scenario also declares infrastructure resources, [`crate::lifecycle::run_scenario`] runs
+//! **[`crate::lifecycle::Phase::Seed`]** first: default seeding on those resources and any
+//! database migrations you configure (for example `migrations = \".../sql/migrations"` on [`crate::test`] with
+//! Postgres and the `sqlx` feature, or migrations in your prelude). Mock services and the
+//! service-under-test container start after that setup.
 //!
 //! # Book reference
 //!

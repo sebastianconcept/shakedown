@@ -1,18 +1,18 @@
-//! Resource providers and registration for the Shakedown harness.
+//! Resource providers and registration for Shakedown.
 //!
-//! **Why:** integration tests need real infrastructure — databases, brokers, caches — provisioned
+//! Integration tests need real infrastructure — databases, brokers, caches — provisioned
 //! fresh and fully isolated for each scenario. The [`Resource`] trait is the contract every engine
-//! implements so the lifecycle harness can provision, health-check, seed, and tear down anything
+//! implements so Shakedown's lifecycle can provision, health-check, seed, and tear down anything
 //! behind one async interface.
 //!
-//! **How:** register resources on [`crate::lifecycle::Context`] before calling
+//! Register resources on [`crate::lifecycle::Context`] before calling
 //! [`crate::lifecycle::run_scenario`]. For built-in engines (Kafka, Postgres, Redis, …) use
 //! [`BuiltinResource`] variants. For custom infrastructure implement [`Resource`] directly and call
 //! `ctx.register_resource(your_resource)`. Use [`sanitize_resource_namespace`] inside `provision`
 //! to derive a scenario-scoped name that is safe as a database name, topic prefix, index name, or
 //! key namespace.
 //!
-//! **Layout:** shared contract, sanitizers, [`BuiltinResource`], and bindings live in this module;
+//! Shared contract, sanitizers, [`BuiltinResource`], and bindings live in this module;
 //! each engine lives under `resources/<engine>/` with `resource.rs`, `helpers.rs`, and `tests.rs`.
 //!
 //! # Book reference

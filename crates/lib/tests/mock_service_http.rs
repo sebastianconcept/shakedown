@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use shakedown::mock_service::HttpMockServiceTrait;
 use shakedown::{
     run_scenario, Context, EventLog, HttpMockService, HttpMockServiceRequest,
-    HttpMockServiceResponse, MockServiceContext,
+    HttpMockServiceResponse, MockServiceContext, StatusCode,
 };
 
 /// **Given** a stateful counter. **When** each request hits any path, **then** return JSON
@@ -38,14 +38,14 @@ async fn stub_bridge_multiple_routes_register_request_assert() {
     // default 404 for unknown paths.
     let stub = HttpMockService::new("auth-api")
         .on("GET", "/health")
-        .respond(200)
+        .respond(StatusCode::OK.into())
         .on("POST", "/v1/validate")
         .respond_json(&serde_json::json!({ "valid": true }))
         .expect("stub json route")
         .on("GET", "/v1/users/*/profile")
         .respond_json(&serde_json::json!({ "name": "test" }))
         .expect("stub json route")
-        .default_response(404);
+        .default_response(StatusCode::NOT_FOUND.into());
 
     let mut ctx = Context::new();
     ctx.register_http_mock_service("auth-api", stub)

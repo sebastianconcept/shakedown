@@ -1,9 +1,9 @@
 //! Integration test suite for the `shakedown-macros` procedural macros using `trybuild`.
 //!
-//! **What:** This module runs compile-pass and compile-fail tests against real usage of
+//! This module runs compile-pass and compile-fail tests against real usage of
 //! `#[shakedown::test]`, `#[shakedown::faulty_test]`, and related attributes.
 //!
-//! **Why:** Unit tests on synthetic `proc_macro2::TokenStream`s are not enough. `trybuild` exercises
+//! Unit tests on synthetic `proc_macro2::TokenStream`s are not enough. `trybuild` exercises
 //! the **full macro pipeline** (real `proc_macro::TokenStream` → expansion → type checking by rustc)
 //! exactly as users will experience it in their own crates. It also locks in the exact compiler
 //! error messages for bad inputs.

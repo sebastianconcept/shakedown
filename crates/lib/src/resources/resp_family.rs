@@ -1,18 +1,18 @@
-//! Shared [`Resource`] implementation for **Redis** and **Valkey** (RESP on port 6379).
+//! Shared [`Resource`] implementation for Redis and Valkey (RESP on port 6379).
 //!
-//! **What:** [`RespResource`] is generic over a [`testcontainers::core::Image`] so the `redis` and
+//! [`RespResource`] is generic over a [`testcontainers::core::Image`] so the `redis` and
 //! `valkey` features each supply their own image while reusing one code path.
 //!
-//! **Why suite-wide container:** One Docker container is started per test **process** and shared
-//! across scenarios. Isolation is **logical**—each scenario gets a distinct key prefix via
+//! One Docker container is started per test **process** and shared
+//! across scenarios. Isolation is logical—each scenario gets a distinct key prefix via
 //! [`sanitize_redis_key_prefix`]—so you avoid paying a new container for every scenario while
 //! keeping data apart.
 //!
-//! **How:** A process-static [`Mutex`] wraps [`SuiteState`]: first provision starts the container
+//! A process-static [`Mutex`] wraps [`SuiteState`]: first provision starts the container
 //! and sets `refs = 1`; further provisions for the same `image:name:tag` increment `refs`.
 //! [`Resource::teardown`] deletes keys matching this scenario’s prefix ([`delete_keys_with_prefix`]
 //! uses `SCAN` + `DEL`), decrements `refs`, and removes the container when the last reference drops.
-//! Mismatched image fingerprints while the suite server is running return an error (one image per
+//! Mismatched image fingerprints while the Shakedown server is running return an error (one image per
 //! process).
 
 use super::{sanitize_redis_key_prefix, Resource, ResourceHandle};

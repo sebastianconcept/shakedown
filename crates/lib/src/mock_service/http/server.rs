@@ -1,6 +1,7 @@
 //! Hyper HTTP/1 listener for [`super::HttpMockServiceTrait`].
 
 use std::convert::Infallible;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -18,6 +19,8 @@ use tokio::sync::oneshot;
 
 use super::super::handle::{MockServiceHandle, RecordedExchange};
 use super::super::types::{MockServiceContext, MockServiceError, MockServiceResources};
+use http::StatusCode;
+
 use super::request::HttpMockServiceRequest;
 use super::response::{internal_server_error_http_response, HttpMockServiceResponse};
 use super::HttpMockServiceTrait;
@@ -28,7 +31,7 @@ pub(crate) struct HttpMockServiceServer {
     pub join: tokio::task::JoinHandle<()>,
 }
 
-/// Bind `127.0.0.1:0`, spawn the accept loop, return the public handle (in an [`Arc`]) and
+/// Bind `bind_ip:0` (ephemeral port), spawn the accept loop, return the public handle (in an [`Arc`]) and
 /// [`HttpMockServiceServer`] (shutdown signal + background task join handle).
 pub(crate) async fn spawn_http_mock_service_server(
     mock_service_name: String,
@@ -36,8 +39,9 @@ pub(crate) async fn spawn_http_mock_service_server(
     scenario_id: String,
     resources: Arc<MockServiceResources>,
     max_recorded_body_size: Option<usize>,
+    bind_ip: IpAddr,
 ) -> Result<(Arc<MockServiceHandle>, HttpMockServiceServer), MockServiceError> {
-    let listener = TcpListener::bind("127.0.0.1:0")
+    let listener = TcpListener::bind(SocketAddr::new(bind_ip, 0))
         .await
         .map_err(|source| MockServiceError::ServerStart { source })?;
     let bind_addr = listener
@@ -136,7 +140,8 @@ async fn serve_one(
         Ok(collected) => collected.to_bytes(),
         Err(_) => {
             return Ok(
-                match HttpMockServiceResponse::status(400).into_http_response() {
+                match HttpMockServiceResponse::status(StatusCode::BAD_REQUEST).into_http_response()
+                {
                     Ok(response) => response,
                     Err(error) => {
                         tracing::error!(
@@ -153,7 +158,7 @@ async fn serve_one(
     };
     let mock_service_request = HttpMockServiceRequest::from_http_parts(parts, body_bytes);
     let timestamp = OffsetDateTime::now_utc();
-    let method = mock_service_request.method().to_owned();
+    let method = mock_service_request.method().as_str().to_owned();
     let path = mock_service_request.path().to_owned();
     let query = mock_service_request.query().map(str::to_owned);
     let request_headers = mock_service_request.headers().to_vec();
@@ -165,7 +170,7 @@ async fn serve_one(
         .await;
     let duration = started.elapsed();
 
-    let response_status = mock_service_response.status;
+    let response_status = mock_service_response.status.as_u16();
     let response_body = mock_service_response.body.clone();
     let http_response = match mock_service_response.into_http_response() {
         Ok(response) => response,

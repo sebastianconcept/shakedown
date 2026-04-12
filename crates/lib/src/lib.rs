@@ -235,8 +235,8 @@ pub use crate::lifecycle::{
 pub use crate::mock_service::{
     HttpMockService, HttpMockServiceRequest, HttpMockServiceResponse,
     HttpMockServiceResponseBuilder, HttpMockServiceRoutePending, HttpMockServiceTrait,
-    MockServiceContext, MockServiceError, MockServiceHandle, MockServiceResources, RecordedCall,
-    RecordedExchange, RouteMatch,
+    HttpMockStatus, Method, MockServiceContext, MockServiceError, MockServiceHandle,
+    MockServiceResources, RecordedCall, RecordedExchange, RouteMatch, StatusCode,
 };
 
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]

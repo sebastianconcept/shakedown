@@ -375,7 +375,7 @@ async fn test_async_resource_phases() {
 #[cfg(feature = "mock-services")]
 mod mock_service_registration_tests {
     use crate::error::{InternalError, ShakedownError};
-    use crate::mock_service::HttpMockService;
+    use crate::mock_service::{HttpMockService, StatusCode};
 
     use super::Context;
 
@@ -383,7 +383,9 @@ mod mock_service_registration_tests {
     fn register_http_mock_service_duplicate_name_returns_error() {
         // Given a context and one registered HTTP mock service
         let mut context = Context::new();
-        let stub = HttpMockService::new("api").on("GET", "/").respond(200);
+        let stub = HttpMockService::new("api")
+            .on("GET", "/")
+            .respond(StatusCode::OK.into());
         context
             .register_http_mock_service("edge", stub.clone())
             .unwrap();
@@ -405,7 +407,9 @@ mod mock_service_registration_tests {
         // Given a context where the mock service phase is marked complete
         let mut context = Context::new();
         context.set_mock_service_servers_phase_complete_for_test(true);
-        let stub = HttpMockService::new("api").on("GET", "/").respond(200);
+        let stub = HttpMockService::new("api")
+            .on("GET", "/")
+            .respond(StatusCode::OK.into());
         // When we try to register a mock service
         let error = context
             .register_http_mock_service("edge", stub)
@@ -423,7 +427,7 @@ mod mock_service_registration_tests {
 #[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
 mod mock_service_grpc_registration_tests {
     use crate::error::{InternalError, ShakedownError};
-    use crate::mock_service::{GrpcMockService, HttpMockService};
+    use crate::mock_service::{GrpcMockService, HttpMockService, StatusCode};
     use tonic::Code;
 
     use super::Context;
@@ -458,7 +462,9 @@ mod mock_service_grpc_registration_tests {
     fn register_grpc_mock_service_name_conflicts_with_http_mock_service() {
         // Given an HTTP mock service already registered under a name
         let mut context = Context::new();
-        let http_stub = HttpMockService::new("api").on("GET", "/").respond(200);
+        let http_stub = HttpMockService::new("api")
+            .on("GET", "/")
+            .respond(StatusCode::OK.into());
         context
             .register_http_mock_service("shared", http_stub)
             .unwrap();

@@ -2,6 +2,7 @@
 
 use std::convert::Infallible;
 use std::future::Future;
+use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -35,7 +36,7 @@ pub(crate) struct GrpcMockServiceServer {
     pub join: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
 }
 
-/// Bind `127.0.0.1:0`, spawn [`tonic::transport::Server`], return [`MockServiceHandle`] and
+/// Bind `bind_ip:0` (ephemeral port), spawn [`tonic::transport::Server`], return [`MockServiceHandle`] and
 /// [`GrpcMockServiceServer`] (shutdown signal + background task join handle).
 pub(crate) async fn spawn_grpc_mock_service_server(
     mock_service_name: String,
@@ -43,8 +44,9 @@ pub(crate) async fn spawn_grpc_mock_service_server(
     scenario_id: String,
     resources: Arc<MockServiceResources>,
     max_recorded_body_size: Option<usize>,
+    bind_ip: IpAddr,
 ) -> Result<(Arc<MockServiceHandle>, GrpcMockServiceServer), MockServiceError> {
-    let listener = TcpListener::bind("127.0.0.1:0")
+    let listener = TcpListener::bind(SocketAddr::new(bind_ip, 0))
         .await
         .map_err(|source| MockServiceError::ServerStart { source })?;
     let bind_addr = listener
