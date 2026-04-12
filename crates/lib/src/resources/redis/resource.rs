@@ -1,5 +1,6 @@
 use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::resp_family::{RespResource, SuiteState};
+use crate::resources::user_seed::RedisUserSeedFn;
 use crate::resources::{Resource, ResourceHandle};
 use async_trait::async_trait;
 use std::sync::OnceLock;
@@ -18,12 +19,17 @@ fn suite_redis_mutex() -> &'static Mutex<SuiteState<Redis>> {
 /// Default image tag is **`7`** (`redis:7`). Override with [`Self::with_image_tag`] or
 /// `SHAKEDOWN_REDIS_IMAGE_TAG`.
 #[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
-#[derive(Debug)]
 pub struct RedisResource(pub(super) RespResource<Redis>);
 
 impl Default for RedisResource {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Debug for RedisResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
     }
 }
 
@@ -50,6 +56,11 @@ impl RedisResource {
     /// Apply the image tag from `SHAKEDOWN_REDIS_IMAGE_TAG` if set (called automatically by [`Self::new`]).
     pub fn with_image_tag_from_env(self) -> Self {
         Self(self.0.with_image_tag_from_env())
+    }
+
+    /// See [`crate::resources::resp_family::RespResource::set_seed`].
+    pub fn set_seed(&mut self, seed: RedisUserSeedFn) {
+        self.0.set_seed(seed);
     }
 }
 

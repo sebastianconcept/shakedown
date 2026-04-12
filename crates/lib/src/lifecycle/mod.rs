@@ -250,7 +250,7 @@ pub enum ScenarioKind {
 /// per-run metadata so [`run_scenario`] can drive provision → teardown without global singletons.
 ///
 /// How: constructed with [`Context::new`] or by `#[shakedown::test]`; the scenario function receives
-/// `&mut Context` to register extras or read [`Context::scenario_id`], [`Context::kafka_bindings`],
+/// `&mut Context` to register extras, configure builtins via `Context::*_resource_mut()` before provision, or read [`Context::scenario_id`], [`Context::kafka_bindings`],
 /// [`Context::rabbit_bindings`] (with the `rabbitmq` feature), [`Context::redis_bindings`] /
 /// [`Context::redis`] (with the `redis` / `valkey` features), [`Context::mongo_bindings`] /
 /// [`Context::mongo`] (with the `mongodb` feature), [`Context::nats_bindings`] / [`Context::nats`]
@@ -274,12 +274,6 @@ pub struct Context {
     /// Postgres bindings when a Postgres resource populated them (`postgres` feature).
     #[cfg(feature = "postgres")]
     postgres_bindings: Option<PostgresBindings>,
-    /// On-disk sqlx migration tree, staged by `#[shakedown::test(migrations = "...")]` (`postgres` + `sqlx`).
-    ///
-    /// Applied in [`run_scenario`] after [`Resource::apply_default_seed`](crate::resources::Resource::apply_default_seed)
-    /// and before mock services / the scenario run phase, so the database schema exists before containers that depend on it start.
-    #[cfg(all(feature = "postgres", feature = "sqlx"))]
-    pending_postgres_sqlx_migrations_path: Option<std::path::PathBuf>,
     /// MariaDB bindings when a MariaDB resource populated them (`mariadb` feature).
     #[cfg(feature = "mariadb")]
     mariadb_bindings: Option<MariaDBBindings>,
@@ -443,8 +437,6 @@ impl Context {
             rabbit_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
-            #[cfg(all(feature = "postgres", feature = "sqlx"))]
-            pending_postgres_sqlx_migrations_path: None,
             #[cfg(feature = "mariadb")]
             mariadb_bindings: None,
             #[cfg(feature = "mysql")]
@@ -554,8 +546,6 @@ impl Context {
             rabbit_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
-            #[cfg(all(feature = "postgres", feature = "sqlx"))]
-            pending_postgres_sqlx_migrations_path: None,
             #[cfg(feature = "mariadb")]
             mariadb_bindings: None,
             #[cfg(feature = "mysql")]
@@ -665,8 +655,6 @@ impl Context {
             rabbit_bindings: None,
             #[cfg(feature = "postgres")]
             postgres_bindings: None,
-            #[cfg(all(feature = "postgres", feature = "sqlx"))]
-            pending_postgres_sqlx_migrations_path: None,
             #[cfg(feature = "mariadb")]
             mariadb_bindings: None,
             #[cfg(feature = "mysql")]
@@ -774,6 +762,300 @@ impl Context {
     pub fn register_extension<R: Resource + 'static>(&mut self, resource: R) {
         self.resources
             .push(RegisteredResource::Extension(Box::new(resource)));
+    }
+
+    /// Mutable reference to the registered [`crate::FakeResource`], if present.
+    pub fn fake_resource_mut(&mut self) -> Option<&mut crate::FakeResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Fake(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::KafkaResource`], if present (`kafka` feature).
+    #[cfg(feature = "kafka")]
+    pub fn kafka_resource_mut(&mut self) -> Option<&mut crate::KafkaResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Kafka(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::RabbitResource`], if present (`rabbitmq` feature).
+    #[cfg(feature = "rabbitmq")]
+    pub fn rabbit_resource_mut(&mut self) -> Option<&mut crate::RabbitResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Rabbit(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::PostgresResource`], if present (`postgres` feature).
+    #[cfg(feature = "postgres")]
+    pub fn postgres_resource_mut(&mut self) -> Option<&mut crate::PostgresResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Postgres(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::PostgresReplicaSetResource`], if present (`postgres-cluster` feature).
+    #[cfg(feature = "postgres-cluster")]
+    pub fn postgres_replica_set_resource_mut(
+        &mut self,
+    ) -> Option<&mut crate::PostgresReplicaSetResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::PostgresReplicaSet(resource)) => {
+                    Some(resource)
+                }
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::MariaDBResource`], if present (`mariadb` feature).
+    #[cfg(feature = "mariadb")]
+    pub fn mariadb_resource_mut(&mut self) -> Option<&mut crate::MariaDBResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::MariaDB(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::MysqlResource`], if present (`mysql` feature).
+    #[cfg(feature = "mysql")]
+    pub fn mysql_resource_mut(&mut self) -> Option<&mut crate::MysqlResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Mysql(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::SqliteResource`], if present (`sqlite` feature).
+    #[cfg(feature = "sqlite")]
+    pub fn sqlite_resource_mut(&mut self) -> Option<&mut crate::SqliteResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Sqlite(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::DuckDbResource`], if present (`duckdb` feature).
+    #[cfg(feature = "duckdb")]
+    pub fn duckdb_resource_mut(&mut self) -> Option<&mut crate::DuckDbResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::DuckDb(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::ToxiproxyResource`], if present (`fault-injection` feature).
+    #[cfg(feature = "fault-injection")]
+    pub fn toxiproxy_resource_mut(&mut self) -> Option<&mut crate::ToxiproxyResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Toxiproxy(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::RedisResource`], if present (`redis` feature).
+    #[cfg(feature = "redis")]
+    pub fn redis_resource_mut(&mut self) -> Option<&mut crate::RedisResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Redis(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::ValkeyResource`], if present (`valkey` feature).
+    #[cfg(feature = "valkey")]
+    pub fn valkey_resource_mut(&mut self) -> Option<&mut crate::ValkeyResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Valkey(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::MongoResource`], if present (`mongodb` feature).
+    #[cfg(feature = "mongodb")]
+    pub fn mongo_resource_mut(&mut self) -> Option<&mut crate::MongoResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Mongo(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::MongoReplicaSetResource`], if present (`mongodb-cluster` feature).
+    #[cfg(feature = "mongodb-cluster")]
+    pub fn mongo_replica_set_resource_mut(
+        &mut self,
+    ) -> Option<&mut crate::MongoReplicaSetResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::MongoReplicaSet(resource)) => {
+                    Some(resource)
+                }
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::KafkaClusterResource`], if present (`kafka-cluster` feature).
+    #[cfg(feature = "kafka-cluster")]
+    pub fn kafka_cluster_resource_mut(&mut self) -> Option<&mut crate::KafkaClusterResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::KafkaCluster(resource)) => {
+                    Some(resource)
+                }
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::RabbitClusterResource`], if present (`rabbitmq-cluster` feature).
+    #[cfg(feature = "rabbitmq-cluster")]
+    pub fn rabbit_cluster_resource_mut(&mut self) -> Option<&mut crate::RabbitClusterResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::RabbitCluster(resource)) => {
+                    Some(resource)
+                }
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::RedisSentinelResource`], if present (`redis-sentinel` feature).
+    #[cfg(feature = "redis-sentinel")]
+    pub fn redis_sentinel_resource_mut(&mut self) -> Option<&mut crate::RedisSentinelResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::RedisSentinel(resource)) => {
+                    Some(resource)
+                }
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::NatsResource`], if present (`nats` feature).
+    #[cfg(feature = "nats")]
+    pub fn nats_resource_mut(&mut self) -> Option<&mut crate::NatsResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Nats(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::Neo4jResource`], if present (`neo4j` feature).
+    #[cfg(feature = "neo4j")]
+    pub fn neo4j_resource_mut(&mut self) -> Option<&mut crate::Neo4jResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Neo4j(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::ElasticsearchResource`], if present (`elasticsearch` feature).
+    #[cfg(feature = "elasticsearch")]
+    pub fn elasticsearch_resource_mut(&mut self) -> Option<&mut crate::ElasticsearchResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Elasticsearch(resource)) => {
+                    Some(resource)
+                }
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::OpenSearchResource`], if present (`opensearch` feature).
+    #[cfg(feature = "opensearch")]
+    pub fn opensearch_resource_mut(&mut self) -> Option<&mut crate::OpenSearchResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::OpenSearch(resource)) => {
+                    Some(resource)
+                }
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::QdrantResource`], if present (`qdrant` feature).
+    #[cfg(feature = "qdrant")]
+    pub fn qdrant_resource_mut(&mut self) -> Option<&mut crate::QdrantResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Qdrant(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::WeaviateResource`], if present (`weaviate` feature).
+    #[cfg(feature = "weaviate")]
+    pub fn weaviate_resource_mut(&mut self) -> Option<&mut crate::WeaviateResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Weaviate(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::InfluxDbResource`], if present (`influxdb` feature).
+    #[cfg(feature = "influxdb")]
+    pub fn influxdb_resource_mut(&mut self) -> Option<&mut crate::InfluxDbResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::InfluxDb(resource)) => Some(resource),
+                _ => None,
+            })
+    }
+
+    /// Mutable reference to the registered [`crate::TimescaledbResource`], if present (`timescaledb` feature).
+    #[cfg(feature = "timescaledb")]
+    pub fn timescaledb_resource_mut(&mut self) -> Option<&mut crate::TimescaledbResource> {
+        self.resources
+            .iter_mut()
+            .find_map(|registered| match registered {
+                RegisteredResource::Builtin(BuiltinResource::Timescaledb(resource)) => {
+                    Some(resource)
+                }
+                _ => None,
+            })
     }
 
     /// Register a [`crate::cluster::ClusterHandle`] for retrieval via [`Context::cluster_handle`].
@@ -996,31 +1278,6 @@ impl Context {
     #[cfg(feature = "postgres")]
     pub fn postgres_bindings(&self) -> Option<&PostgresBindings> {
         self.postgres_bindings.as_ref()
-    }
-
-    /// Stages a sqlx migration tree to apply in [`run_scenario`] (`postgres` + `sqlx`).
-    /// Calling this method does not run migrations immediately; the harness applies them during
-    /// [`run_scenario`] after default seed and before mock services.
-    ///
-    /// The `#[shakedown::test(migrations = "./migrations")]` macro expands to a call that passes
-    /// `Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/", ...)).to_path_buf()` from the **test
-    /// crate** so the path resolves relative to that crate.
-    ///
-    /// ```rust,no_run
-    /// # use shakedown::Context;
-    /// let mut ctx = Context::new();
-    /// ctx.set_pending_postgres_sqlx_migrations_path(std::path::PathBuf::from("/tmp/migrations"));
-    /// ```
-    #[cfg(all(feature = "postgres", feature = "sqlx"))]
-    pub fn set_pending_postgres_sqlx_migrations_path(&mut self, path: std::path::PathBuf) {
-        self.pending_postgres_sqlx_migrations_path = Some(path);
-    }
-
-    #[cfg(all(feature = "postgres", feature = "sqlx"))]
-    pub(crate) fn take_pending_postgres_sqlx_migrations_path(
-        &mut self,
-    ) -> Option<std::path::PathBuf> {
-        self.pending_postgres_sqlx_migrations_path.take()
     }
 
     /// Set MariaDB bindings for this scenario (typically after MariaDB provision).
@@ -3709,104 +3966,6 @@ where
             );
             emit_failure_timeline_on_infra_err(event_log, &scenario_id, &e);
             return Err(e.into());
-        }
-    }
-
-    #[cfg(all(feature = "postgres", feature = "sqlx"))]
-    if let Some(migrations_path) = ctx.take_pending_postgres_sqlx_migrations_path() {
-        event_log.append_raw(
-            EventLevel::Info,
-            "lifecycle",
-            "Applying sqlx migrations from #[shakedown::test(migrations = ...)]",
-        );
-        let migrator = match sqlx::migrate::Migrator::new(migrations_path).await {
-            Ok(migrator) => migrator,
-            Err(source) => {
-                let error =
-                    ShakedownError::Infrastructure(InfrastructureError::Backend(Box::new(source)));
-                event_log.append_raw(
-                    EventLevel::Error,
-                    "lifecycle",
-                    format!("sqlx Migrator::new failed: {error}"),
-                );
-                teardown_all_resources(ctx).await;
-                #[cfg(all(
-                    any(
-                        feature = "kafka",
-                        feature = "rabbitmq",
-                        feature = "postgres",
-                        feature = "mariadb",
-                        feature = "mysql",
-                        feature = "redis",
-                        feature = "valkey",
-                        feature = "mongodb",
-                        feature = "nats",
-                        feature = "neo4j",
-                        feature = "elasticsearch",
-                        feature = "opensearch",
-                        feature = "qdrant",
-                        feature = "weaviate",
-                        feature = "influxdb",
-                        feature = "timescaledb",
-                        feature = "services",
-                    ),
-                    not(feature = "no-diagnostics"),
-                ))]
-                shakedown_merge_diagnostics!(
-                    docker_events_monitor,
-                    resource_stats_monitor,
-                    container_logs_monitor,
-                    event_log
-                );
-                crate::timeline::emit_failure_timeline_for_shakedown_error(
-                    event_log,
-                    scenario_id.as_str(),
-                    &error,
-                );
-                return Err(error);
-            }
-        };
-        if let Err(error) = ctx.postgres().run_migrations(&migrator).await {
-            event_log.append_raw(
-                EventLevel::Error,
-                "lifecycle",
-                format!("sqlx migrations failed: {error}"),
-            );
-            teardown_all_resources(ctx).await;
-            #[cfg(all(
-                any(
-                    feature = "kafka",
-                    feature = "rabbitmq",
-                    feature = "postgres",
-                    feature = "mariadb",
-                    feature = "mysql",
-                    feature = "redis",
-                    feature = "valkey",
-                    feature = "mongodb",
-                    feature = "nats",
-                    feature = "neo4j",
-                    feature = "elasticsearch",
-                    feature = "opensearch",
-                    feature = "qdrant",
-                    feature = "weaviate",
-                    feature = "influxdb",
-                    feature = "timescaledb",
-                    feature = "services",
-                ),
-                not(feature = "no-diagnostics"),
-            ))]
-            shakedown_merge_diagnostics!(
-                docker_events_monitor,
-                resource_stats_monitor,
-                container_logs_monitor,
-                event_log
-            );
-            crate::timeline::emit_failure_timeline_for_shakedown_error(
-                event_log,
-                scenario_id.as_str(),
-                &error,
-            );
-            return Err(error);
         }
     }
 

@@ -10,7 +10,7 @@
 //! [`crate::PostgresBindings`]. Anything beyond that is **explicit composition** in your prelude
 //! or seed code.
 //!
-//! **`migrations = "./migrations"` on [`crate::test`] applies only to the primary database** — the
+//! **`Postgres(migrations = "./migrations")` on [`crate::test`] applies only to the primary database** — the
 //! one bound to [`crate::lifecycle::Context::postgres`] / [`crate::lifecycle::Context::postgres_bindings`].
 //! Each additional database has its own migration history and path; Shakedown does not run multiple
 //! migration roots for you on one attribute. That is **by design** so secondary schemas stay
@@ -27,7 +27,7 @@
 //! use shakedown::{Context, EnvMapping, Isolatable, ServiceUnderTest};
 //!
 //! async fn example_prelude(ctx: &mut Context) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//!     // Primary: your service’s own migrations (or rely on `migrations = "./migrations"` on the macro).
+//!     // Primary: your service’s own migrations (or rely on `Postgres(migrations = "./migrations")` on the macro).
 //!     let primary_path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"));
 //!     let primary_migrator = sqlx::migrate::Migrator::new(primary_path).await?;
 //!     ctx.postgres().run_migrations(&primary_migrator).await?;

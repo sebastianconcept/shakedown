@@ -8,6 +8,7 @@
 //! [`PostgresBindings::connection_url`](crate::PostgresBindings) targets the **primary**; helpers
 //! behave like standalone [`crate::PostgresResource`].
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -26,7 +27,8 @@ use tokio_postgres::NoTls;
 use crate::cluster::{create_cluster_network, remove_cluster_network};
 use crate::docker_labels::{SHAKEDOWN_DOCKER_LABEL_KEY, SHAKEDOWN_DOCKER_LABEL_VALUE};
 use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
-use crate::resources::{sanitize_sql_database_name, Resource};
+use crate::resources::user_seed::PostgresUserSeedFn;
+use crate::resources::{map_seed_error, sanitize_sql_database_name, PostgresBindings, Resource};
 
 pub(crate) const DEFAULT_POSTGRES_CLUSTER_IMAGE_TAG: &str = "16";
 const POSTGRES_PORT: u16 = 5432;
@@ -151,7 +153,6 @@ async fn wait_for_streaming_primary(
 ///
 /// Containers are **not** suite-shared — each scenario provisions fresh primary and replica so
 /// future promotion/failover tests stay meaningful.
-#[derive(Debug)]
 pub struct PostgresReplicaSetResource {
     image_tag: Option<String>,
     holds_provision: bool,
@@ -165,6 +166,30 @@ pub struct PostgresReplicaSetResource {
     database_name: String,
     username: String,
     password: String,
+    #[cfg(all(feature = "postgres-cluster", feature = "sqlx"))]
+    sqlx_migrations_path: Option<PathBuf>,
+    seed_sql_path: Option<PathBuf>,
+    user_seed: Option<PostgresUserSeedFn>,
+}
+
+impl std::fmt::Debug for PostgresReplicaSetResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PostgresReplicaSetResource")
+            .field("image_tag", &self.image_tag)
+            .field("holds_provision", &self.holds_provision)
+            .field("network_name", &self.network_name)
+            .field("volume_name", &self.volume_name)
+            .field("primary_host", &self.primary_host)
+            .field("primary_port", &self.primary_port)
+            .field("replica_port", &self.replica_port)
+            .field("database_name", &self.database_name)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("seed_sql_path", &self.seed_sql_path)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for PostgresReplicaSetResource {
@@ -189,6 +214,10 @@ impl PostgresReplicaSetResource {
             database_name: String::new(),
             username: "postgres".to_string(),
             password: "postgres".to_string(),
+            #[cfg(all(feature = "postgres-cluster", feature = "sqlx"))]
+            sqlx_migrations_path: None,
+            seed_sql_path: None,
+            user_seed: None,
         }
     }
 
@@ -207,6 +236,48 @@ impl PostgresReplicaSetResource {
             }
         }
         self
+    }
+
+    /// sqlx migrations directory (`postgres-cluster` + `sqlx`).
+    #[cfg(all(feature = "postgres-cluster", feature = "sqlx"))]
+    pub fn with_migrations_path(mut self, path: PathBuf) -> Self {
+        self.sqlx_migrations_path = Some(path);
+        self
+    }
+
+    /// Single `.sql` seed file.
+    pub fn with_seed_path(mut self, path: PathBuf) -> Self {
+        self.seed_sql_path = Some(path);
+        self
+    }
+
+    /// Programmatic seed after migrations and optional seed file.
+    pub fn set_seed(&mut self, seed: PostgresUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn postgres_cluster_bindings(&self) -> Result<PostgresBindings, InfrastructureError> {
+        if !self.holds_provision {
+            return Err(InfrastructureError::NotProvisioned(
+                "postgres-cluster".into(),
+            ));
+        }
+        let connection_url = scenario_connection_url(
+            self.primary_host.as_str(),
+            self.primary_port,
+            self.database_name.as_str(),
+            self.username.as_str(),
+            self.password.as_str(),
+        );
+        Ok(PostgresBindings {
+            host: self.primary_host.clone(),
+            port: self.primary_port,
+            database: self.database_name.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            connection_url,
+            replica_port: Some(self.replica_port),
+        })
     }
 }
 
@@ -284,6 +355,33 @@ impl Resource for PostgresReplicaSetResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        let bindings = self.postgres_cluster_bindings()?;
+
+        #[cfg(all(feature = "postgres-cluster", feature = "sqlx"))]
+        if let Some(path) = self.sqlx_migrations_path.clone() {
+            let migrator = sqlx::migrate::Migrator::new(path).await.map_err(|source| {
+                InfrastructureError::Backend(Box::new(std::io::Error::other(source.to_string())))
+            })?;
+            bindings
+                .run_migrations(&migrator)
+                .await
+                .map_err(map_seed_error)?;
+        }
+
+        if let Some(path) = self.seed_sql_path.clone() {
+            let sql = tokio::fs::read_to_string(&path).await.map_err(|source| {
+                InfrastructureError::Backend(Box::new(std::io::Error::other(source.to_string())))
+            })?;
+            let client = connect_with_url(bindings.connection_url.as_str()).await?;
+            client.batch_execute(&sql).await.map_err(|source| {
+                InfrastructureError::Backend(Box::new(std::io::Error::other(source.to_string())))
+            })?;
+        }
+
+        if let Some(seed_fn) = self.user_seed.take() {
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
+
         Ok(())
     }
 

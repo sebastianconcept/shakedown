@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_elasticsearch_index_prefix, Resource, ResourceHandle};
+use crate::resources::user_seed::QdrantUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_elasticsearch_index_prefix, QdrantBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
 use std::sync::OnceLock;
 use testcontainers::core::IntoContainerPort;
@@ -98,7 +101,6 @@ async fn delete_collections_with_prefix(rest_url: &str, prefix: &str) -> Result<
 ///
 /// Default tag **`latest`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_QDRANT_IMAGE_TAG`.
 /// Readiness probes HTTP [`GET /readyz`](https://qdrant.tech/documentation/guides/installation/) on the REST port until the node reports ready.
-#[derive(Debug)]
 pub struct QdrantResource {
     image_repository: String,
     image_tag: Option<String>,
@@ -109,6 +111,25 @@ pub struct QdrantResource {
     rest_url: String,
     grpc_url: String,
     collection_prefix: String,
+    user_seed: Option<QdrantUserSeedFn>,
+}
+
+impl std::fmt::Debug for QdrantResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("QdrantResource")
+            .field("image_repository", &self.image_repository)
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("rest_port", &self.rest_port)
+            .field("grpc_port", &self.grpc_port)
+            .field("rest_url", &self.rest_url)
+            .field("grpc_url", &self.grpc_url)
+            .field("collection_prefix", &self.collection_prefix)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for QdrantResource {
@@ -130,6 +151,7 @@ impl QdrantResource {
             rest_url: String::new(),
             grpc_url: String::new(),
             collection_prefix: String::new(),
+            user_seed: None,
         }
     }
 
@@ -152,6 +174,31 @@ impl QdrantResource {
 
     fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
         InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
+    }
+
+    pub fn set_seed(&mut self, seed: QdrantUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn qdrant_bindings(&self) -> Result<QdrantBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        let rest_port = self
+            .rest_port
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        let grpc_port = self
+            .grpc_port
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        Ok(QdrantBindings {
+            grpc_url: self.grpc_url.clone(),
+            rest_url: self.rest_url.clone(),
+            host: host.to_string(),
+            grpc_port,
+            rest_port,
+            collection_prefix: self.collection_prefix.clone(),
+        })
     }
 }
 
@@ -290,6 +337,10 @@ impl Resource for QdrantResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.qdrant_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

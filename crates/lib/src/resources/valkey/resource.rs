@@ -1,5 +1,6 @@
 use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::resp_family::{RespResource, SuiteState};
+use crate::resources::user_seed::RedisUserSeedFn;
 use crate::resources::{Resource, ResourceHandle};
 use async_trait::async_trait;
 use std::sync::OnceLock;
@@ -16,12 +17,17 @@ fn suite_valkey_mutex() -> &'static Mutex<SuiteState<Valkey>> {
 ///
 /// Default tag follows the module image (Valkey 8.x). Override with [`Self::with_image_tag`] or
 /// `SHAKEDOWN_VALKEY_IMAGE_TAG`.
-#[derive(Debug)]
 pub struct ValkeyResource(pub(super) RespResource<Valkey>);
 
 impl Default for ValkeyResource {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Debug for ValkeyResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
     }
 }
 
@@ -48,6 +54,11 @@ impl ValkeyResource {
     /// Apply the image tag from `SHAKEDOWN_VALKEY_IMAGE_TAG` if set (called automatically by [`Self::new`]).
     pub fn with_image_tag_from_env(self) -> Self {
         Self(self.0.with_image_tag_from_env())
+    }
+
+    /// See [`crate::resources::resp_family::RespResource::set_seed`].
+    pub fn set_seed(&mut self, seed: RedisUserSeedFn) {
+        self.0.set_seed(seed);
     }
 }
 

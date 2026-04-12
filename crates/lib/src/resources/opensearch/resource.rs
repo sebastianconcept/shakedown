@@ -1,6 +1,10 @@
 use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::search_operations::SearchOperations;
-use crate::resources::{sanitize_elasticsearch_index_prefix, Resource, ResourceHandle};
+use crate::resources::user_seed::OpenSearchUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_elasticsearch_index_prefix, OpenSearchBindings, Resource,
+    ResourceHandle,
+};
 use async_trait::async_trait;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -55,7 +59,6 @@ fn image_fingerprint(repository: &str, tag_override: &Option<String>) -> String 
 ///
 /// Default tag **`2`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_OPENSEARCH_IMAGE_TAG`.
 /// Security is **off** by default (`plugins.security.disabled=true`). Use [`Self::with_security`] for HTTP basic auth (`admin` / fixed test password matching `OPENSEARCH_INITIAL_ADMIN_PASSWORD` policy).
-#[derive(Debug)]
 pub struct OpenSearchResource {
     image_repository: String,
     image_tag: Option<String>,
@@ -67,6 +70,26 @@ pub struct OpenSearchResource {
     index_prefix: String,
     username: Option<String>,
     password: Option<String>,
+    user_seed: Option<OpenSearchUserSeedFn>,
+}
+
+impl std::fmt::Debug for OpenSearchResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OpenSearchResource")
+            .field("image_repository", &self.image_repository)
+            .field("image_tag", &self.image_tag)
+            .field("security_enabled", &self.security_enabled)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("http_url", &self.http_url)
+            .field("index_prefix", &self.index_prefix)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for OpenSearchResource {
@@ -89,6 +112,7 @@ impl OpenSearchResource {
             index_prefix: String::new(),
             username: None,
             password: None,
+            user_seed: None,
         }
     }
 
@@ -125,6 +149,28 @@ impl OpenSearchResource {
             self.username.clone(),
             self.password.clone(),
         )
+    }
+
+    pub fn set_seed(&mut self, seed: OpenSearchUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn opensearch_bindings(&self) -> Result<OpenSearchBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        Ok(OpenSearchBindings {
+            url: self.http_url.clone(),
+            host: host.to_string(),
+            port,
+            index_prefix: self.index_prefix.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+        })
     }
 }
 
@@ -291,6 +337,10 @@ impl Resource for OpenSearchResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.opensearch_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

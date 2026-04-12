@@ -1,6 +1,10 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_sql_database_name, Resource, ResourceHandle};
+use crate::resources::user_seed::TimescaleDbUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_sql_database_name, PostgresBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use testcontainers::core::IntoContainerPort;
 use testcontainers::core::WaitFor;
@@ -77,7 +81,9 @@ async fn connect_with_url(url: &str) -> Result<tokio_postgres::Client, Infrastru
 ///
 /// Default tag **`latest-pg16`**. Override with [`Self::with_image_tag`] or
 /// `SHAKEDOWN_TIMESCALEDB_IMAGE_TAG`.
-#[derive(Debug)]
+///
+/// **Seed phase:** optional sqlx migrations, optional `.sql` seed file, then optional user closure
+/// (same ordering as [`crate::resources::PostgresResource`]).
 pub struct TimescaledbResource {
     image_repository: String,
     image_tag: Option<String>,
@@ -87,6 +93,31 @@ pub struct TimescaledbResource {
     username: String,
     password: String,
     database_name: String,
+    #[cfg(all(feature = "timescaledb", feature = "sqlx"))]
+    sqlx_migrations_path: Option<PathBuf>,
+    seed_sql_path: Option<PathBuf>,
+    user_seed: Option<TimescaleDbUserSeedFn>,
+}
+
+impl std::fmt::Debug for TimescaledbResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug_struct = formatter.debug_struct("TimescaledbResource");
+        debug_struct
+            .field("image_repository", &self.image_repository)
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("database_name", &self.database_name);
+        #[cfg(all(feature = "timescaledb", feature = "sqlx"))]
+        debug_struct.field("sqlx_migrations_path", &self.sqlx_migrations_path);
+        debug_struct
+            .field("seed_sql_path", &self.seed_sql_path)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for TimescaledbResource {
@@ -107,6 +138,10 @@ impl TimescaledbResource {
             username: "postgres".to_string(),
             password: "postgres".to_string(),
             database_name: String::new(),
+            #[cfg(all(feature = "timescaledb", feature = "sqlx"))]
+            sqlx_migrations_path: None,
+            seed_sql_path: None,
+            user_seed: None,
         }
     }
 
@@ -136,6 +171,50 @@ impl TimescaledbResource {
 
     fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
         InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
+    }
+
+    /// sqlx migration directory (`timescaledb` + `sqlx` features).
+    #[cfg(all(feature = "timescaledb", feature = "sqlx"))]
+    pub fn with_migrations_path(mut self, path: PathBuf) -> Self {
+        self.sqlx_migrations_path = Some(path);
+        self
+    }
+
+    /// Single `.sql` seed file (static reference data).
+    pub fn with_seed_path(mut self, path: PathBuf) -> Self {
+        self.seed_sql_path = Some(path);
+        self
+    }
+
+    /// Programmatic seed after migrations and optional seed file.
+    pub fn set_seed(&mut self, seed: TimescaleDbUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn timescaledb_bindings(&self) -> Result<PostgresBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        let connection_url = scenario_connection_url(
+            host,
+            port,
+            self.database_name.as_str(),
+            &self.username,
+            &self.password,
+        );
+        Ok(PostgresBindings {
+            host: host.to_string(),
+            port,
+            database: self.database_name.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            connection_url,
+            replica_port: None,
+        })
     }
 }
 
@@ -288,6 +367,33 @@ impl Resource for TimescaledbResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        let bindings = self.timescaledb_bindings()?;
+
+        #[cfg(all(feature = "timescaledb", feature = "sqlx"))]
+        if let Some(path) = self.sqlx_migrations_path.clone() {
+            let migrator = sqlx::migrate::Migrator::new(path).await.map_err(|source| {
+                InfrastructureError::Backend(Box::new(std::io::Error::other(source.to_string())))
+            })?;
+            bindings
+                .run_migrations(&migrator)
+                .await
+                .map_err(map_seed_error)?;
+        }
+
+        if let Some(path) = self.seed_sql_path.clone() {
+            let sql = tokio::fs::read_to_string(&path).await.map_err(|source| {
+                InfrastructureError::Backend(Box::new(std::io::Error::other(source.to_string())))
+            })?;
+            let client = connect_with_url(bindings.connection_url.as_str()).await?;
+            client.batch_execute(&sql).await.map_err(|source| {
+                InfrastructureError::Backend(Box::new(std::io::Error::other(source.to_string())))
+            })?;
+        }
+
+        if let Some(seed_fn) = self.user_seed.take() {
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
+
         Ok(())
     }
 

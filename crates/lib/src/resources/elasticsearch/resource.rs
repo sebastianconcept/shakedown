@@ -1,6 +1,10 @@
 use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::search_operations::SearchOperations;
-use crate::resources::{sanitize_elasticsearch_index_prefix, Resource, ResourceHandle};
+use crate::resources::user_seed::ElasticsearchUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_elasticsearch_index_prefix, ElasticsearchBindings, Resource,
+    ResourceHandle,
+};
 use async_trait::async_trait;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -48,7 +52,6 @@ fn image_fingerprint(image: &ElasticSearch, tag_override: &Option<String>) -> St
 ///
 /// Default tag **`8.15.0`**. Override with [`Self::with_image_tag`] or `SHAKEDOWN_ELASTICSEARCH_IMAGE_TAG`.
 /// Security is **off** by default (`xpack.security.enabled=false`). Use [`Self::with_security`] for HTTP basic auth (`elastic` / `shakedown`).
-#[derive(Debug)]
 pub struct ElasticsearchResource {
     image: ElasticSearch,
     image_tag: Option<String>,
@@ -60,6 +63,26 @@ pub struct ElasticsearchResource {
     index_prefix: String,
     username: Option<String>,
     password: Option<String>,
+    user_seed: Option<ElasticsearchUserSeedFn>,
+}
+
+impl std::fmt::Debug for ElasticsearchResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ElasticsearchResource")
+            .field("image", &self.image)
+            .field("image_tag", &self.image_tag)
+            .field("security_enabled", &self.security_enabled)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("http_url", &self.http_url)
+            .field("index_prefix", &self.index_prefix)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for ElasticsearchResource {
@@ -82,6 +105,7 @@ impl ElasticsearchResource {
             index_prefix: String::new(),
             username: None,
             password: None,
+            user_seed: None,
         }
     }
 
@@ -118,6 +142,28 @@ impl ElasticsearchResource {
             self.username.clone(),
             self.password.clone(),
         )
+    }
+
+    pub fn set_seed(&mut self, seed: ElasticsearchUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn elasticsearch_bindings(&self) -> Result<ElasticsearchBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned(RESOURCE_NAME.into()))?;
+        Ok(ElasticsearchBindings {
+            url: self.http_url.clone(),
+            host: host.to_string(),
+            port,
+            index_prefix: self.index_prefix.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+        })
     }
 }
 
@@ -273,6 +319,10 @@ impl Resource for ElasticsearchResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.elasticsearch_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 

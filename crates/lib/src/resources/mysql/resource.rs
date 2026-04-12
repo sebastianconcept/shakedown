@@ -1,8 +1,13 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_sql_database_name, Resource, ResourceHandle};
+use crate::resources::sql_seed::statements_from_sql_script;
+use crate::resources::user_seed::MysqlUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_sql_database_name, MysqlBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::{OptsBuilder, Pool};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use testcontainers::core::Image;
 use testcontainers::runners::AsyncRunner;
@@ -71,7 +76,6 @@ pub(crate) fn scenario_connection_url(
 /// **Suite lifecycle:** the first provision in the process starts a single server; further
 /// [`MysqlResource`] instances reuse it. The last successful [`Resource::teardown`] drops the
 /// scenario database and may remove the container when the refcount reaches zero.
-#[derive(Debug)]
 pub struct MysqlResource {
     image: MysqlImage,
     image_tag: Option<String>,
@@ -81,6 +85,31 @@ pub struct MysqlResource {
     username: String,
     password: String,
     database_name: String,
+    #[cfg(all(feature = "mysql", feature = "sqlx"))]
+    sqlx_migrations_path: Option<PathBuf>,
+    seed_sql_path: Option<PathBuf>,
+    user_seed: Option<MysqlUserSeedFn>,
+}
+
+impl std::fmt::Debug for MysqlResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug_struct = formatter.debug_struct("MysqlResource");
+        debug_struct
+            .field("image", &self.image)
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("database_name", &self.database_name);
+        #[cfg(all(feature = "mysql", feature = "sqlx"))]
+        debug_struct.field("sqlx_migrations_path", &self.sqlx_migrations_path);
+        debug_struct
+            .field("seed_sql_path", &self.seed_sql_path)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for MysqlResource {
@@ -101,6 +130,10 @@ impl MysqlResource {
             username: "root".to_string(),
             password: String::new(),
             database_name: String::new(),
+            #[cfg(all(feature = "mysql", feature = "sqlx"))]
+            sqlx_migrations_path: None,
+            seed_sql_path: None,
+            user_seed: None,
         }
     }
 
@@ -127,6 +160,46 @@ impl MysqlResource {
 
     fn map_mysql_err(e: mysql_async::Error) -> InfrastructureError {
         InfrastructureError::Backend(Box::new(std::io::Error::other(e.to_string())))
+    }
+
+    #[cfg(all(feature = "mysql", feature = "sqlx"))]
+    pub fn with_migrations_path(mut self, path: PathBuf) -> Self {
+        self.sqlx_migrations_path = Some(path);
+        self
+    }
+
+    pub fn with_seed_path(mut self, path: PathBuf) -> Self {
+        self.seed_sql_path = Some(path);
+        self
+    }
+
+    pub fn set_seed(&mut self, seed: MysqlUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn mysql_bindings(&self) -> Result<MysqlBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned("mysql".into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned("mysql".into()))?;
+        let connection_url = scenario_connection_url(
+            host,
+            port,
+            self.database_name.as_str(),
+            &self.username,
+            &self.password,
+        );
+        Ok(MysqlBindings {
+            host: host.to_string(),
+            port,
+            database: self.database_name.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            connection_url,
+        })
     }
 }
 
@@ -278,6 +351,45 @@ impl Resource for MysqlResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        let bindings = self.mysql_bindings()?;
+
+        #[cfg(all(feature = "mysql", feature = "sqlx"))]
+        if let Some(path) = self.sqlx_migrations_path.clone() {
+            let migrator = sqlx::migrate::Migrator::new(path).await.map_err(|source| {
+                InfrastructureError::Backend(Box::new(std::io::Error::other(source.to_string())))
+            })?;
+            bindings
+                .run_migrations(&migrator)
+                .await
+                .map_err(map_seed_error)?;
+        }
+
+        if let Some(path) = self.seed_sql_path.clone() {
+            let sql = tokio::fs::read_to_string(&path).await.map_err(|source| {
+                InfrastructureError::Backend(Box::new(std::io::Error::other(source.to_string())))
+            })?;
+            let opts = mysql_async::Opts::from_url(bindings.connection_url.as_str()).map_err(
+                |source| {
+                    InfrastructureError::Backend(Box::new(std::io::Error::other(
+                        source.to_string(),
+                    )))
+                },
+            )?;
+            let pool = Pool::new(opts);
+            let mut connection = pool.get_conn().await.map_err(Self::map_mysql_err)?;
+            for statement in statements_from_sql_script(sql.as_str()) {
+                connection
+                    .query_drop(statement)
+                    .await
+                    .map_err(Self::map_mysql_err)?;
+            }
+            pool.disconnect().await.map_err(Self::map_mysql_err)?;
+        }
+
+        if let Some(seed_fn) = self.user_seed.take() {
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
+
         Ok(())
     }
 

@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_kafka_topic_prefix, Resource, ResourceHandle};
+use crate::resources::user_seed::KafkaUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_kafka_topic_prefix, KafkaBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::client::DefaultClientContext;
@@ -45,7 +48,6 @@ fn image_fingerprint(image: &apache::Kafka, tag_override: &Option<String>) -> St
 /// removes the container. All instances in one process must use the same image name and tag
 /// (first configuration wins).
 #[cfg_attr(docsrs, doc(cfg(feature = "kafka")))]
-#[derive(Debug)]
 pub struct KafkaResource {
     image: apache::Kafka,
     /// Optional image tag override (image name stays from [`apache::Kafka`]).
@@ -54,6 +56,21 @@ pub struct KafkaResource {
     holds_suite_ref: bool,
     bootstrap_servers: Option<String>,
     topic_prefix: String,
+    user_seed: Option<KafkaUserSeedFn>,
+}
+
+impl std::fmt::Debug for KafkaResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("KafkaResource")
+            .field("image", &self.image)
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("bootstrap_servers", &self.bootstrap_servers)
+            .field("topic_prefix", &self.topic_prefix)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for KafkaResource {
@@ -71,6 +88,7 @@ impl KafkaResource {
             holds_suite_ref: false,
             bootstrap_servers: None,
             topic_prefix: String::new(),
+            user_seed: None,
         }
     }
 
@@ -99,6 +117,22 @@ impl KafkaResource {
 
     fn map_tc_err(e: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
         InfrastructureError::Backend(Box::new(std::io::Error::other(e.to_string())))
+    }
+
+    /// Optional user seed after the proof topic is created ([`Resource::apply_default_seed`]).
+    pub fn set_seed(&mut self, seed: KafkaUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn kafka_bindings(&self) -> Result<KafkaBindings, InfrastructureError> {
+        let bootstrap_servers = self
+            .bootstrap_servers
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned("kafka".into()))?;
+        Ok(KafkaBindings::new(
+            bootstrap_servers,
+            self.topic_prefix.as_str(),
+        ))
     }
 }
 
@@ -260,6 +294,11 @@ impl Resource for KafkaResource {
                     )));
                 }
             }
+        }
+
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.kafka_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
         }
 
         Ok(())

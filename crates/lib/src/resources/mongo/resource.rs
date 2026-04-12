@@ -1,5 +1,8 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::{sanitize_sql_database_name, Resource, ResourceHandle};
+use crate::resources::user_seed::MongoUserSeedFn;
+use crate::resources::{
+    map_seed_error, sanitize_sql_database_name, MongoBindings, Resource, ResourceHandle,
+};
 use async_trait::async_trait;
 use mongodb::bson::doc;
 use mongodb::Client;
@@ -58,7 +61,6 @@ async fn mongo_client(uri: &str) -> Result<Client, mongodb::error::Error> {
 /// Default image tag is **`7`** (`mongo:7`). Override with [`Self::with_image_tag`] or
 /// `SHAKEDOWN_MONGO_IMAGE_TAG`. Root credentials are fixed (`root` / `root`) for the suite container.
 #[cfg_attr(docsrs, doc(cfg(feature = "mongodb")))]
-#[derive(Debug)]
 pub struct MongoResource {
     image: Mongo,
     image_tag: Option<String>,
@@ -68,6 +70,24 @@ pub struct MongoResource {
     username: String,
     password: String,
     database_name: String,
+    user_seed: Option<MongoUserSeedFn>,
+}
+
+impl std::fmt::Debug for MongoResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MongoResource")
+            .field("image", &self.image)
+            .field("image_tag", &self.image_tag)
+            .field("holds_suite_ref", &self.holds_suite_ref)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("database_name", &self.database_name)
+            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl Default for MongoResource {
@@ -88,6 +108,7 @@ impl MongoResource {
             username: SUITE_USER.to_string(),
             password: SUITE_PASSWORD.to_string(),
             database_name: String::new(),
+            user_seed: None,
         }
     }
 
@@ -106,6 +127,30 @@ impl MongoResource {
             }
         }
         self
+    }
+
+    pub fn set_seed(&mut self, seed: MongoUserSeedFn) {
+        self.user_seed = Some(seed);
+    }
+
+    fn mongo_bindings(&self) -> Result<MongoBindings, InfrastructureError> {
+        let host = self
+            .host
+            .as_deref()
+            .ok_or_else(|| InfrastructureError::NotProvisioned("mongodb".into()))?;
+        let port = self
+            .port
+            .ok_or_else(|| InfrastructureError::NotProvisioned("mongodb".into()))?;
+        let connection_url = scenario_connection_uri(host, port, self.database_name.as_str());
+        Ok(MongoBindings {
+            host: host.to_string(),
+            port,
+            database: self.database_name.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            connection_url,
+            replica_set_host_ports: Vec::new(),
+        })
     }
 
     fn map_tc_err(error: impl std::fmt::Display + Send + Sync + 'static) -> InfrastructureError {
@@ -249,6 +294,10 @@ impl Resource for MongoResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+        if let Some(seed_fn) = self.user_seed.take() {
+            let bindings = self.mongo_bindings()?;
+            seed_fn(bindings).await.map_err(map_seed_error)?;
+        }
         Ok(())
     }
 
