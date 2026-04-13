@@ -259,6 +259,9 @@ pub use crate::mock_service::{
     TcpMockServiceRegistration, TcpMockServiceRoutePending, TcpMockServiceTrait, TlsAcceptor,
 };
 
+#[cfg(all(feature = "mock-services", feature = "udp-mock-services"))]
+pub use crate::mock_service::{UdpMockService, UdpMockServiceRegistration, UdpMockServiceTrait};
+
 #[cfg(feature = "outbox")]
 pub use crate::publication::{
     message_matches_aggregate_id, PublicationObserveSpec, PublicationVerifier,
