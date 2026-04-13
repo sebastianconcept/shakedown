@@ -21,7 +21,9 @@ pub enum HealthCheck {
         timeout: Duration,
         interval: Duration,
     },
-    /// gRPC health (`grpc.health.v1`) with optional service name.
+    /// gRPC health (`grpc.health.v1.Health/Check`) with optional service name (requires **`grpc`**).
+    #[cfg_attr(docsrs, doc(cfg(feature = "grpc")))]
+    #[cfg(feature = "grpc")]
     Grpc {
         service: Option<String>,
         timeout: Duration,
@@ -67,7 +69,11 @@ impl HealthCheck {
         }
     }
 
-    /// gRPC health with the default service.
+    /// gRPC health with the default service (empty `HealthCheckRequest.service`).
+    ///
+    /// Probes `grpc.health.v1.Health/Check` via [`crate::service::lifecycle`]. Requires the
+    /// **`grpc`** Cargo feature (enable `grpc` on the `shakedown` dependency).
+    #[cfg(feature = "grpc")]
     pub fn grpc() -> Self {
         Self::Grpc {
             service: None,
@@ -76,7 +82,10 @@ impl HealthCheck {
         }
     }
 
-    /// gRPC health for a named service.
+    /// gRPC health for a named service (`HealthCheckRequest.service`).
+    ///
+    /// Requires the **`grpc`** Cargo feature.
+    #[cfg(feature = "grpc")]
     pub fn grpc_service(service_name: impl Into<String>) -> Self {
         Self::Grpc {
             service: Some(service_name.into()),
@@ -115,10 +124,11 @@ impl HealthCheck {
     pub fn timeout(&self) -> Duration {
         match self {
             HealthCheck::Http { timeout, .. }
-            | HealthCheck::Grpc { timeout, .. }
             | HealthCheck::Tcp { timeout, .. }
             | HealthCheck::Command { timeout, .. }
             | HealthCheck::Composite { timeout, .. } => *timeout,
+            #[cfg(feature = "grpc")]
+            HealthCheck::Grpc { timeout, .. } => *timeout,
         }
     }
 
@@ -126,10 +136,11 @@ impl HealthCheck {
     pub fn interval(&self) -> Duration {
         match self {
             HealthCheck::Http { interval, .. }
-            | HealthCheck::Grpc { interval, .. }
             | HealthCheck::Tcp { interval, .. }
             | HealthCheck::Command { interval, .. }
             | HealthCheck::Composite { interval, .. } => *interval,
+            #[cfg(feature = "grpc")]
+            HealthCheck::Grpc { interval, .. } => *interval,
         }
     }
 
@@ -147,6 +158,7 @@ impl HealthCheck {
                 timeout,
                 interval,
             },
+            #[cfg(feature = "grpc")]
             HealthCheck::Grpc {
                 service, interval, ..
             } => HealthCheck::Grpc {
@@ -184,6 +196,7 @@ impl HealthCheck {
                 timeout,
                 interval,
             },
+            #[cfg(feature = "grpc")]
             HealthCheck::Grpc {
                 service, timeout, ..
             } => HealthCheck::Grpc {
@@ -255,6 +268,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "grpc")]
     fn grpc_defaults() {
         // Given grpc() with no service name
         let check = HealthCheck::grpc();
@@ -273,6 +287,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "grpc")]
     fn grpc_service_defaults() {
         // Given grpc_service with a concrete service name
         let check = HealthCheck::grpc_service("payments.v1.Payments");
@@ -361,6 +376,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "grpc")]
     fn accessors_match_variant() {
         // Given grpc_service("svc")
         let grpc = HealthCheck::grpc_service("svc");

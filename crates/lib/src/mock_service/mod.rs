@@ -6,7 +6,7 @@
 //! masking the bugs you most want to catch. Shakedown mock services run as real local servers on real
 //! network ports so your service's HTTP client hits the same code path it would in production.
 //!
-//! Create an [`HttpMockService`] (or [`GrpcMockService`] with the `grpc-mock-services`
+//! Create an [`HttpMockService`] (or [`GrpcMockService`] with the `grpc`
 //! feature), register scenario-specific routes or handlers, then inject its URL into the service
 //! container via [`crate::service::EnvMapping`]. The harness starts and stops the mock server as
 //! part of the normal lifecycle. After the scenario, assert call counts and request bodies through
@@ -15,7 +15,7 @@
 //! Implement [`HttpMockServiceTrait`] / [`GrpcMockServiceTrait`] for stateful or branching
 //! per-request logic.
 //!
-//! Enabled with the **`mock-services`** feature (default). Add **`grpc-mock-services`** for gRPC
+//! Enabled with the **`mock-services`** feature (default). Add **`grpc`** for gRPC
 //! support (`tonic` + `prost`).
 //!
 //! # Book reference
@@ -23,7 +23,7 @@
 //! Part I, *Chapter 8: Mock Services* — introduces `HttpMockService`, route registration,
 //! per-scenario response overrides, and call-count assertions.
 
-#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+#[cfg(all(feature = "mock-services", feature = "grpc"))]
 pub(crate) mod grpc;
 #[cfg(feature = "mock-services")]
 pub(crate) mod handle;
@@ -41,12 +41,12 @@ pub use http::{
     RouteMatch, StatusCode,
 };
 
-#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+#[cfg(all(feature = "mock-services", feature = "grpc"))]
 pub use grpc::{
     GrpcMockService, GrpcMockServiceMethodPending, GrpcMockServiceRequest, GrpcMockServiceResponse,
 };
 
-#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+#[cfg(all(feature = "mock-services", feature = "grpc"))]
 pub use grpc::GrpcMockServiceTrait;
 #[cfg(feature = "mock-services")]
 pub use http::HttpMockServiceTrait;

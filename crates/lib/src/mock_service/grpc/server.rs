@@ -1,4 +1,4 @@
-//! Tonic-hosted gRPC mock service server (`grpc-mock-services`): [`tower::Service`] over unary payloads.
+//! Tonic-hosted gRPC mock service server (`grpc`): [`tower::Service`] over unary payloads.
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -320,7 +320,7 @@ fn status_to_http_response(status: Status) -> Response<Body> {
     }
 }
 
-#[cfg(all(test, feature = "grpc-mock-services"))]
+#[cfg(all(test, feature = "grpc"))]
 mod tests {
     use http::header::{HeaderMap, HeaderName, HeaderValue};
 

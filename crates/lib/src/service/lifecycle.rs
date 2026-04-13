@@ -267,10 +267,7 @@ async fn run_leaf_health_check(
             })
             .await
         }
-        HealthCheck::Tcp {
-            timeout,
-            interval,
-        } => {
+        HealthCheck::Tcp { timeout, interval } => {
             let primary_port = host_ports
                 .first()
                 .map(|(_, port)| *port)
@@ -287,13 +284,22 @@ async fn run_leaf_health_check(
             })
             .await
         }
-        HealthCheck::Grpc { .. } => Err(
-            "gRPC health checks are not implemented yet; use `HealthCheck::http` or `HealthCheck::tcp`"
-                .to_string(),
-        ),
-        HealthCheck::Composite { .. } => Err(
-            "internal error: composite health check leaked into leaf probe".to_string(),
-        ),
+        #[cfg(feature = "grpc")]
+        HealthCheck::Grpc {
+            service,
+            timeout,
+            interval,
+        } => {
+            converge_poll(*timeout, *interval, || {
+                let base_url_owned = base_url.to_string();
+                let service = service.clone();
+                async move { grpc_probe_once(&base_url_owned, &service).await }
+            })
+            .await
+        }
+        HealthCheck::Composite { .. } => {
+            Err("internal error: composite health check leaked into leaf probe".to_string())
+        }
     }
 }
 
@@ -387,6 +393,38 @@ async fn command_probe_once(
         Some(0) => Ok(()),
         Some(value) => Err(format!("exec exited with status {value}")),
         None => Err("exec exit code not available".to_string()),
+    }
+}
+
+/// `grpc.health.v1.Health/Check` against `base_url` (HTTP origin, e.g. `http://127.0.0.1:8080`).
+#[cfg(feature = "grpc")]
+async fn grpc_probe_once(base_url: &str, service: &Option<String>) -> Result<(), String> {
+    use tonic::transport::Endpoint;
+    use tonic_health::pb::health_check_response::ServingStatus;
+    use tonic_health::pb::health_client::HealthClient;
+    use tonic_health::pb::HealthCheckRequest;
+
+    let endpoint = Endpoint::from_shared(base_url.to_string())
+        .map_err(|error| format!("invalid gRPC health endpoint URL: {error}"))?;
+    let channel = endpoint
+        .connect()
+        .await
+        .map_err(|error| format!("gRPC health connect failed: {error}"))?;
+
+    let mut client = HealthClient::new(channel);
+    let request = tonic::Request::new(HealthCheckRequest {
+        service: service.clone().unwrap_or_default(),
+    });
+    let response = client
+        .check(request)
+        .await
+        .map_err(|error| format!("gRPC Health/Check request failed: {error}"))?;
+    let status = response.into_inner().status();
+    match status {
+        ServingStatus::Serving => Ok(()),
+        other => Err(format!(
+            "gRPC health status is {other:?}, expected SERVING (probe grpc.health.v1.Health/Check)"
+        )),
     }
 }
 

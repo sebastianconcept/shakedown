@@ -189,7 +189,7 @@ Swap `cargo test` for `cargo nextest run … --run-ignored all` when you use nex
 |---------|----------------|--------|
 | `cargo test -p shakedown` | Unit + integration tests for default (minimal) features; includes **`mock_service_http`** when `mock-services` is in default features | Not required for the default set |
 | `cargo test -p shakedown --features mock-services --test mock_service_http` | HTTP [`HttpMockService`](src/mock_service/http/stub.rs) + coded [`HttpMockServiceTrait`](src/mock_service/http/mod.rs) integration tests only | No |
-| `cargo test -p shakedown --features grpc-mock-services --test mock_service_grpc` | gRPC [`GrpcMockService`](src/mock_service/grpc/stub.rs) unary integration test | No |
+| `cargo test -p shakedown --features grpc --test mock_service_grpc` | gRPC [`GrpcMockService`](src/mock_service/grpc/stub.rs) unary integration test | No |
 | `cargo test -p shakedown --features outbox,sqlite` | Outbox helpers + SQLite vertical tests | Not required |
 | `cargo test -p shakedown --features outbox,rabbitmq,sqlite` | Adds Rabbit publication helpers’ unit coverage | Not required for SQLite-only tests |
 | `cargo test -p shakedown --features services` | Service-under-test unit tests + integration **targets** (Docker cases still **`#[ignore]`** unless you pass `-- --ignored`) | Optional Docker for ignored targets |
@@ -799,7 +799,7 @@ To use your verifier from tests, call `PublicationVerifier::assert_observed(&you
 | Feature | Default? | What it enables |
 |---------|----------|-----------------|
 | **`mock-services`** | Yes | HTTP mock services: [`HttpMockService`](src/mock_service/http/stub.rs) and [`HttpMockServiceTrait`](src/mock_service/http/mod.rs) served by hyper. |
-| **`grpc-mock-services`** | No (opt-in) | Unary gRPC mock services: [`GrpcMockService`](src/mock_service/grpc/stub.rs) and [`GrpcMockServiceTrait`](src/mock_service/grpc/mod.rs) served by tonic. |
+| **`grpc`** | No (opt-in) | Unary gRPC mock services ([`GrpcMockService`](src/mock_service/grpc/stub.rs)); [`HealthCheck::grpc`](src/service/health.rs) / [`HealthCheck::grpc_service`](src/service/health.rs) for [`ServiceUnderTest`](src/service/builder.rs) readiness (`grpc.health.v1` via tonic). |
 
 ### Quick-start (HTTP)
 
@@ -833,7 +833,7 @@ async fn http_mock_service_quickstart() {
 
 ### Quick-start (gRPC)
 
-Runnable reference: [`tests/mock_service_grpc.rs`](tests/mock_service_grpc.rs) (requires `grpc-mock-services`).
+Runnable reference: [`tests/mock_service_grpc.rs`](tests/mock_service_grpc.rs) (requires `grpc`).
 
 When you expect calls:
 
@@ -960,9 +960,9 @@ When **[`auto_inject(true)`](src/service/builder.rs)** (the default), the harnes
 
 #### `HealthCheck` variants
 
-Constructors live on [`HealthCheck`](src/service/health.rs): [`http`](src/service/health.rs), [`http_status`](src/service/health.rs), [`grpc`](src/service/health.rs), [`grpc_service`](src/service/health.rs), [`tcp`](src/service/health.rs), [`command`](src/service/health.rs), [`composite`](src/service/health.rs). Default poll budget is **30s** with **500ms** interval ([`DEFAULT_HEALTH_CHECK_TIMEOUT`](src/service/health.rs), [`DEFAULT_HEALTH_CHECK_INTERVAL`](src/service/health.rs)); tune with [`.with_timeout`](src/service/health.rs) / [`.with_interval`](src/service/health.rs).
+Constructors live on [`HealthCheck`](src/service/health.rs): [`http`](src/service/health.rs), [`http_status`](src/service/health.rs), [`tcp`](src/service/health.rs), [`command`](src/service/health.rs), [`composite`](src/service/health.rs). With the **`grpc`** feature, also [`grpc`](src/service/health.rs) and [`grpc_service`](src/service/health.rs) (standard `grpc.health.v1.Health/Check`). Default poll budget is **30s** with **500ms** interval ([`DEFAULT_HEALTH_CHECK_TIMEOUT`](src/service/health.rs), [`DEFAULT_HEALTH_CHECK_INTERVAL`](src/service/health.rs)); tune with [`.with_timeout`](src/service/health.rs) / [`.with_interval`](src/service/health.rs).
 
-**Implemented today for readiness:** **HTTP**, **TCP**, **Command** (container exec), and **Composite** (ordered nested checks). **`Grpc`** is accepted in configuration but **not yet implemented** as a probe — use **`http`** or **`tcp`** until gRPC health wiring lands.
+**Implemented today for readiness:** **HTTP**, **TCP**, **Command** (container exec), **Composite** (ordered nested checks), and **gRPC** health (**`grpc`** feature: tonic client to `grpc.health.v1.Health/Check`).
 
 ```rust
 use shakedown::HealthCheck;
