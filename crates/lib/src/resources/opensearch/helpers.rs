@@ -1,27 +1,41 @@
 //! OpenSearch typed helpers — [`OpenSearchHelpers`] for scenario-scoped indices (`opensearch` feature).
 
-use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
+use crate::error::named_binding::not_provisioned_named_binding;
+use crate::error::{AssertionError, ScenarioError, ShakedownError};
 use crate::helper_prelude::map_backend_error;
-use crate::lifecycle::Context;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 use crate::resources::search_operations::{SearchOperations, SearchOperationsResult};
 use crate::resources::OpenSearchBindings;
 
 /// Facade for OpenSearch helpers bound to [`Context`] (`opensearch` feature).
 pub struct OpenSearchHelpers<'ctx> {
     context: &'ctx Context,
+    binding_name: String,
 }
 
 impl<'ctx> OpenSearchHelpers<'ctx> {
-    pub(crate) fn new(context: &'ctx Context) -> Self {
-        Self { context }
+    /// Helpers scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
+    pub fn new(context: &'ctx Context) -> Result<Self, ShakedownError> {
+        Self::named(context, DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Helpers scoped to the binding registered under `name` in [`Context`].
+    pub fn named(context: &'ctx Context, name: &str) -> Result<Self, ShakedownError> {
+        if context.opensearch_bindings_named(name).is_none() {
+            return Err(not_provisioned_named_binding("opensearch bindings", name));
+        }
+        Ok(Self {
+            context,
+            binding_name: name.to_string(),
+        })
     }
 
     fn opensearch_bindings(&self) -> Result<&OpenSearchBindings, ShakedownError> {
-        self.context.opensearch_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "opensearch bindings".to_string(),
-            ))
-        })
+        self.context
+            .opensearch_bindings_named(self.binding_name.as_str())
+            .ok_or_else(|| {
+                not_provisioned_named_binding("opensearch bindings", self.binding_name.as_str())
+            })
     }
 
     fn operations(&self) -> Result<SearchOperations, ShakedownError> {

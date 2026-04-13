@@ -5,8 +5,9 @@
 use tokio_postgres::types::ToSql;
 use tokio_postgres::Row;
 
-use crate::error::{InfrastructureError, ShakedownError};
-use crate::lifecycle::Context;
+use crate::error::named_binding::not_provisioned_named_binding;
+use crate::error::ShakedownError;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 use crate::resources::postgres::{
     postgres_assert_row_count, postgres_assert_row_exists, postgres_execute, postgres_query_all,
 };
@@ -16,19 +17,32 @@ use crate::resources::PostgresBindings;
 /// Facade for TimescaleDB helpers bound to [`Context`] (`timescaledb` feature).
 pub struct TimescaledbHelpers<'ctx> {
     context: &'ctx Context,
+    binding_name: String,
 }
 
 impl<'ctx> TimescaledbHelpers<'ctx> {
-    pub(crate) fn new(context: &'ctx Context) -> Self {
-        Self { context }
+    /// Helpers scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
+    pub fn new(context: &'ctx Context) -> Result<Self, ShakedownError> {
+        Self::named(context, DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Helpers scoped to the binding registered under `name` in [`Context`].
+    pub fn named(context: &'ctx Context, name: &str) -> Result<Self, ShakedownError> {
+        if context.timescaledb_bindings_named(name).is_none() {
+            return Err(not_provisioned_named_binding("timescaledb bindings", name));
+        }
+        Ok(Self {
+            context,
+            binding_name: name.to_string(),
+        })
     }
 
     fn timescaledb_bindings(&self) -> Result<&PostgresBindings, ShakedownError> {
-        self.context.timescaledb_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "timescaledb bindings".to_string(),
-            ))
-        })
+        self.context
+            .timescaledb_bindings_named(self.binding_name.as_str())
+            .ok_or_else(|| {
+                not_provisioned_named_binding("timescaledb bindings", self.binding_name.as_str())
+            })
     }
 
     /// Run an `INSERT`, `UPDATE`, `DELETE`, or DDL statement.

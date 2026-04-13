@@ -39,12 +39,14 @@ async fn kafka_cluster_three_brokers_produce_consume(ctx: &mut shakedown::Contex
     };
 
     ctx.kafka()
+        .expect("kafka helpers")
         .produce_json("cluster_vertical", "k1", &payload)
         .await
         .expect("produce_json against multi-broker bootstrap");
 
     let got = ctx
         .kafka()
+        .expect("kafka helpers")
         .consume_one("cluster_vertical", None)
         .await
         .expect("consume_one");
@@ -115,12 +117,14 @@ async fn kafka_cluster_leader_election_after_broker_stop(ctx: &mut shakedown::Co
     };
 
     ctx.kafka()
+        .expect("kafka helpers")
         .produce_json("leader_election_vertical", "k1", &payload)
         .await
         .expect("produce_json after leader election");
 
     let got = ctx
         .kafka()
+        .expect("kafka helpers")
         .consume_one("leader_election_vertical", Some(Duration::from_secs(90)))
         .await
         .expect("consume_one");

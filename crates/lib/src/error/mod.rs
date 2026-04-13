@@ -22,6 +22,7 @@ mod assertion;
 mod infrastructure;
 mod internal;
 mod into_infrastructure;
+pub(crate) mod named_binding;
 mod resource_handle;
 mod resource_not_found;
 mod scenario;

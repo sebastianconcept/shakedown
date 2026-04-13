@@ -16,6 +16,7 @@ async fn postgres_helpers_execute_create_insert_then_assert(ctx: &mut shakedown:
 
     // When: we create a table and insert a row using only `PostgresHelpers` (no raw client wiring).
     ctx.postgres()
+        .expect("postgres helpers")
         .execute(
             "CREATE TABLE helper_items (id SERIAL PRIMARY KEY, value_text TEXT NOT NULL)",
             &[],
@@ -23,6 +24,7 @@ async fn postgres_helpers_execute_create_insert_then_assert(ctx: &mut shakedown:
         .await
         .expect("execute CREATE TABLE via helpers");
     ctx.postgres()
+        .expect("postgres helpers")
         .execute(
             "INSERT INTO helper_items (value_text) VALUES ($1)",
             &[&"hello-postgres"],
@@ -32,6 +34,7 @@ async fn postgres_helpers_execute_create_insert_then_assert(ctx: &mut shakedown:
 
     // Then: the row exists and the table has exactly one row.
     ctx.postgres()
+        .expect("postgres helpers")
         .assert_row_exists(
             "SELECT 1 FROM helper_items WHERE value_text = $1",
             &[&"hello-postgres"],
@@ -39,6 +42,7 @@ async fn postgres_helpers_execute_create_insert_then_assert(ctx: &mut shakedown:
         .await
         .expect("assert_row_exists");
     ctx.postgres()
+        .expect("postgres helpers")
         .assert_row_count("SELECT * FROM helper_items", &[], 1)
         .await
         .expect("assert_row_count");

@@ -43,7 +43,7 @@ async fn sqlite_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
     // Given: a scenario with SQLite provisioned and an isolated in-memory database URI.
 
     // When: we create a table and insert a row using only `SqliteHelpers` (async API over spawn_blocking).
-    ctx.sqlite()
+    ctx.sqlite().expect("sqlite helpers")
         .execute(
             "CREATE TABLE helper_items (id INTEGER PRIMARY KEY AUTOINCREMENT, value_text TEXT NOT NULL)",
             (),
@@ -52,6 +52,7 @@ async fn sqlite_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
         .expect("execute CREATE TABLE via helpers");
     let inserted_value = "hello-sqlite";
     ctx.sqlite()
+        .expect("sqlite helpers")
         .execute(
             "INSERT INTO helper_items (value_text) VALUES (?1)",
             (inserted_value,),
@@ -61,6 +62,7 @@ async fn sqlite_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
 
     // Then: the row exists and the table has exactly one row.
     ctx.sqlite()
+        .expect("sqlite helpers")
         .assert_row_exists(
             "SELECT 1 FROM helper_items WHERE value_text = ?1",
             (inserted_value,),
@@ -68,6 +70,7 @@ async fn sqlite_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
         .await
         .expect("assert_row_exists");
     ctx.sqlite()
+        .expect("sqlite helpers")
         .assert_row_count("SELECT * FROM helper_items", (), 1)
         .await
         .expect("assert_row_count");
@@ -76,16 +79,19 @@ async fn sqlite_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
 #[shakedown::test(resources = [Sqlite])]
 async fn sqlite_helpers_custom_migration_runner(ctx: &mut shakedown::Context) {
     ctx.sqlite()
+        .expect("sqlite helpers")
         .run_migrations(&SqliteDdlRunner(
             "CREATE TABLE migration_runner_proof (x INTEGER NOT NULL)",
         ))
         .await
         .expect("custom MigrationRunner");
     ctx.sqlite()
+        .expect("sqlite helpers")
         .execute("INSERT INTO migration_runner_proof (x) VALUES (7)", ())
         .await
         .expect("insert after migration");
     ctx.sqlite()
+        .expect("sqlite helpers")
         .assert_row_exists("SELECT 1 FROM migration_runner_proof WHERE x = 7", ())
         .await
         .expect("assert row");

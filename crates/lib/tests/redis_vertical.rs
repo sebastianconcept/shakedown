@@ -38,10 +38,12 @@ async fn redis_provisions_and_sets_bindings() {
                     "expected redis URL"
                 );
                 ctx.redis()
+                    .expect("redis helpers")
                     .set("vertical_k", "vertical_v")
                     .await
                     .expect("set via helpers");
                 ctx.redis()
+                    .expect("redis helpers")
                     .assert_key_equals("vertical_k", "vertical_v")
                     .await
                     .expect("assert value");

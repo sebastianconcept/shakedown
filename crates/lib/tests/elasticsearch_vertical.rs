@@ -35,6 +35,7 @@ async fn elasticsearch_provisions_and_sets_bindings() {
                     "expected scenario index prefix"
                 );
                 ctx.elasticsearch()
+                    .expect("elasticsearch helpers")
                     .index_document(
                         "vertical_idx",
                         "doc1",
@@ -43,6 +44,7 @@ async fn elasticsearch_provisions_and_sets_bindings() {
                     .await
                     .expect("index via helpers");
                 ctx.elasticsearch()
+                    .expect("elasticsearch helpers")
                     .assert_document_indexed("vertical_idx", "doc1")
                     .await
                     .expect("assert indexed");

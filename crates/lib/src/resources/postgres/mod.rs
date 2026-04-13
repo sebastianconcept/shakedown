@@ -30,7 +30,7 @@
 //!     // Primary: your service’s own migrations (or rely on `Postgres(migrations = "./migrations")` on the macro).
 //!     let primary_path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"));
 //!     let primary_migrator = sqlx::migrate::Migrator::new(primary_path).await?;
-//!     ctx.postgres().run_migrations(&primary_migrator).await?;
+//!     ctx.postgres()?.run_migrations(&primary_migrator).await?;
 //!
 //!     // Secondary: explicit database + migrations (e.g. upstream crate’s migration tree).
 //!     let primary_bindings = ctx.postgres_bindings().ok_or("postgres not provisioned")?;

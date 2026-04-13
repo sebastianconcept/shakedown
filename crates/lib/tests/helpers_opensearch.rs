@@ -10,6 +10,7 @@
 #[ignore = "requires Docker; run: cargo test -p shakedown --features opensearch --test helpers_opensearch -- --ignored"]
 async fn opensearch_helpers_index_search(ctx: &mut shakedown::Context) {
     ctx.opensearch()
+        .expect("opensearch helpers")
         .index_document(
             "docs",
             "a1",
@@ -21,6 +22,7 @@ async fn opensearch_helpers_index_search(ctx: &mut shakedown::Context) {
         "query": { "match": { "title": "alpha" } }
     });
     ctx.opensearch()
+        .expect("opensearch helpers")
         .assert_search_hits("docs", query, 1)
         .await
         .expect("assert_search_hits");

@@ -9,27 +9,41 @@ use rdkafka::producer::{BaseProducer, BaseRecord, FutureProducer, FutureRecord, 
 use rdkafka::util::Timeout;
 use serde::Serialize;
 
-use crate::error::{InfrastructureError, ShakedownError};
+use crate::error::named_binding::not_provisioned_named_binding;
+use crate::error::ShakedownError;
 use crate::helper_prelude::{map_backend_error, ConsumedMessage, DEFAULT_HELPER_CONSUME_TIMEOUT};
-use crate::lifecycle::Context;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 use crate::resources::KafkaBindings;
 
 /// Facade for Kafka produce helpers bound to [`Context`].
 pub struct KafkaHelpers<'ctx> {
     context: &'ctx Context,
+    binding_name: String,
 }
 
 impl<'ctx> KafkaHelpers<'ctx> {
-    pub(crate) fn new(context: &'ctx Context) -> Self {
-        Self { context }
+    /// Helpers scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
+    pub fn new(context: &'ctx Context) -> Result<Self, ShakedownError> {
+        Self::named(context, DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Helpers scoped to the binding registered under `name` in [`Context`].
+    pub fn named(context: &'ctx Context, name: &str) -> Result<Self, ShakedownError> {
+        if context.kafka_bindings_named(name).is_none() {
+            return Err(not_provisioned_named_binding("kafka bindings", name));
+        }
+        Ok(Self {
+            context,
+            binding_name: name.to_string(),
+        })
     }
 
     fn kafka_bindings(&self) -> Result<&KafkaBindings, ShakedownError> {
-        self.context.kafka_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "kafka bindings".to_string(),
-            ))
-        })
+        self.context
+            .kafka_bindings_named(self.binding_name.as_str())
+            .ok_or_else(|| {
+                not_provisioned_named_binding("kafka bindings", self.binding_name.as_str())
+            })
     }
 
     /// Produce a message to a scenario-scoped topic.

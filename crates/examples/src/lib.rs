@@ -144,11 +144,13 @@ pub async fn adoption_example_body(ctx: &mut Context) {
     // When we publish JSON to the logical "events" topic and read it back with the typed helpers.
     let kafka_payload = json!({"demo": "kafka-round-trip", "n": 1});
     ctx.kafka()
+        .expect("kafka helpers")
         .produce_json("events", "test-key", &kafka_payload)
         .await
         .expect("produce_json to scenario-scoped events topic");
     let consumed = ctx
         .kafka()
+        .expect("kafka helpers")
         .consume_one("events", Some(Duration::from_secs(30)))
         .await
         .expect("consume_one from events");
@@ -159,6 +161,7 @@ pub async fn adoption_example_body(ctx: &mut Context) {
 
     // When we create a table, insert a row, and assert it exists on the scenario database.
     ctx.postgres()
+        .expect("postgres helpers")
         .execute(
             "CREATE TABLE adoption_demo (id SERIAL PRIMARY KEY, label TEXT NOT NULL)",
             &[],
@@ -166,6 +169,7 @@ pub async fn adoption_example_body(ctx: &mut Context) {
         .await
         .expect("CREATE TABLE adoption_demo");
     ctx.postgres()
+        .expect("postgres helpers")
         .execute(
             "INSERT INTO adoption_demo (label) VALUES ($1)",
             &[&"integrations"],
@@ -173,6 +177,7 @@ pub async fn adoption_example_body(ctx: &mut Context) {
         .await
         .expect("INSERT adoption_demo");
     ctx.postgres()
+        .expect("postgres helpers")
         .assert_row_exists(
             "SELECT 1 FROM adoption_demo WHERE label = $1",
             &[&"integrations"],

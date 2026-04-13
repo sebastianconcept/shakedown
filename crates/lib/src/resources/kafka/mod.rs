@@ -91,7 +91,7 @@
 //! let _namespaced_topic = bindings.topic_namespace("input");
 //! // Same string the harness injects when you use `EnvMapping::kafka_topic("INPUT_TOPIC", "input")`.
 //! let _consumed = ctx
-//!     .kafka()
+//!     .kafka()?
 //!     .consume_one("input", Some(Duration::from_secs(20)))
 //!     .await?;
 //! # Ok(())

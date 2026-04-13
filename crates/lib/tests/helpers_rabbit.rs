@@ -45,6 +45,7 @@ async fn rabbit_helpers_publish_and_await_fresh_exchange(ctx: &mut shakedown::Co
     // When: we call publish_and_await on a brand-new exchange and queue.
     let consumed = ctx
         .rabbit()
+        .expect("rabbitmq helpers")
         .publish_and_await(
             "paa_events",
             shakedown::ExchangeKind::Direct,
@@ -70,6 +71,7 @@ async fn rabbit_helpers_parallel_same_logical_exchange_a(ctx: &mut shakedown::Co
     let payload = b"parallel-rabbit-a".to_vec();
     let consumed = ctx
         .rabbit()
+        .expect("rabbitmq helpers")
         .publish_and_await(
             "shared_logical_ex",
             ExchangeKind::Direct,
@@ -89,6 +91,7 @@ async fn rabbit_helpers_parallel_same_logical_exchange_b(ctx: &mut shakedown::Co
     let payload = b"parallel-rabbit-b".to_vec();
     let consumed = ctx
         .rabbit()
+        .expect("rabbitmq helpers")
         .publish_and_await(
             "shared_logical_ex",
             ExchangeKind::Direct,
@@ -116,12 +119,14 @@ async fn rabbit_helpers_topology_publish_json_and_consume_until(ctx: &mut shaked
     // When: we declare a direct exchange, a durable queue, and bind `order.created` in one call
     // (instead of hand-rolling exchange_declare + queue_declare + queue_bind with manual prefixes).
     ctx.rabbit()
+        .expect("rabbitmq helpers")
         .declare_topology("events", ExchangeKind::Direct, "events", "order.created")
         .await
         .expect("declare_topology should succeed with provisioned RabbitMQ bindings");
 
     // And: we publish JSON to the logical exchange; routing key is sent as-is per helper contract.
     ctx.rabbit()
+        .expect("rabbitmq helpers")
         .publish_json("events", "order.created", &event)
         .await
         .expect("publish_json should succeed after topology setup");
@@ -130,6 +135,7 @@ async fn rabbit_helpers_topology_publish_json_and_consume_until(ctx: &mut shaked
     // round-trip through JSON.
     let consumed = ctx
         .rabbit()
+        .expect("rabbitmq helpers")
         .consume_until(
             "events",
             |message| {

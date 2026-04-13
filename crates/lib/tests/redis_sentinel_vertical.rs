@@ -64,12 +64,14 @@ async fn redis_sentinel_quorum_helpers_and_replicas() {
                     .expect("SENTINEL CKQUORUM");
 
                 ctx.redis()
+                    .expect("redis helpers")
                     .set("sentinel_vertical_k", "sentinel_vertical_v")
                     .await
                     .expect("set on primary via helpers");
 
                 assert_eq!(
                     ctx.redis()
+                        .expect("redis helpers")
                         .get("sentinel_vertical_k")
                         .await
                         .expect("get on primary"),

@@ -44,6 +44,7 @@ async fn mongo_outbox_setup_and_row_assertions() {
 
                 scenario_context
                     .mongo()
+                    .expect("mongodb helpers")
                     .insert_document(
                         "outbox_event",
                         serde_json::json!({
@@ -64,6 +65,7 @@ async fn mongo_outbox_setup_and_row_assertions() {
 
                 scenario_context
                     .mongo()
+                    .expect("mongodb helpers")
                     .insert_document(
                         "outbox_event",
                         serde_json::json!({
@@ -84,6 +86,7 @@ async fn mongo_outbox_setup_and_row_assertions() {
 
                 scenario_context
                     .mongo()
+                    .expect("mongodb helpers")
                     .insert_document(
                         "outbox_event",
                         serde_json::json!({

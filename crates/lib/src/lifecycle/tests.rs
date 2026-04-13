@@ -39,6 +39,42 @@ fn context_kafka_default_and_named_bindings() {
     assert!(ctx.kafka_bindings_named("missing").is_none());
 }
 
+#[cfg(feature = "kafka")]
+#[test]
+fn kafka_helper_errors_when_default_binding_missing() {
+    let ctx = Context::new();
+    let Err(error) = ctx.kafka() else {
+        panic!("expected missing default kafka binding");
+    };
+    let message = format!("{error}");
+    assert!(
+        message.contains("kafka bindings"),
+        "expected NotProvisioned for kafka: {message}"
+    );
+}
+
+#[cfg(feature = "kafka")]
+#[test]
+fn kafka_named_helper_errors_clearly_when_binding_missing() {
+    let ctx = Context::new();
+    let Err(error) = ctx.kafka_named("shard") else {
+        panic!("expected missing named kafka binding");
+    };
+    let message = format!("{error}");
+    assert!(
+        message.contains("shard"),
+        "expected binding name in error: {message}"
+    );
+}
+
+#[cfg(feature = "kafka")]
+#[test]
+fn kafka_named_helper_ok_when_binding_present() {
+    let mut ctx = Context::new();
+    ctx.set_kafka_bindings(KafkaBindings::new("127.0.0.1:9092", "p_"));
+    assert!(ctx.kafka_named("default").is_ok());
+}
+
 #[cfg(feature = "fault-injection")]
 #[test]
 fn fault_handle_none_without_toxiproxy_provision() {
