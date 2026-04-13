@@ -36,6 +36,18 @@ pub enum InfrastructureError {
         #[source]
         source: Box<dyn Error + Send + Sync>,
     },
+    /// Infrastructure error: Service '{resource}' pre_start hook failed: {source}
+    ///
+    /// Cause: a callback registered on the service spec returned an error after seed and before the
+    /// service container was started (`services` feature).
+    #[error("Infrastructure error: Service '{resource}' pre_start hook failed: {source}")]
+    ServicePreStart {
+        /// Service label (same form as other service infrastructure errors, e.g. `service:web`).
+        resource: String,
+        /// Error returned from the user hook.
+        #[source]
+        source: Box<dyn Error + Send + Sync>,
+    },
     /// Infrastructure error: Failed to teardown {resource}: {source}
     ///
     /// Cause: container stop/remove failed, connection leak, or timeout during cleanup.

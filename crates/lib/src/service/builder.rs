@@ -107,6 +107,9 @@ impl ServiceUnderTest {
     /// Multiple calls run in declaration order. For multi-service scenarios, each service's hooks
     /// run immediately before that service's container start (after dependency services are
     /// already healthy).
+    ///
+    /// If a hook returns `Err`, the scenario fails with [`crate::InfrastructureError::ServicePreStart`]
+    /// (distinct from container provision failures).
     pub fn pre_start<F, Fut>(mut self, callback: F) -> Self
     where
         F: Fn(&Context) -> Fut + Send + Sync + 'static,

@@ -60,7 +60,9 @@ pub enum AssertionError {
     },
     /// polling assertion '{description}' timed out after {elapsed:?} (limit {timeout:?}), {attempts} attempts: {last_error}
     ///
-    /// Cause: [`crate::assert_eventually`] did not observe success before the deadline (see DD-7 fixed-interval polling).
+    /// Cause: [`crate::assert_eventually`] did not observe success before the deadline; the helper
+    /// polls at a fixed interval until the timeout, so the last error is from the final failed
+    /// attempt before that deadline.
     EventuallyTimeout {
         /// Human-readable label for the condition (e.g. `"row exists"`).
         description: String,

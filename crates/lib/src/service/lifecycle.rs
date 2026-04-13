@@ -49,6 +49,16 @@ fn map_service_readiness_error(
     }
 }
 
+fn map_service_pre_start_error(
+    service_name: &str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> InfrastructureError {
+    InfrastructureError::ServicePreStart {
+        resource: format!("service:{service_name}"),
+        source: Box::new(source),
+    }
+}
+
 fn map_service_teardown_error(
     service_name: &str,
     source: impl std::error::Error + Send + Sync + 'static,
@@ -115,7 +125,7 @@ async fn start_one_service(
         );
         crate::service::pre_start::ServicePreStart::invoke(callback.as_ref(), &*context)
             .await
-            .map_err(|error| map_service_provision_error(service_name, error))?;
+            .map_err(|error| map_service_pre_start_error(service_name, error))?;
     }
 
     let environment = inject_service_env(context, &specification);

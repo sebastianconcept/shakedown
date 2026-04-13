@@ -877,6 +877,11 @@ Public entry points (all behind `feature = "services"`): [`ServiceUnderTest`](sr
 
 Runnable references in this repo: [`tests/services_lifecycle.rs`](tests/services_lifecycle.rs) (single container), [`tests/services_kafka_mock_service_whoami.rs`](tests/services_kafka_mock_service_whoami.rs), [`tests/services_multi_postgres_whoami.rs`](tests/services_multi_postgres_whoami.rs).
 
+### Named infrastructure bindings and `pre_start` hooks
+
+- **Named resources in the scenario macro:** For **Postgres**, **MariaDB**, **MySQL**, and **TimescaleDB**, you can set `name = "..."` in the resource’s parentheses (for example `Postgres(name = "primary", …)`) so each instance gets its own binding key and typed helpers. Unsupported resource types reject `name` at macro expansion. See [`tests/macro_named_mariadb.rs`](tests/macro_named_mariadb.rs).
+- **`pre_start` on the service spec:** [`ServiceUnderTest::pre_start`](src/service/builder.rs) registers async callbacks that run **after** seed and **before** the service’s Docker container starts. They receive a **read-only** [`Context`](src/lifecycle/mod.rs); multiple callbacks run in **declaration order**. Use this for work that must happen while infrastructure is up but before the SUT image runs (for example ensuring a Kafka topic exists). Hook failures are classified as [`InfrastructureError::ServicePreStart`](src/error/infrastructure.rs) (not a generic provision error). See [`tests/services_pre_start.rs`](tests/services_pre_start.rs).
+
 ### 1. Single-service quick-start (register, health check, assert)
 
 1. Build a [`ServiceSpec`](src/service/types.rs) with [`ServiceUnderTest::docker`](src/service/builder.rs) — **`.name(...)`** and **at least one `.port(...)`** are required; if you omit [`.health_check`](src/service/builder.rs), the harness defaults to [`HealthCheck::tcp`](src/service/health.rs).
