@@ -10,14 +10,17 @@ use crate::lifecycle::Context;
 
 /// Poll `check` until it returns `Ok(())` or `timeout` elapses.
 ///
-/// Uses fixed-interval polling ([`sleep`] after each failed attempt); interval is not exponential
-/// (DD-7). The closure must be [`Fn`] — use `Arc<Mutex<_>>` inside the async block if you need
+/// Uses fixed-interval polling ([`sleep`] after each failed attempt): the interval stays constant
+/// so tests get predictable spacing and simple timing reasoning; this helper does not implement
+/// exponential backoff.
+///
+/// The closure must be [`Fn`] — use `Arc<Mutex<_>>` inside the async block if you need
 /// mutable state across attempts.
 ///
 /// While [`run_scenario`] is executing the scenario body (run phase), failed attempts are appended
 /// to the [`crate::EventLog`] when `context` has a run-phase event sender — pass the same
-/// [`Context`] you receive in your scenario so polling appears on the failure timeline (Mode 3
-/// diagnostics).
+/// [`Context`] you receive in your scenario so polling attempts show up on the failure timeline
+/// alongside other scenario events.
 ///
 /// # Errors
 ///
@@ -44,11 +47,10 @@ where
 
     let start = Instant::now();
     let mut attempts: u32 = 0;
-    #[allow(unused_assignments)]
-    let mut last_error_message: Option<String> = None;
 
     loop {
         attempts = attempts.saturating_add(1);
+        let last_error_message: String;
         match check().await {
             Ok(()) => {
                 if attempts > 1 {
@@ -66,7 +68,7 @@ where
             }
             Err(error) => {
                 let message = error.to_string();
-                last_error_message = Some(message.clone());
+                last_error_message = message.clone();
                 push_scenario_event(
                     context,
                     Event::debug(
@@ -87,7 +89,7 @@ where
                     timeout,
                     elapsed,
                     attempts,
-                    last_error: last_error_message.unwrap_or_default(),
+                    last_error: last_error_message,
                 },
             )));
         }
@@ -115,7 +117,9 @@ mod tests {
 
     #[tokio::test]
     async fn succeeds_immediately() {
+        // Given a context and a check that always succeeds
         let context = Context::new();
+        // When we poll until success
         assert_eventually(
             "always ok",
             Duration::from_secs(10),
@@ -124,14 +128,17 @@ mod tests {
             || async { Ok(()) },
         )
         .await
+        // Then the helper returns Ok on the first attempt
         .unwrap();
     }
 
     #[tokio::test]
     async fn succeeds_after_n_polls() {
+        // Given a check that fails twice then succeeds
         let context = Context::new();
         let counter = Arc::new(AtomicU32::new(0));
         let counter_for_closure = Arc::clone(&counter);
+        // When we poll with enough timeout for three attempts
         assert_eventually(
             "third time lucky",
             Duration::from_secs(10),
@@ -155,12 +162,15 @@ mod tests {
         )
         .await
         .unwrap();
+        // Then we observed exactly three poll attempts
         assert_eq!(counter.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
     async fn timeout_reports_fields() {
+        // Given a check that never succeeds within the deadline
         let context = Context::new();
+        // When assert_eventually exhausts the timeout
         let error = assert_eventually(
             "never ready",
             Duration::from_millis(80),
@@ -177,6 +187,7 @@ mod tests {
         .await
         .unwrap_err();
 
+        // Then the error is EventuallyTimeout with populated fields
         match error {
             ShakedownError::Scenario(ScenarioError::Assertion(
                 AssertionError::EventuallyTimeout {
@@ -201,7 +212,9 @@ mod tests {
 
     #[tokio::test]
     async fn zero_poll_interval_is_rejected() {
+        // Given a zero poll interval (invalid configuration)
         let context = Context::new();
+        // When we call assert_eventually
         let error = assert_eventually(
             "bad interval",
             Duration::from_secs(1),
@@ -211,6 +224,7 @@ mod tests {
         )
         .await
         .unwrap_err();
+        // Then we get an internal invalid-configuration error
         assert!(matches!(error, ShakedownError::Internal(_)));
     }
 }

@@ -56,6 +56,20 @@ fn infrastructure_error_display() {
 }
 
 #[test]
+fn infrastructure_error_service_pre_start_display() {
+    // Given a service pre_start hook failure wrapping an I/O error
+    let err = InfrastructureError::ServicePreStart {
+        resource: "service:web".to_string(),
+        source: Box::new(std::io::Error::other("hook failed")),
+    };
+    // When we format it for display
+    let displayed = format!("{}", err);
+    // Then the message names pre_start and the service label
+    assert!(displayed.contains("pre_start"), "{displayed}");
+    assert!(displayed.contains("service:web"), "{displayed}");
+}
+
+#[test]
 fn internal_error_display() {
     // Given an invariant violation internal error
     let err = InternalError::InvariantViolation("state must be valid".to_string());

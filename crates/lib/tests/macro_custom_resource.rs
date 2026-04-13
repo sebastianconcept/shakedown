@@ -1,4 +1,5 @@
-//! `resources = [ ..., expr ]` — custom [`Resource`] expressions in `#[shakedown::test]` (US-009).
+//! Custom [`Resource`] values in the `resources = [ ... ]` list for `#[shakedown::test]` (in addition
+//! to builtin resource names).
 
 use async_trait::async_trait;
 use shakedown::error::InfrastructureError;
