@@ -425,6 +425,8 @@ pub struct Context {
     /// Merge point for [`crate::load::LoadHandle`] timeline rows; set for the run phase only.
     #[cfg(feature = "load")]
     load_event_sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
+    /// Sender for application [`crate::event::Event`] rows during the run phase (e.g. [`crate::assert_eventually`] poll attempts).
+    scenario_application_event_sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
 }
 
 impl Context {
@@ -534,6 +536,7 @@ impl Context {
             rabbit_cluster_control: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
+            scenario_application_event_sender: None,
         }
     }
 
@@ -643,6 +646,7 @@ impl Context {
             rabbit_cluster_control: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
+            scenario_application_event_sender: None,
         }
     }
 
@@ -752,6 +756,7 @@ impl Context {
             rabbit_cluster_control: None,
             #[cfg(feature = "load")]
             load_event_sender: None,
+            scenario_application_event_sender: None,
         }
     }
 
@@ -1113,6 +1118,21 @@ impl Context {
         &self,
     ) -> Option<&std::sync::mpsc::Sender<crate::event::Event>> {
         self.load_event_sender.as_ref()
+    }
+
+    /// Used by [`run_scenario`] to merge [`crate::assert_eventually`] poll rows into [`crate::EventLog`].
+    pub(crate) fn set_scenario_application_event_sender(
+        &mut self,
+        sender: Option<std::sync::mpsc::Sender<crate::event::Event>>,
+    ) {
+        self.scenario_application_event_sender = sender;
+    }
+
+    /// Sender for structured scenario-body events (run phase only), e.g. [`crate::assert_eventually`].
+    pub(crate) fn scenario_application_event_sender(
+        &self,
+    ) -> Option<&std::sync::mpsc::Sender<crate::event::Event>> {
+        self.scenario_application_event_sender.as_ref()
     }
 
     #[cfg(feature = "mongodb-cluster")]
@@ -4487,6 +4507,9 @@ where
     ))]
     shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Run);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting run phase");
+    let (scenario_application_event_sender, scenario_application_event_receiver) =
+        std::sync::mpsc::channel::<crate::event::Event>();
+    ctx.set_scenario_application_event_sender(Some(scenario_application_event_sender));
     // Fault-injection timeline: `FaultHandle` sits on `Context` and scenario code calls it from
     // async paths (add/remove toxic, reset proxy). The harness owns `EventLog` separately; we need
     // those fault actions to show up in the same log as lifecycle and infra lines. You cannot hand
@@ -4640,6 +4663,11 @@ where
         feature = "fault-injection"
     )))]
     let scenario_outcome = scenario_fn(ctx).await;
+
+    ctx.set_scenario_application_event_sender(None);
+    for event in scenario_application_event_receiver.try_iter() {
+        event_log.append(event);
+    }
 
     #[cfg(feature = "load")]
     {

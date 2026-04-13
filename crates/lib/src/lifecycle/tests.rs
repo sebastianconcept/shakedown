@@ -420,6 +420,67 @@ async fn test_async_resource_phases() {
     assert!(result.is_ok());
 }
 
+#[tokio::test]
+async fn assert_eventually_poll_attempts_merge_into_event_log() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::assert_eventually::assert_eventually;
+    use crate::error::{AssertionError, ScenarioError, ShakedownError};
+    use crate::resources::{BuiltinResource, FakeResource};
+
+    let mut ctx = Context::new();
+    ctx.register_builtin(BuiltinResource::Fake(FakeResource::default()));
+    let mut event_log = EventLog::new();
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_for_scenario = Arc::clone(&counter);
+    run_scenario(
+        &mut ctx,
+        "assert-eventually-event-log",
+        move |scenario_context| {
+            let poll_counter = Arc::clone(&counter_for_scenario);
+            Box::pin(async move {
+                assert_eventually(
+                    "two steps",
+                    Duration::from_secs(2),
+                    Duration::from_millis(15),
+                    scenario_context,
+                    move || {
+                        let poll_counter = Arc::clone(&poll_counter);
+                        async move {
+                            let step = poll_counter.fetch_add(1, Ordering::SeqCst) + 1;
+                            if step >= 2 {
+                                Ok(())
+                            } else {
+                                Err(ShakedownError::Scenario(ScenarioError::Assertion(
+                                    AssertionError::Unspecified {
+                                        detail: "not yet".to_string(),
+                                    },
+                                )))
+                            }
+                        }
+                    },
+                )
+                .await
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+    let messages: Vec<String> = event_log
+        .events()
+        .map(|event| event.message.clone())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("poll attempt")),
+        "expected assert_eventually debug rows in event log: {messages:?}"
+    );
+}
+
 #[cfg(feature = "mock-services")]
 mod mock_service_registration_tests {
     use crate::error::{InternalError, ShakedownError};

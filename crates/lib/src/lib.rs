@@ -176,6 +176,8 @@ pub use instrumentation::timeline;
 #[path = "outbox/error.rs"]
 mod outbox_error;
 pub use outbox_error::OutboxError;
+/// Fixed-interval async polling assertion ([`assert_eventually`]).
+mod assert_eventually;
 /// Structured errors: scenario vs infrastructure vs internal framework failures.
 pub mod error;
 /// Toxiproxy fault-injection control API (`fault-injection` feature).
@@ -214,6 +216,13 @@ pub mod resources;
 #[cfg(feature = "services")]
 pub mod service;
 
+/// Public types and functions from the lifecycle module.
+pub use crate::assert_eventually::assert_eventually;
+
+/// Glob-import friendly helpers for scenario bodies (`use shakedown::prelude::*`).
+pub mod prelude {
+    pub use crate::assert_eventually::assert_eventually;
+}
 #[cfg(feature = "load")]
 pub use crate::error::PerformanceAssertionDetails;
 #[doc(inline)]
@@ -225,7 +234,6 @@ pub use crate::event::{
     DockerEventKind, Event, EventLevel, EventLog, EventSnapshot, InfraEvent, InfraSeverity,
     LogEntry, ScenarioLogEntry,
 };
-/// Public types and functions from the lifecycle module.
 pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, Phase,
     ScenarioKind, ScenarioRunOutcome, DEFAULT_RESOURCE_BINDING_NAME,
