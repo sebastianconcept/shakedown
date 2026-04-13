@@ -99,6 +99,19 @@ impl<'ctx> KafkaHelpers<'ctx> {
         self.produce(topic, key, payload).await
     }
 
+    /// Produce a raw-byte message to a scenario-scoped topic.
+    ///
+    /// Alias for [`Self::produce`]. Pairs with [`Self::produce_json`] for discoverability when the
+    /// payload is already encoded (for example protobuf).
+    pub async fn produce_bytes(
+        &self,
+        topic: &str,
+        key: impl Into<Vec<u8>>,
+        payload: impl Into<Vec<u8>>,
+    ) -> Result<(), ShakedownError> {
+        self.produce(topic, key, payload).await
+    }
+
     /// Poll until a message matching `predicate` arrives on the scenario-scoped topic, or the
     /// timeout expires.
     ///
