@@ -1,5 +1,21 @@
-use super::{build_resource_registration, ResourceSpec};
+use super::{
+    build_resource_entry, build_resource_registration, parse_resource_entry_list, ResourceEntry,
+    ResourceSpec,
+};
+use quote::quote;
+use syn::bracketed;
+use syn::parse::{Parse, ParseStream};
 use syn::parse_str;
+
+struct BracketedResourceEntries(pub Vec<ResourceEntry>);
+
+impl Parse for BracketedResourceEntries {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let inner;
+        bracketed!(inner in input);
+        parse_resource_entry_list(&inner).map(BracketedResourceEntries)
+    }
+}
 
 #[test]
 fn mariadb_named_resource_spec_builds() {
@@ -120,4 +136,41 @@ fn all_builtins_emit_unconditional_registration() {
             "{resource_name} expansion must not contain compile_error!",
         );
     }
+}
+
+#[test]
+fn custom_bare_ident_emits_register_extension() {
+    let parsed: BracketedResourceEntries =
+        syn::parse2(quote! { [VaultDev] }).expect("parse bracketed resource list");
+    assert_eq!(parsed.0.len(), 1);
+    let expansion = build_resource_entry(&parsed.0[0])
+        .expect("build")
+        .to_string();
+    assert!(
+        expansion.contains("register_extension"),
+        "expected register_extension, got: {expansion}",
+    );
+}
+
+#[test]
+fn custom_path_call_expression_emits_register_extension() {
+    let parsed: BracketedResourceEntries =
+        syn::parse2(quote! { [crate::testing::VaultDevResource::new()] })
+            .expect("parse bracketed resource list");
+    assert_eq!(parsed.0.len(), 1);
+    let expansion = build_resource_entry(&parsed.0[0])
+        .expect("build")
+        .to_string();
+    assert!(
+        expansion.contains("register_extension") && expansion.contains("VaultDevResource"),
+        "expected register_extension with expression, got: {expansion}",
+    );
+}
+
+#[test]
+fn builtins_mixed_with_custom_expression() {
+    let parsed: BracketedResourceEntries =
+        syn::parse2(quote! { [Fake, crate::foo::Bar::new()] }).expect("parse");
+    assert!(matches!(parsed.0[0], ResourceEntry::Builtin(_)));
+    assert!(matches!(parsed.0[1], ResourceEntry::Custom(_)));
 }

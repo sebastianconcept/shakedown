@@ -1,5 +1,5 @@
-error: unknown resource type `InvalidResource`; valid builtins are `Fake`, `Kafka`, `KafkaCluster`, `Rabbit`, `RabbitCluster`, `Postgres`, `PostgresReplicaSet`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `RedisSentinel`, `Valkey`, `Mongo`, `MongoReplicaSet`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`
- --> tests/trybuild/fail/invalid_resource.rs:8:32
+error: unknown resource type with configuration; use a known builtin name or a Rust expression such as `crate::MyResource::new()` (not the `Name(key = value)` builtin form)
+ --> tests/trybuild/fail/invalid_resource.rs:6:32
   |
-8 | #[shakedown::test(resources = [InvalidResource])]
+6 | #[shakedown::test(resources = [InvalidResource(migrations = "./migrations")])]
   |                                ^^^^^^^^^^^^^^^

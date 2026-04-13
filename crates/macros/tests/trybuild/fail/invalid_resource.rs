@@ -1,13 +1,11 @@
-//! Fail: `#[shakedown::test(resources = [InvalidResource])]` with unknown builtin.
+//! Fail: `#[shakedown::test(resources = [InvalidResource(migrations = "...")])]` — unknown builtin with builtin-style config.
 //!
-//! **Given** a resource name that is not one of the supported builtins
-//! **When** `build_resource_registration` is called during macro expansion
-//! **Then** it returns a `syn::Error` that produces a helpful compiler diagnostic
-//! listing all valid resource types.
+//! Unknown resource names must use a Rust expression (e.g. `crate::MyResource::new()`), not the
+//! `Name(key = value)` form reserved for first-party builtins.
 
-#[shakedown::test(resources = [InvalidResource])]
+#[shakedown::test(resources = [InvalidResource(migrations = "./migrations")])]
 async fn with_invalid_resource(ctx: &mut shakedown::Context) {
-    // This should fail to compile because InvalidResource is not a known builtin
+    let _ = ctx;
 }
 
 fn main() {}

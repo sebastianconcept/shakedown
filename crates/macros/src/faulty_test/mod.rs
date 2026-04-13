@@ -6,14 +6,12 @@ use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{Expr, Ident, ItemFn, Token};
 
-use crate::resource_registration::{
-    build_resource_registration, parse_resource_spec_list_bracketed,
-};
+use crate::resource_registration::{build_resource_entry, parse_resource_spec_list_bracketed};
 use crate::signature::first_parameter_is_ctx_mut_context;
 
 /// Parsed `#[shakedown::faulty_test(...)]` arguments.
 pub(super) struct FaultyTestAttr {
-    pub(super) resources: Option<Vec<crate::resource_registration::ResourceSpec>>,
+    pub(super) resources: Option<Vec<crate::resource_registration::ResourceEntry>>,
     pub(super) fault_profile: Option<String>,
 }
 
@@ -117,8 +115,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(resource_names) => {
             let mut registrations = Vec::new();
 
-            for resource_ident in &resource_names {
-                let reg = build_resource_registration(resource_ident);
+            for resource_entry in &resource_names {
+                let reg = build_resource_entry(resource_entry);
                 match reg {
                     Ok(code) => registrations.push(code),
                     Err(e) => return e.into_compile_error(),

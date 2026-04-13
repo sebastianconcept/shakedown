@@ -2,6 +2,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
+use syn::parse::discouraged::Speculative;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{bracketed, parenthesized, Expr, Ident, Token};
@@ -80,6 +81,67 @@ pub(crate) struct ResourceSpec {
     pub(crate) config: Option<Vec<(Ident, Expr)>>,
 }
 
+/// One entry in `resources = [ ... ]`: a builtin [`ResourceSpec`] or a Rust expression implementing `shakedown::Resource`.
+pub(crate) enum ResourceEntry {
+    Builtin(ResourceSpec),
+    Custom(Expr),
+}
+
+fn is_builtin_resource_ident(ident: &Ident) -> bool {
+    matches!(
+        ident.to_string().as_str(),
+        "Fake"
+            | "Kafka"
+            | "KafkaCluster"
+            | "Postgres"
+            | "PostgresReplicaSet"
+            | "MariaDB"
+            | "Mysql"
+            | "Sqlite"
+            | "DuckDb"
+            | "Rabbit"
+            | "RabbitCluster"
+            | "Redis"
+            | "RedisSentinel"
+            | "Valkey"
+            | "Mongo"
+            | "MongoReplicaSet"
+            | "Nats"
+            | "Neo4j"
+            | "Elasticsearch"
+            | "OpenSearch"
+            | "Qdrant"
+            | "Weaviate"
+            | "InfluxDb"
+            | "Timescaledb"
+            | "Toxiproxy"
+    )
+}
+
+fn parse_resource_entry(input: ParseStream) -> syn::Result<ResourceEntry> {
+    let fork = input.fork();
+    if let Ok(spec) = fork.parse::<ResourceSpec>() {
+        input.advance_to(&fork);
+        if is_builtin_resource_ident(&spec.ident) {
+            return Ok(ResourceEntry::Builtin(spec));
+        }
+        if spec.config.is_some() {
+            return Err(syn::Error::new(
+                spec.ident.span(),
+                "unknown resource type with configuration; use a known builtin name or a Rust expression such as `crate::MyResource::new()` (not the `Name(key = value)` builtin form)",
+            ));
+        }
+        let path_expr = Expr::Path(syn::ExprPath {
+            attrs: Vec::new(),
+            qself: None,
+            path: syn::Path::from(spec.ident.clone()),
+        });
+        return Ok(ResourceEntry::Custom(path_expr));
+    }
+    let expr: Expr = input.parse()?;
+    Ok(ResourceEntry::Custom(expr))
+}
+
 impl Parse for ResourceSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let ident = input.parse::<Ident>()?;
@@ -113,22 +175,32 @@ impl Parse for ResourceSpec {
 /// Comma-separated resource specs inside `[ ... ]` (e.g. `resources = [Fake, Kafka]` or `resources = [MongoReplicaSet(node_count = 3)]`).
 pub(crate) fn parse_resource_spec_list_bracketed(
     input: ParseStream,
-) -> syn::Result<Vec<ResourceSpec>> {
+) -> syn::Result<Vec<ResourceEntry>> {
     let inner;
     bracketed!(inner in input);
-    parse_resource_spec_list(&inner)
+    parse_resource_entry_list(&inner)
 }
 
-/// Parse a comma-separated list of resource specs (no surrounding brackets).
-pub(crate) fn parse_resource_spec_list(input: ParseStream) -> syn::Result<Vec<ResourceSpec>> {
-    let mut specs = Vec::new();
+/// Parse a comma-separated list of resource entries (no surrounding brackets).
+pub(crate) fn parse_resource_entry_list(input: ParseStream) -> syn::Result<Vec<ResourceEntry>> {
+    let mut entries = Vec::new();
     while !input.is_empty() {
-        specs.push(input.parse::<ResourceSpec>()?);
+        entries.push(parse_resource_entry(input)?);
         if !input.is_empty() {
             input.parse::<Token![,]>()?;
         }
     }
-    Ok(specs)
+    Ok(entries)
+}
+
+/// Builds registration tokens for a parsed [`ResourceEntry`] (builtin or custom expression).
+pub(crate) fn build_resource_entry(entry: &ResourceEntry) -> syn::Result<TokenStream> {
+    match entry {
+        ResourceEntry::Builtin(spec) => build_resource_registration(spec),
+        ResourceEntry::Custom(expr) => Ok(quote! {
+            ctx.register_extension(#expr);
+        }),
+    }
 }
 
 /// Builds registration code for a single resource spec (bare identifier or with config).
@@ -770,14 +842,12 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
                 ));
             });
         }
-        _ => {
-            return Err(syn::Error::new(
-                spec.ident.span(),
-                format!(
-                    "unknown resource type `{resource_type_name}`; valid builtins are `Fake`, `Kafka`, `KafkaCluster`, `Rabbit`, `RabbitCluster`, `Postgres`, `PostgresReplicaSet`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `RedisSentinel`, `Valkey`, `Mongo`, `MongoReplicaSet`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`"
-                ),
-            ));
-        }
+        _ => Err(syn::Error::new(
+            spec.ident.span(),
+            format!(
+                "unknown resource type `{resource_type_name}`; valid builtins are `Fake`, `Kafka`, `KafkaCluster`, `Rabbit`, `RabbitCluster`, `Postgres`, `PostgresReplicaSet`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `RedisSentinel`, `Valkey`, `Mongo`, `MongoReplicaSet`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`"
+            ),
+        )),
     }
 }
 
