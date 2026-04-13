@@ -1,4 +1,4 @@
-//! Kafka typed helpers: `produce_json` → `consume_one` and `consume_until` (Docker).
+//! Kafka typed helpers: `produce_json` / `produce_bytes` → `consume_one` and `consume_until` (Docker).
 //!
 //! This target is listed in `Cargo.toml` with `required-features = ["kafka"]`. Tests are
 //! **`#[ignore]`** so `cargo test --workspace` skips Docker by default.
@@ -200,4 +200,27 @@ async fn kafka_helpers_produce_json_consume_one_and_consume_until_with_predicate
         .expect("payload_json on filtered result");
     assert_eq!(wanted.order_id, "wanted");
     assert_eq!(wanted.amount_cents, 42);
+}
+
+#[shakedown::test(resources = [Kafka])]
+#[ignore = "requires Docker; run: cargo test -p shakedown --features kafka --test helpers_kafka -- --ignored"]
+async fn kafka_helpers_produce_bytes_consume_one(ctx: &mut shakedown::Context) {
+    // Simulates a pre-encoded binary payload (e.g. protobuf) without serde on the wire.
+    let payload: Vec<u8> = vec![0x0a, 0x03, 0x66, 0x6f, 0x6f]; // tag + "foo"
+
+    ctx.kafka()
+        .expect("kafka helpers")
+        .produce_bytes("binary_events", "bin-key", payload.clone())
+        .await
+        .expect("produce_bytes should succeed with provisioned Kafka bindings");
+
+    let consumed = ctx
+        .kafka()
+        .expect("kafka helpers")
+        .consume_one("binary_events", None)
+        .await
+        .expect("consume_one should see the produced record");
+
+    assert_eq!(consumed.key_str(), Some("bin-key"));
+    assert_eq!(consumed.payload.as_deref(), Some(payload.as_slice()));
 }
