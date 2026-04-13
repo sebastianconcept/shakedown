@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::TimescaleDbUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, TimescaleDbUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_sql_database_name, PostgresBindings, Resource, ResourceHandle,
 };
@@ -96,7 +96,7 @@ pub struct TimescaledbResource {
     #[cfg(all(feature = "timescaledb", feature = "sqlx"))]
     sqlx_migrations_path: Option<PathBuf>,
     seed_sql_path: Option<PathBuf>,
-    user_seed: Option<TimescaleDbUserSeedFn>,
+    user_seed: UserSeedSlot<PostgresBindings>,
 }
 
 impl std::fmt::Debug for TimescaledbResource {
@@ -115,7 +115,14 @@ impl std::fmt::Debug for TimescaledbResource {
         debug_struct.field("sqlx_migrations_path", &self.sqlx_migrations_path);
         debug_struct
             .field("seed_sql_path", &self.seed_sql_path)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -141,7 +148,7 @@ impl TimescaledbResource {
             #[cfg(all(feature = "timescaledb", feature = "sqlx"))]
             sqlx_migrations_path: None,
             seed_sql_path: None,
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -188,7 +195,7 @@ impl TimescaledbResource {
 
     /// Programmatic seed after migrations and optional seed file.
     pub fn set_seed(&mut self, seed: TimescaleDbUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn timescaledb_bindings(&self) -> Result<PostgresBindings, InfrastructureError> {
@@ -390,7 +397,7 @@ impl Resource for TimescaledbResource {
             })?;
         }
 
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }
 

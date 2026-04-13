@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::InfluxDbUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, InfluxDbUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_sql_database_name, InfluxDbBindings, Resource, ResourceHandle,
 };
@@ -212,7 +212,7 @@ pub struct InfluxDbResource {
     token: String,
     bucket_name: String,
     bucket_id: String,
-    user_seed: Option<InfluxDbUserSeedFn>,
+    user_seed: UserSeedSlot<InfluxDbBindings>,
 }
 
 impl std::fmt::Debug for InfluxDbResource {
@@ -229,7 +229,14 @@ impl std::fmt::Debug for InfluxDbResource {
             .field("token", &"<redacted>")
             .field("bucket_name", &self.bucket_name)
             .field("bucket_id", &self.bucket_id)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -254,7 +261,7 @@ impl InfluxDbResource {
             token: SUITE_ADMIN_TOKEN.to_string(),
             bucket_name: String::new(),
             bucket_id: String::new(),
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -279,8 +286,9 @@ impl InfluxDbResource {
         InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
     }
 
+    /// Async seed closure receiving [`InfluxDbBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: InfluxDbUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn influxdb_bindings(&self) -> Result<InfluxDbBindings, InfrastructureError> {
@@ -441,7 +449,7 @@ impl Resource for InfluxDbResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.influxdb_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

@@ -1,6 +1,6 @@
 use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::sql_seed::statements_from_sql_script;
-use crate::resources::user_seed::MysqlUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, MysqlUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_sql_database_name, MysqlBindings, Resource, ResourceHandle,
 };
@@ -88,7 +88,7 @@ pub struct MysqlResource {
     #[cfg(all(feature = "mysql", feature = "sqlx"))]
     sqlx_migrations_path: Option<PathBuf>,
     seed_sql_path: Option<PathBuf>,
-    user_seed: Option<MysqlUserSeedFn>,
+    user_seed: UserSeedSlot<MysqlBindings>,
 }
 
 impl std::fmt::Debug for MysqlResource {
@@ -107,7 +107,14 @@ impl std::fmt::Debug for MysqlResource {
         debug_struct.field("sqlx_migrations_path", &self.sqlx_migrations_path);
         debug_struct
             .field("seed_sql_path", &self.seed_sql_path)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -133,7 +140,7 @@ impl MysqlResource {
             #[cfg(all(feature = "mysql", feature = "sqlx"))]
             sqlx_migrations_path: None,
             seed_sql_path: None,
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -162,19 +169,24 @@ impl MysqlResource {
         InfrastructureError::Backend(Box::new(std::io::Error::other(e.to_string())))
     }
 
+    /// sqlx migration directory (`mysql` + `sqlx`).
     #[cfg(all(feature = "mysql", feature = "sqlx"))]
     pub fn with_migrations_path(mut self, path: PathBuf) -> Self {
         self.sqlx_migrations_path = Some(path);
         self
     }
 
+    /// Single `.sql` seed file (`;`-split statements).
     pub fn with_seed_path(mut self, path: PathBuf) -> Self {
         self.seed_sql_path = Some(path);
         self
     }
 
+    /// Programmatic seed after migrations and optional [`Self::with_seed_path`] file.
+    ///
+    /// Receives [`MysqlBindings`] for the scenario database.
     pub fn set_seed(&mut self, seed: MysqlUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn mysql_bindings(&self) -> Result<MysqlBindings, InfrastructureError> {
@@ -386,7 +398,7 @@ impl Resource for MysqlResource {
             pool.disconnect().await.map_err(Self::map_mysql_err)?;
         }
 
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }
 

@@ -156,7 +156,6 @@ use crate::resources::{
 #[cfg(feature = "services")]
 use crate::service::ServiceHandle;
 use async_trait::async_trait;
-#[cfg(any(feature = "mock-services", feature = "services", feature = "cluster"))]
 use std::collections::HashMap;
 #[cfg(feature = "mock-services")]
 use std::sync::Arc;
@@ -244,6 +243,9 @@ pub enum ScenarioKind {
     Faulty,
 }
 
+/// Map key for the single-resource / unnamed binding path ([`Context::set_kafka_bindings`], etc.).
+pub const DEFAULT_RESOURCE_BINDING_NAME: &str = "default";
+
 /// Mutable scenario state for one run: resources, backend, ids, and optional messaging/DB bindings.
 ///
 /// Why: the harness and scenario body share one place for registered infrastructure and
@@ -267,58 +269,58 @@ pub struct Context {
     /// Scenario ID for isolation
     scenario_id: ScenarioId,
     /// Kafka bindings when a Kafka resource populated them (from provision metadata).
-    kafka_bindings: Option<KafkaBindings>,
+    kafka_bindings: HashMap<String, KafkaBindings>,
     /// RabbitMQ bindings when a Rabbit resource populated them (`rabbitmq` feature).
     #[cfg(feature = "rabbitmq")]
-    rabbit_bindings: Option<RabbitBindings>,
+    rabbit_bindings: HashMap<String, RabbitBindings>,
     /// Postgres bindings when a Postgres resource populated them (`postgres` feature).
     #[cfg(feature = "postgres")]
-    postgres_bindings: Option<PostgresBindings>,
+    postgres_bindings: HashMap<String, PostgresBindings>,
     /// MariaDB bindings when a MariaDB resource populated them (`mariadb` feature).
     #[cfg(feature = "mariadb")]
-    mariadb_bindings: Option<MariaDBBindings>,
+    mariadb_bindings: HashMap<String, MariaDBBindings>,
     /// Oracle MySQL bindings when a MySQL resource populated them (`mysql` feature).
     #[cfg(feature = "mysql")]
-    mysql_bindings: Option<MysqlBindings>,
+    mysql_bindings: HashMap<String, MysqlBindings>,
     /// SQLite bindings when a SQLite resource populated them (`sqlite` feature).
     #[cfg(feature = "sqlite")]
-    sqlite_bindings: Option<SqliteBindings>,
+    sqlite_bindings: HashMap<String, SqliteBindings>,
     /// DuckDB bindings when a DuckDB resource populated them (`duckdb` feature).
     #[cfg(feature = "duckdb")]
-    duckdb_bindings: Option<DuckDbBindings>,
+    duckdb_bindings: HashMap<String, DuckDbBindings>,
     /// Redis / Valkey bindings when a matching resource populated them (`redis` / `valkey` features).
     #[cfg(any(feature = "redis", feature = "valkey"))]
-    redis_bindings: Option<RedisBindings>,
+    redis_bindings: HashMap<String, RedisBindings>,
     /// Redis Sentinel discovery + primary URL when [`crate::BuiltinResource::RedisSentinel`] provisioned (`redis-sentinel`).
     #[cfg(feature = "redis-sentinel")]
-    redis_sentinel_bindings: Option<RedisSentinelBindings>,
+    redis_sentinel_bindings: HashMap<String, RedisSentinelBindings>,
     /// MongoDB bindings when a Mongo resource populated them (`mongodb` feature).
     #[cfg(feature = "mongodb")]
-    mongo_bindings: Option<MongoBindings>,
+    mongo_bindings: HashMap<String, MongoBindings>,
     /// NATS bindings when a NATS resource populated them (`nats` feature).
     #[cfg(feature = "nats")]
-    nats_bindings: Option<NatsBindings>,
+    nats_bindings: HashMap<String, NatsBindings>,
     /// Neo4j bindings when a Neo4j resource populated them (`neo4j` feature).
     #[cfg(feature = "neo4j")]
-    neo4j_bindings: Option<Neo4jBindings>,
+    neo4j_bindings: HashMap<String, Neo4jBindings>,
     /// Elasticsearch bindings when an Elasticsearch resource populated them (`elasticsearch` feature).
     #[cfg(feature = "elasticsearch")]
-    elasticsearch_bindings: Option<ElasticsearchBindings>,
+    elasticsearch_bindings: HashMap<String, ElasticsearchBindings>,
     /// OpenSearch bindings when an OpenSearch resource populated them (`opensearch` feature).
     #[cfg(feature = "opensearch")]
-    opensearch_bindings: Option<OpenSearchBindings>,
+    opensearch_bindings: HashMap<String, OpenSearchBindings>,
     /// Qdrant bindings when a Qdrant resource populated them (`qdrant` feature).
     #[cfg(feature = "qdrant")]
-    qdrant_bindings: Option<QdrantBindings>,
+    qdrant_bindings: HashMap<String, QdrantBindings>,
     /// Weaviate bindings when a Weaviate resource populated them (`weaviate` feature).
     #[cfg(feature = "weaviate")]
-    weaviate_bindings: Option<WeaviateBindings>,
+    weaviate_bindings: HashMap<String, WeaviateBindings>,
     /// InfluxDB bindings when an InfluxDB resource populated them (`influxdb` feature).
     #[cfg(feature = "influxdb")]
-    influxdb_bindings: Option<InfluxDbBindings>,
+    influxdb_bindings: HashMap<String, InfluxDbBindings>,
     /// TimescaleDB bindings when a TimescaleDB resource populated them (`timescaledb` feature).
     #[cfg(feature = "timescaledb")]
-    timescaledb_bindings: Option<PostgresBindings>,
+    timescaledb_bindings: HashMap<String, PostgresBindings>,
     /// Kind of scenario being executed (Normal or Faulty)
     scenario_kind: ScenarioKind,
     /// Optional label from `#[shakedown::faulty_test(fault_profile = "...")]` for presets / diagnostics.
@@ -432,41 +434,41 @@ impl Context {
             resources: Vec::new(),
             environment_backend: Box::new(NoopEnvironmentBackend),
             scenario_id: ScenarioId::empty(),
-            kafka_bindings: None,
+            kafka_bindings: HashMap::new(),
             #[cfg(feature = "rabbitmq")]
-            rabbit_bindings: None,
+            rabbit_bindings: HashMap::new(),
             #[cfg(feature = "postgres")]
-            postgres_bindings: None,
+            postgres_bindings: HashMap::new(),
             #[cfg(feature = "mariadb")]
-            mariadb_bindings: None,
+            mariadb_bindings: HashMap::new(),
             #[cfg(feature = "mysql")]
-            mysql_bindings: None,
+            mysql_bindings: HashMap::new(),
             #[cfg(feature = "sqlite")]
-            sqlite_bindings: None,
+            sqlite_bindings: HashMap::new(),
             #[cfg(feature = "duckdb")]
-            duckdb_bindings: None,
+            duckdb_bindings: HashMap::new(),
             #[cfg(any(feature = "redis", feature = "valkey"))]
-            redis_bindings: None,
+            redis_bindings: HashMap::new(),
             #[cfg(feature = "redis-sentinel")]
-            redis_sentinel_bindings: None,
+            redis_sentinel_bindings: HashMap::new(),
             #[cfg(feature = "mongodb")]
-            mongo_bindings: None,
+            mongo_bindings: HashMap::new(),
             #[cfg(feature = "nats")]
-            nats_bindings: None,
+            nats_bindings: HashMap::new(),
             #[cfg(feature = "neo4j")]
-            neo4j_bindings: None,
+            neo4j_bindings: HashMap::new(),
             #[cfg(feature = "elasticsearch")]
-            elasticsearch_bindings: None,
+            elasticsearch_bindings: HashMap::new(),
             #[cfg(feature = "opensearch")]
-            opensearch_bindings: None,
+            opensearch_bindings: HashMap::new(),
             #[cfg(feature = "qdrant")]
-            qdrant_bindings: None,
+            qdrant_bindings: HashMap::new(),
             #[cfg(feature = "weaviate")]
-            weaviate_bindings: None,
+            weaviate_bindings: HashMap::new(),
             #[cfg(feature = "influxdb")]
-            influxdb_bindings: None,
+            influxdb_bindings: HashMap::new(),
             #[cfg(feature = "timescaledb")]
-            timescaledb_bindings: None,
+            timescaledb_bindings: HashMap::new(),
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -541,41 +543,41 @@ impl Context {
             resources: Vec::new(),
             environment_backend: Box::new(backend),
             scenario_id: ScenarioId::empty(),
-            kafka_bindings: None,
+            kafka_bindings: HashMap::new(),
             #[cfg(feature = "rabbitmq")]
-            rabbit_bindings: None,
+            rabbit_bindings: HashMap::new(),
             #[cfg(feature = "postgres")]
-            postgres_bindings: None,
+            postgres_bindings: HashMap::new(),
             #[cfg(feature = "mariadb")]
-            mariadb_bindings: None,
+            mariadb_bindings: HashMap::new(),
             #[cfg(feature = "mysql")]
-            mysql_bindings: None,
+            mysql_bindings: HashMap::new(),
             #[cfg(feature = "sqlite")]
-            sqlite_bindings: None,
+            sqlite_bindings: HashMap::new(),
             #[cfg(feature = "duckdb")]
-            duckdb_bindings: None,
+            duckdb_bindings: HashMap::new(),
             #[cfg(any(feature = "redis", feature = "valkey"))]
-            redis_bindings: None,
+            redis_bindings: HashMap::new(),
             #[cfg(feature = "redis-sentinel")]
-            redis_sentinel_bindings: None,
+            redis_sentinel_bindings: HashMap::new(),
             #[cfg(feature = "mongodb")]
-            mongo_bindings: None,
+            mongo_bindings: HashMap::new(),
             #[cfg(feature = "nats")]
-            nats_bindings: None,
+            nats_bindings: HashMap::new(),
             #[cfg(feature = "neo4j")]
-            neo4j_bindings: None,
+            neo4j_bindings: HashMap::new(),
             #[cfg(feature = "elasticsearch")]
-            elasticsearch_bindings: None,
+            elasticsearch_bindings: HashMap::new(),
             #[cfg(feature = "opensearch")]
-            opensearch_bindings: None,
+            opensearch_bindings: HashMap::new(),
             #[cfg(feature = "qdrant")]
-            qdrant_bindings: None,
+            qdrant_bindings: HashMap::new(),
             #[cfg(feature = "weaviate")]
-            weaviate_bindings: None,
+            weaviate_bindings: HashMap::new(),
             #[cfg(feature = "influxdb")]
-            influxdb_bindings: None,
+            influxdb_bindings: HashMap::new(),
             #[cfg(feature = "timescaledb")]
-            timescaledb_bindings: None,
+            timescaledb_bindings: HashMap::new(),
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -650,41 +652,41 @@ impl Context {
             resources: Vec::new(),
             environment_backend: Box::new(NoopEnvironmentBackend),
             scenario_id: ScenarioId::new(scenario_id),
-            kafka_bindings: None,
+            kafka_bindings: HashMap::new(),
             #[cfg(feature = "rabbitmq")]
-            rabbit_bindings: None,
+            rabbit_bindings: HashMap::new(),
             #[cfg(feature = "postgres")]
-            postgres_bindings: None,
+            postgres_bindings: HashMap::new(),
             #[cfg(feature = "mariadb")]
-            mariadb_bindings: None,
+            mariadb_bindings: HashMap::new(),
             #[cfg(feature = "mysql")]
-            mysql_bindings: None,
+            mysql_bindings: HashMap::new(),
             #[cfg(feature = "sqlite")]
-            sqlite_bindings: None,
+            sqlite_bindings: HashMap::new(),
             #[cfg(feature = "duckdb")]
-            duckdb_bindings: None,
+            duckdb_bindings: HashMap::new(),
             #[cfg(any(feature = "redis", feature = "valkey"))]
-            redis_bindings: None,
+            redis_bindings: HashMap::new(),
             #[cfg(feature = "redis-sentinel")]
-            redis_sentinel_bindings: None,
+            redis_sentinel_bindings: HashMap::new(),
             #[cfg(feature = "mongodb")]
-            mongo_bindings: None,
+            mongo_bindings: HashMap::new(),
             #[cfg(feature = "nats")]
-            nats_bindings: None,
+            nats_bindings: HashMap::new(),
             #[cfg(feature = "neo4j")]
-            neo4j_bindings: None,
+            neo4j_bindings: HashMap::new(),
             #[cfg(feature = "elasticsearch")]
-            elasticsearch_bindings: None,
+            elasticsearch_bindings: HashMap::new(),
             #[cfg(feature = "opensearch")]
-            opensearch_bindings: None,
+            opensearch_bindings: HashMap::new(),
             #[cfg(feature = "qdrant")]
-            qdrant_bindings: None,
+            qdrant_bindings: HashMap::new(),
             #[cfg(feature = "weaviate")]
-            weaviate_bindings: None,
+            weaviate_bindings: HashMap::new(),
             #[cfg(feature = "influxdb")]
-            influxdb_bindings: None,
+            influxdb_bindings: HashMap::new(),
             #[cfg(feature = "timescaledb")]
-            timescaledb_bindings: None,
+            timescaledb_bindings: HashMap::new(),
             scenario_kind: ScenarioKind::Normal,
             fault_profile: None,
             #[cfg(feature = "fault-injection")]
@@ -1248,216 +1250,486 @@ impl Context {
 
     /// Set Kafka bindings for this scenario (typically after Kafka provision).
     pub fn set_kafka_bindings(&mut self, kafka_bindings: KafkaBindings) {
-        self.kafka_bindings = Some(kafka_bindings);
+        self.kafka_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), kafka_bindings);
+    }
+
+    /// Set Kafka bindings under a logical name (multi-Kafka topologies).
+    pub fn set_kafka_bindings_named(&mut self, name: &str, kafka_bindings: KafkaBindings) {
+        self.kafka_bindings.insert(name.to_string(), kafka_bindings);
     }
 
     /// Get a reference to Kafka bindings if available.
     pub fn kafka_bindings(&self) -> Option<&KafkaBindings> {
-        self.kafka_bindings.as_ref()
+        self.kafka_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Kafka bindings for a named resource registration.
+    pub fn kafka_bindings_named(&self, name: &str) -> Option<&KafkaBindings> {
+        self.kafka_bindings.get(name)
     }
 
     /// Set RabbitMQ bindings for this scenario (typically after Rabbit provision).
     #[cfg(feature = "rabbitmq")]
     pub fn set_rabbit_bindings(&mut self, rabbit_bindings: RabbitBindings) {
-        self.rabbit_bindings = Some(rabbit_bindings);
+        self.rabbit_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), rabbit_bindings);
+    }
+
+    /// Set RabbitMQ bindings under a logical name.
+    #[cfg(feature = "rabbitmq")]
+    pub fn set_rabbit_bindings_named(&mut self, name: &str, rabbit_bindings: RabbitBindings) {
+        self.rabbit_bindings
+            .insert(name.to_string(), rabbit_bindings);
     }
 
     /// Get RabbitMQ bindings if available (`rabbitmq` feature).
     #[cfg(feature = "rabbitmq")]
     pub fn rabbit_bindings(&self) -> Option<&RabbitBindings> {
-        self.rabbit_bindings.as_ref()
+        self.rabbit_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// RabbitMQ bindings for a named resource registration (`rabbitmq` feature).
+    #[cfg(feature = "rabbitmq")]
+    pub fn rabbit_bindings_named(&self, name: &str) -> Option<&RabbitBindings> {
+        self.rabbit_bindings.get(name)
     }
 
     /// Set Postgres bindings for this scenario (typically after Postgres provision).
     #[cfg(feature = "postgres")]
     pub fn set_postgres_bindings(&mut self, postgres_bindings: PostgresBindings) {
-        self.postgres_bindings = Some(postgres_bindings);
+        self.postgres_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), postgres_bindings);
+    }
+
+    /// Set Postgres bindings under a logical name.
+    #[cfg(feature = "postgres")]
+    pub fn set_postgres_bindings_named(&mut self, name: &str, postgres_bindings: PostgresBindings) {
+        self.postgres_bindings
+            .insert(name.to_string(), postgres_bindings);
     }
 
     /// Get Postgres bindings if available (`postgres` feature).
     #[cfg(feature = "postgres")]
     pub fn postgres_bindings(&self) -> Option<&PostgresBindings> {
-        self.postgres_bindings.as_ref()
+        self.postgres_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Postgres bindings for a named resource registration (`postgres` feature).
+    #[cfg(feature = "postgres")]
+    pub fn postgres_bindings_named(&self, name: &str) -> Option<&PostgresBindings> {
+        self.postgres_bindings.get(name)
     }
 
     /// Set MariaDB bindings for this scenario (typically after MariaDB provision).
     #[cfg(feature = "mariadb")]
     pub fn set_mariadb_bindings(&mut self, mariadb_bindings: MariaDBBindings) {
-        self.mariadb_bindings = Some(mariadb_bindings);
+        self.mariadb_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), mariadb_bindings);
+    }
+
+    /// Set MariaDB bindings under a logical name.
+    #[cfg(feature = "mariadb")]
+    pub fn set_mariadb_bindings_named(&mut self, name: &str, mariadb_bindings: MariaDBBindings) {
+        self.mariadb_bindings
+            .insert(name.to_string(), mariadb_bindings);
     }
 
     /// Get MariaDB bindings if available (`mariadb` feature).
     #[cfg(feature = "mariadb")]
     pub fn mariadb_bindings(&self) -> Option<&MariaDBBindings> {
-        self.mariadb_bindings.as_ref()
+        self.mariadb_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// MariaDB bindings for a named resource registration (`mariadb` feature).
+    #[cfg(feature = "mariadb")]
+    pub fn mariadb_bindings_named(&self, name: &str) -> Option<&MariaDBBindings> {
+        self.mariadb_bindings.get(name)
     }
 
     /// Set MySQL (Oracle) bindings for this scenario (typically after MySQL provision).
     #[cfg(feature = "mysql")]
     pub fn set_mysql_bindings(&mut self, mysql_bindings: MysqlBindings) {
-        self.mysql_bindings = Some(mysql_bindings);
+        self.mysql_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), mysql_bindings);
+    }
+
+    /// Set MySQL bindings under a logical name.
+    #[cfg(feature = "mysql")]
+    pub fn set_mysql_bindings_named(&mut self, name: &str, mysql_bindings: MysqlBindings) {
+        self.mysql_bindings.insert(name.to_string(), mysql_bindings);
     }
 
     /// Get Oracle MySQL bindings if available (`mysql` feature).
     #[cfg(feature = "mysql")]
     pub fn mysql_bindings(&self) -> Option<&MysqlBindings> {
-        self.mysql_bindings.as_ref()
+        self.mysql_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// MySQL bindings for a named resource registration (`mysql` feature).
+    #[cfg(feature = "mysql")]
+    pub fn mysql_bindings_named(&self, name: &str) -> Option<&MysqlBindings> {
+        self.mysql_bindings.get(name)
     }
 
     /// Set SQLite bindings for this scenario (typically after SQLite provision).
     #[cfg(feature = "sqlite")]
     pub fn set_sqlite_bindings(&mut self, sqlite_bindings: SqliteBindings) {
-        self.sqlite_bindings = Some(sqlite_bindings);
+        self.sqlite_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), sqlite_bindings);
+    }
+
+    /// Set SQLite bindings under a logical name.
+    #[cfg(feature = "sqlite")]
+    pub fn set_sqlite_bindings_named(&mut self, name: &str, sqlite_bindings: SqliteBindings) {
+        self.sqlite_bindings
+            .insert(name.to_string(), sqlite_bindings);
     }
 
     /// Get SQLite bindings if available (`sqlite` feature).
     #[cfg(feature = "sqlite")]
     pub fn sqlite_bindings(&self) -> Option<&SqliteBindings> {
-        self.sqlite_bindings.as_ref()
+        self.sqlite_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// SQLite bindings for a named resource registration (`sqlite` feature).
+    #[cfg(feature = "sqlite")]
+    pub fn sqlite_bindings_named(&self, name: &str) -> Option<&SqliteBindings> {
+        self.sqlite_bindings.get(name)
     }
 
     /// Set DuckDB bindings for this scenario (typically after DuckDB provision).
     #[cfg(feature = "duckdb")]
     pub fn set_duckdb_bindings(&mut self, duckdb_bindings: DuckDbBindings) {
-        self.duckdb_bindings = Some(duckdb_bindings);
+        self.duckdb_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), duckdb_bindings);
+    }
+
+    /// Set DuckDB bindings under a logical name.
+    #[cfg(feature = "duckdb")]
+    pub fn set_duckdb_bindings_named(&mut self, name: &str, duckdb_bindings: DuckDbBindings) {
+        self.duckdb_bindings
+            .insert(name.to_string(), duckdb_bindings);
     }
 
     /// DuckDB connection path when a DuckDB resource populated them (`duckdb` feature).
     #[cfg(feature = "duckdb")]
     pub fn duckdb_bindings(&self) -> Option<&DuckDbBindings> {
-        self.duckdb_bindings.as_ref()
+        self.duckdb_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// DuckDB bindings for a named resource registration (`duckdb` feature).
+    #[cfg(feature = "duckdb")]
+    pub fn duckdb_bindings_named(&self, name: &str) -> Option<&DuckDbBindings> {
+        self.duckdb_bindings.get(name)
     }
 
     /// Set Redis / Valkey bindings for this scenario (typically after Redis or Valkey provision).
     #[cfg(any(feature = "redis", feature = "valkey"))]
     pub fn set_redis_bindings(&mut self, redis_bindings: RedisBindings) {
-        self.redis_bindings = Some(redis_bindings);
+        self.redis_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), redis_bindings);
+    }
+
+    /// Set Redis / Valkey bindings under a logical name.
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    pub fn set_redis_bindings_named(&mut self, name: &str, redis_bindings: RedisBindings) {
+        self.redis_bindings.insert(name.to_string(), redis_bindings);
     }
 
     /// Redis or Valkey connection details when a matching resource populated them (`redis` / `valkey` features).
     #[cfg(any(feature = "redis", feature = "valkey"))]
     pub fn redis_bindings(&self) -> Option<&RedisBindings> {
-        self.redis_bindings.as_ref()
+        self.redis_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Redis or Valkey bindings for a named resource registration.
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    pub fn redis_bindings_named(&self, name: &str) -> Option<&RedisBindings> {
+        self.redis_bindings.get(name)
     }
 
     /// Set Redis Sentinel discovery bindings when [`crate::BuiltinResource::RedisSentinel`] populated them.
     #[cfg(feature = "redis-sentinel")]
     pub fn set_redis_sentinel_bindings(&mut self, redis_sentinel_bindings: RedisSentinelBindings) {
-        self.redis_sentinel_bindings = Some(redis_sentinel_bindings);
+        self.redis_sentinel_bindings.insert(
+            DEFAULT_RESOURCE_BINDING_NAME.to_string(),
+            redis_sentinel_bindings,
+        );
+    }
+
+    /// Set Redis Sentinel bindings under a logical name.
+    #[cfg(feature = "redis-sentinel")]
+    pub fn set_redis_sentinel_bindings_named(
+        &mut self,
+        name: &str,
+        redis_sentinel_bindings: RedisSentinelBindings,
+    ) {
+        self.redis_sentinel_bindings
+            .insert(name.to_string(), redis_sentinel_bindings);
     }
 
     /// Sentinel endpoints + master name + primary URL (`redis-sentinel` feature).
     #[cfg(feature = "redis-sentinel")]
     pub fn redis_sentinel_bindings(&self) -> Option<&RedisSentinelBindings> {
-        self.redis_sentinel_bindings.as_ref()
+        self.redis_sentinel_bindings
+            .get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Redis Sentinel bindings for a named resource registration (`redis-sentinel` feature).
+    #[cfg(feature = "redis-sentinel")]
+    pub fn redis_sentinel_bindings_named(&self, name: &str) -> Option<&RedisSentinelBindings> {
+        self.redis_sentinel_bindings.get(name)
     }
 
     /// Set MongoDB bindings for this scenario (typically after Mongo provision).
     #[cfg(feature = "mongodb")]
     pub fn set_mongo_bindings(&mut self, mongo_bindings: MongoBindings) {
-        self.mongo_bindings = Some(mongo_bindings);
+        self.mongo_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), mongo_bindings);
+    }
+
+    /// Set MongoDB bindings under a logical name.
+    #[cfg(feature = "mongodb")]
+    pub fn set_mongo_bindings_named(&mut self, name: &str, mongo_bindings: MongoBindings) {
+        self.mongo_bindings.insert(name.to_string(), mongo_bindings);
     }
 
     /// MongoDB connection details when a Mongo resource populated them (`mongodb` feature).
     #[cfg(feature = "mongodb")]
     pub fn mongo_bindings(&self) -> Option<&MongoBindings> {
-        self.mongo_bindings.as_ref()
+        self.mongo_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// MongoDB bindings for a named resource registration (`mongodb` feature).
+    #[cfg(feature = "mongodb")]
+    pub fn mongo_bindings_named(&self, name: &str) -> Option<&MongoBindings> {
+        self.mongo_bindings.get(name)
     }
 
     /// Set NATS bindings for this scenario (typically after NATS provision).
     #[cfg(feature = "nats")]
     pub fn set_nats_bindings(&mut self, nats_bindings: NatsBindings) {
-        self.nats_bindings = Some(nats_bindings);
+        self.nats_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), nats_bindings);
+    }
+
+    /// Set NATS bindings under a logical name.
+    #[cfg(feature = "nats")]
+    pub fn set_nats_bindings_named(&mut self, name: &str, nats_bindings: NatsBindings) {
+        self.nats_bindings.insert(name.to_string(), nats_bindings);
     }
 
     /// NATS connection details when a NATS resource populated them (`nats` feature).
     #[cfg(feature = "nats")]
     pub fn nats_bindings(&self) -> Option<&NatsBindings> {
-        self.nats_bindings.as_ref()
+        self.nats_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// NATS bindings for a named resource registration (`nats` feature).
+    #[cfg(feature = "nats")]
+    pub fn nats_bindings_named(&self, name: &str) -> Option<&NatsBindings> {
+        self.nats_bindings.get(name)
     }
 
     /// Set Neo4j bindings for this scenario (typically after Neo4j provision).
     #[cfg(feature = "neo4j")]
     pub fn set_neo4j_bindings(&mut self, neo4j_bindings: Neo4jBindings) {
-        self.neo4j_bindings = Some(neo4j_bindings);
+        self.neo4j_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), neo4j_bindings);
+    }
+
+    /// Set Neo4j bindings under a logical name.
+    #[cfg(feature = "neo4j")]
+    pub fn set_neo4j_bindings_named(&mut self, name: &str, neo4j_bindings: Neo4jBindings) {
+        self.neo4j_bindings.insert(name.to_string(), neo4j_bindings);
     }
 
     /// Neo4j connection details when a Neo4j resource populated them (`neo4j` feature).
     #[cfg(feature = "neo4j")]
     pub fn neo4j_bindings(&self) -> Option<&Neo4jBindings> {
-        self.neo4j_bindings.as_ref()
+        self.neo4j_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Neo4j bindings for a named resource registration (`neo4j` feature).
+    #[cfg(feature = "neo4j")]
+    pub fn neo4j_bindings_named(&self, name: &str) -> Option<&Neo4jBindings> {
+        self.neo4j_bindings.get(name)
     }
 
     /// Set Elasticsearch bindings for this scenario (typically after Elasticsearch provision).
     #[cfg(feature = "elasticsearch")]
     pub fn set_elasticsearch_bindings(&mut self, elasticsearch_bindings: ElasticsearchBindings) {
-        self.elasticsearch_bindings = Some(elasticsearch_bindings);
+        self.elasticsearch_bindings.insert(
+            DEFAULT_RESOURCE_BINDING_NAME.to_string(),
+            elasticsearch_bindings,
+        );
+    }
+
+    /// Set Elasticsearch bindings under a logical name.
+    #[cfg(feature = "elasticsearch")]
+    pub fn set_elasticsearch_bindings_named(
+        &mut self,
+        name: &str,
+        elasticsearch_bindings: ElasticsearchBindings,
+    ) {
+        self.elasticsearch_bindings
+            .insert(name.to_string(), elasticsearch_bindings);
     }
 
     /// Elasticsearch HTTP URL and index prefix when an Elasticsearch resource populated them (`elasticsearch` feature).
     #[cfg(feature = "elasticsearch")]
     pub fn elasticsearch_bindings(&self) -> Option<&ElasticsearchBindings> {
-        self.elasticsearch_bindings.as_ref()
+        self.elasticsearch_bindings
+            .get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Elasticsearch bindings for a named resource registration (`elasticsearch` feature).
+    #[cfg(feature = "elasticsearch")]
+    pub fn elasticsearch_bindings_named(&self, name: &str) -> Option<&ElasticsearchBindings> {
+        self.elasticsearch_bindings.get(name)
     }
 
     /// Set OpenSearch bindings for this scenario (typically after OpenSearch provision).
     #[cfg(feature = "opensearch")]
     pub fn set_opensearch_bindings(&mut self, opensearch_bindings: OpenSearchBindings) {
-        self.opensearch_bindings = Some(opensearch_bindings);
+        self.opensearch_bindings.insert(
+            DEFAULT_RESOURCE_BINDING_NAME.to_string(),
+            opensearch_bindings,
+        );
+    }
+
+    /// Set OpenSearch bindings under a logical name.
+    #[cfg(feature = "opensearch")]
+    pub fn set_opensearch_bindings_named(
+        &mut self,
+        name: &str,
+        opensearch_bindings: OpenSearchBindings,
+    ) {
+        self.opensearch_bindings
+            .insert(name.to_string(), opensearch_bindings);
     }
 
     /// OpenSearch HTTP URL and index prefix when an OpenSearch resource populated them (`opensearch` feature).
     #[cfg(feature = "opensearch")]
     pub fn opensearch_bindings(&self) -> Option<&OpenSearchBindings> {
-        self.opensearch_bindings.as_ref()
+        self.opensearch_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// OpenSearch bindings for a named resource registration (`opensearch` feature).
+    #[cfg(feature = "opensearch")]
+    pub fn opensearch_bindings_named(&self, name: &str) -> Option<&OpenSearchBindings> {
+        self.opensearch_bindings.get(name)
     }
 
     /// Set Qdrant bindings for this scenario (typically after Qdrant provision).
     #[cfg(feature = "qdrant")]
     pub fn set_qdrant_bindings(&mut self, qdrant_bindings: QdrantBindings) {
-        self.qdrant_bindings = Some(qdrant_bindings);
+        self.qdrant_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), qdrant_bindings);
+    }
+
+    /// Set Qdrant bindings under a logical name.
+    #[cfg(feature = "qdrant")]
+    pub fn set_qdrant_bindings_named(&mut self, name: &str, qdrant_bindings: QdrantBindings) {
+        self.qdrant_bindings
+            .insert(name.to_string(), qdrant_bindings);
     }
 
     /// Qdrant gRPC/REST endpoints and collection prefix when a Qdrant resource populated them (`qdrant` feature).
     #[cfg(feature = "qdrant")]
     pub fn qdrant_bindings(&self) -> Option<&QdrantBindings> {
-        self.qdrant_bindings.as_ref()
+        self.qdrant_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Qdrant bindings for a named resource registration (`qdrant` feature).
+    #[cfg(feature = "qdrant")]
+    pub fn qdrant_bindings_named(&self, name: &str) -> Option<&QdrantBindings> {
+        self.qdrant_bindings.get(name)
     }
 
     /// Set Weaviate bindings for this scenario (typically after Weaviate provision).
     #[cfg(feature = "weaviate")]
     pub fn set_weaviate_bindings(&mut self, weaviate_bindings: WeaviateBindings) {
-        self.weaviate_bindings = Some(weaviate_bindings);
+        self.weaviate_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), weaviate_bindings);
+    }
+
+    /// Set Weaviate bindings under a logical name.
+    #[cfg(feature = "weaviate")]
+    pub fn set_weaviate_bindings_named(&mut self, name: &str, weaviate_bindings: WeaviateBindings) {
+        self.weaviate_bindings
+            .insert(name.to_string(), weaviate_bindings);
     }
 
     /// Weaviate REST URL and class name prefix when a Weaviate resource populated them (`weaviate` feature).
     #[cfg(feature = "weaviate")]
     pub fn weaviate_bindings(&self) -> Option<&WeaviateBindings> {
-        self.weaviate_bindings.as_ref()
+        self.weaviate_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Weaviate bindings for a named resource registration (`weaviate` feature).
+    #[cfg(feature = "weaviate")]
+    pub fn weaviate_bindings_named(&self, name: &str) -> Option<&WeaviateBindings> {
+        self.weaviate_bindings.get(name)
     }
 
     /// Set InfluxDB bindings for this scenario (typically after InfluxDB provision).
     #[cfg(feature = "influxdb")]
     pub fn set_influxdb_bindings(&mut self, influxdb_bindings: InfluxDbBindings) {
-        self.influxdb_bindings = Some(influxdb_bindings);
+        self.influxdb_bindings
+            .insert(DEFAULT_RESOURCE_BINDING_NAME.to_string(), influxdb_bindings);
+    }
+
+    /// Set InfluxDB bindings under a logical name.
+    #[cfg(feature = "influxdb")]
+    pub fn set_influxdb_bindings_named(&mut self, name: &str, influxdb_bindings: InfluxDbBindings) {
+        self.influxdb_bindings
+            .insert(name.to_string(), influxdb_bindings);
     }
 
     /// InfluxDB HTTP URL, token, org, and scenario bucket when an InfluxDB resource populated them (`influxdb` feature).
     #[cfg(feature = "influxdb")]
     pub fn influxdb_bindings(&self) -> Option<&InfluxDbBindings> {
-        self.influxdb_bindings.as_ref()
+        self.influxdb_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// InfluxDB bindings for a named resource registration (`influxdb` feature).
+    #[cfg(feature = "influxdb")]
+    pub fn influxdb_bindings_named(&self, name: &str) -> Option<&InfluxDbBindings> {
+        self.influxdb_bindings.get(name)
     }
 
     /// Set TimescaleDB bindings for this scenario (typically after TimescaleDB provision).
     #[cfg(feature = "timescaledb")]
     pub fn set_timescaledb_bindings(&mut self, timescaledb_bindings: PostgresBindings) {
-        self.timescaledb_bindings = Some(timescaledb_bindings);
+        self.timescaledb_bindings.insert(
+            DEFAULT_RESOURCE_BINDING_NAME.to_string(),
+            timescaledb_bindings,
+        );
+    }
+
+    /// Set TimescaleDB bindings under a logical name.
+    #[cfg(feature = "timescaledb")]
+    pub fn set_timescaledb_bindings_named(
+        &mut self,
+        name: &str,
+        timescaledb_bindings: PostgresBindings,
+    ) {
+        self.timescaledb_bindings
+            .insert(name.to_string(), timescaledb_bindings);
     }
 
     /// TimescaleDB connection details when a TimescaleDB resource populated them (`timescaledb` feature).
     #[cfg(feature = "timescaledb")]
     pub fn timescaledb_bindings(&self) -> Option<&PostgresBindings> {
-        self.timescaledb_bindings.as_ref()
+        self.timescaledb_bindings.get(DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// TimescaleDB bindings for a named resource registration (`timescaledb` feature).
+    #[cfg(feature = "timescaledb")]
+    pub fn timescaledb_bindings_named(&self, name: &str) -> Option<&PostgresBindings> {
+        self.timescaledb_bindings.get(name)
     }
 
     /// Set the local IP address HTTP and gRPC mock listeners bind to (port is always ephemeral).

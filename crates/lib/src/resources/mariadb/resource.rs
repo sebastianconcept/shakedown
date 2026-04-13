@@ -1,6 +1,6 @@
 use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::sql_seed::statements_from_sql_script;
-use crate::resources::user_seed::MariaDbUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, MariaDbUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_sql_database_name, MariaDBBindings, Resource, ResourceHandle,
 };
@@ -88,7 +88,7 @@ pub struct MariaDBResource {
     #[cfg(all(feature = "mariadb", feature = "sqlx"))]
     sqlx_migrations_path: Option<PathBuf>,
     seed_sql_path: Option<PathBuf>,
-    user_seed: Option<MariaDbUserSeedFn>,
+    user_seed: UserSeedSlot<MariaDBBindings>,
 }
 
 impl std::fmt::Debug for MariaDBResource {
@@ -107,7 +107,14 @@ impl std::fmt::Debug for MariaDBResource {
         debug_struct.field("sqlx_migrations_path", &self.sqlx_migrations_path);
         debug_struct
             .field("seed_sql_path", &self.seed_sql_path)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -133,7 +140,7 @@ impl MariaDBResource {
             #[cfg(all(feature = "mariadb", feature = "sqlx"))]
             sqlx_migrations_path: None,
             seed_sql_path: None,
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -175,8 +182,11 @@ impl MariaDBResource {
         self
     }
 
+    /// Programmatic seed after migrations and optional [`Self::with_seed_path`] file.
+    ///
+    /// Receives [`MariaDBBindings`] for the scenario database.
     pub fn set_seed(&mut self, seed: MariaDbUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn mariadb_bindings(&self) -> Result<MariaDBBindings, InfrastructureError> {
@@ -388,7 +398,7 @@ impl Resource for MariaDBResource {
             pool.disconnect().await.map_err(Self::map_mysql_err)?;
         }
 
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }
 

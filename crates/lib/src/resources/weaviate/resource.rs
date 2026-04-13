@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::WeaviateUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, UserSeedSlot, WeaviateUserSeedFn};
 use crate::resources::{
     map_seed_error, sanitize_elasticsearch_index_prefix, Resource, ResourceHandle, WeaviateBindings,
 };
@@ -119,7 +119,7 @@ pub struct WeaviateResource {
     port: Option<u16>,
     rest_url: String,
     class_prefix: String,
-    user_seed: Option<WeaviateUserSeedFn>,
+    user_seed: UserSeedSlot<WeaviateBindings>,
 }
 
 impl std::fmt::Debug for WeaviateResource {
@@ -132,7 +132,14 @@ impl std::fmt::Debug for WeaviateResource {
             .field("port", &self.port)
             .field("rest_url", &self.rest_url)
             .field("class_prefix", &self.class_prefix)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -153,7 +160,7 @@ impl WeaviateResource {
             port: None,
             rest_url: String::new(),
             class_prefix: String::new(),
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -178,8 +185,9 @@ impl WeaviateResource {
         InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
     }
 
+    /// Async seed closure receiving [`WeaviateBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: WeaviateUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn weaviate_bindings(&self) -> Result<WeaviateBindings, InfrastructureError> {
@@ -326,7 +334,7 @@ impl Resource for WeaviateResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.weaviate_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

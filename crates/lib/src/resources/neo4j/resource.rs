@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::Neo4jUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, Neo4jUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_neo4j_database_name, Neo4jBindings, Resource, ResourceHandle,
 };
@@ -114,7 +114,7 @@ pub struct Neo4jResource {
     username: String,
     password: String,
     database_name: String,
-    user_seed: Option<Neo4jUserSeedFn>,
+    user_seed: UserSeedSlot<Neo4jBindings>,
 }
 
 impl std::fmt::Debug for Neo4jResource {
@@ -129,7 +129,14 @@ impl std::fmt::Debug for Neo4jResource {
             .field("username", &self.username)
             .field("password", &"<redacted>")
             .field("database_name", &self.database_name)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -152,7 +159,7 @@ impl Neo4jResource {
             username: SUITE_USER.to_string(),
             password: SUITE_PASSWORD.to_string(),
             database_name: String::new(),
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
         .with_image_tag_from_env()
     }
@@ -178,8 +185,9 @@ impl Neo4jResource {
         InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
     }
 
+    /// Async seed closure receiving [`Neo4jBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: Neo4jUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn neo4j_bindings(&self) -> Result<Neo4jBindings, InfrastructureError> {
@@ -362,7 +370,7 @@ impl Resource for Neo4jResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.neo4j_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

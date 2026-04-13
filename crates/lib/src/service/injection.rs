@@ -8,10 +8,16 @@
 
 use std::collections::HashMap;
 
-use crate::lifecycle::Context;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 use crate::resources::KafkaBindings;
 use crate::service::address::rewrite_injected_addresses_for_service_container;
 use crate::service::types::{EnvMapping, ServiceSpec};
+
+fn binding_lookup_key(binding_name: &Option<String>) -> &str {
+    binding_name
+        .as_deref()
+        .unwrap_or(DEFAULT_RESOURCE_BINDING_NAME)
+}
 
 /// Build the effective environment map for a service container: convention injection,
 /// [`EnvMapping`] renames, then explicit `.env()` entries from the builder (highest precedence).
@@ -93,32 +99,39 @@ impl MappingOverrides {
         };
         for mapping in mappings {
             match mapping {
-                EnvMapping::Kafka(name) => overrides.kafka = Some(name.clone()),
+                EnvMapping::Kafka { env_var, .. } => overrides.kafka = Some(env_var.clone()),
                 EnvMapping::KafkaTopic { .. } => {}
                 EnvMapping::KafkaConsumerGroup { .. } => {}
-                EnvMapping::Postgres(name) => overrides.postgres = Some(name.clone()),
-                EnvMapping::MariaDb(name) => overrides.mariadb = Some(name.clone()),
-                EnvMapping::Mysql(name) => overrides.mysql = Some(name.clone()),
-                EnvMapping::Rabbitmq(name) => overrides.rabbitmq = Some(name.clone()),
-                EnvMapping::Redis(name) => overrides.redis = Some(name.clone()),
+                EnvMapping::Postgres { env_var, .. } => overrides.postgres = Some(env_var.clone()),
+                EnvMapping::MariaDb { env_var, .. } => overrides.mariadb = Some(env_var.clone()),
+                EnvMapping::Mysql { env_var, .. } => overrides.mysql = Some(env_var.clone()),
+                EnvMapping::Rabbitmq { env_var, .. } => overrides.rabbitmq = Some(env_var.clone()),
+                EnvMapping::Redis { env_var, .. } => overrides.redis = Some(env_var.clone()),
                 #[cfg(feature = "redis-sentinel")]
                 EnvMapping::RedisSentinel {
                     sentinel_hosts_var,
                     master_name_var,
+                    ..
                 } => {
                     overrides.redis_sentinel_hosts = Some(sentinel_hosts_var.clone());
                     overrides.redis_sentinel_master = Some(master_name_var.clone());
                 }
-                EnvMapping::Mongo(name) => overrides.mongo = Some(name.clone()),
-                EnvMapping::Nats(name) => overrides.nats = Some(name.clone()),
-                EnvMapping::Neo4j(name) => overrides.neo4j = Some(name.clone()),
-                EnvMapping::DuckDb(name) => overrides.duckdb = Some(name.clone()),
-                EnvMapping::Elasticsearch(name) => overrides.elasticsearch = Some(name.clone()),
-                EnvMapping::OpenSearch(name) => overrides.opensearch = Some(name.clone()),
-                EnvMapping::Qdrant(name) => overrides.qdrant = Some(name.clone()),
-                EnvMapping::Weaviate(name) => overrides.weaviate = Some(name.clone()),
-                EnvMapping::InfluxDb(name) => overrides.influxdb = Some(name.clone()),
-                EnvMapping::Timescaledb(name) => overrides.timescaledb = Some(name.clone()),
+                EnvMapping::Mongo { env_var, .. } => overrides.mongo = Some(env_var.clone()),
+                EnvMapping::Nats { env_var, .. } => overrides.nats = Some(env_var.clone()),
+                EnvMapping::Neo4j { env_var, .. } => overrides.neo4j = Some(env_var.clone()),
+                EnvMapping::DuckDb { env_var, .. } => overrides.duckdb = Some(env_var.clone()),
+                EnvMapping::Elasticsearch { env_var, .. } => {
+                    overrides.elasticsearch = Some(env_var.clone());
+                }
+                EnvMapping::OpenSearch { env_var, .. } => {
+                    overrides.opensearch = Some(env_var.clone())
+                }
+                EnvMapping::Qdrant { env_var, .. } => overrides.qdrant = Some(env_var.clone()),
+                EnvMapping::Weaviate { env_var, .. } => overrides.weaviate = Some(env_var.clone()),
+                EnvMapping::InfluxDb { env_var, .. } => overrides.influxdb = Some(env_var.clone()),
+                EnvMapping::Timescaledb { env_var, .. } => {
+                    overrides.timescaledb = Some(env_var.clone());
+                }
                 EnvMapping::MockService {
                     mock_service_name,
                     env_var,
@@ -349,9 +362,11 @@ fn inject_only_env_mappings(
         if let EnvMapping::RedisSentinel {
             sentinel_hosts_var,
             master_name_var,
+            binding_name,
         } = mapping
         {
-            if let Some(bindings) = context.redis_sentinel_bindings() {
+            let key_lookup = binding_lookup_key(binding_name);
+            if let Some(bindings) = context.redis_sentinel_bindings_named(key_lookup) {
                 environment.insert(sentinel_hosts_var.clone(), bindings.sentinel_hosts.clone());
                 environment.insert(master_name_var.clone(), bindings.master_name.clone());
             }
@@ -385,159 +400,223 @@ fn resolve_env_mapping(
     )))]
     let _ = service_name;
     match mapping {
-        EnvMapping::Kafka(key) => context
-            .kafka_bindings()
-            .map(|bindings| (key.clone(), kafka_bootstrap_value(bindings))),
+        EnvMapping::Kafka {
+            env_var,
+            binding_name,
+        } => context
+            .kafka_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), kafka_bootstrap_value(bindings))),
         EnvMapping::KafkaTopic {
             env_var,
             logical_topic,
-        } => context.kafka_bindings().map(|bindings| {
-            (
-                env_var.clone(),
-                bindings.topic_namespace(logical_topic.as_str()),
-            )
-        }),
+            binding_name,
+        } => context
+            .kafka_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| {
+                (
+                    env_var.clone(),
+                    bindings.topic_namespace(logical_topic.as_str()),
+                )
+            }),
         EnvMapping::KafkaConsumerGroup {
             env_var,
             logical_group_id,
-        } => context.kafka_bindings().map(|bindings| {
-            (
-                env_var.clone(),
-                bindings.consumer_group_namespace(logical_group_id.as_str()),
-            )
-        }),
+            binding_name,
+        } => context
+            .kafka_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| {
+                (
+                    env_var.clone(),
+                    bindings.consumer_group_namespace(logical_group_id.as_str()),
+                )
+            }),
         #[cfg(feature = "postgres")]
-        EnvMapping::Postgres(key) => context.postgres_bindings().map(|bindings| {
-            (
-                key.clone(),
-                relational_url_for_service(
-                    bindings.connection_url.as_str(),
-                    bindings.database.as_str(),
-                    service_name,
-                    partition_relational,
-                ),
-            )
-        }),
+        EnvMapping::Postgres {
+            env_var,
+            binding_name,
+        } => context
+            .postgres_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| {
+                (
+                    env_var.clone(),
+                    relational_url_for_service(
+                        bindings.connection_url.as_str(),
+                        bindings.database.as_str(),
+                        service_name,
+                        partition_relational,
+                    ),
+                )
+            }),
         #[cfg(not(feature = "postgres"))]
-        EnvMapping::Postgres(_) => None,
+        EnvMapping::Postgres { .. } => None,
         #[cfg(feature = "mariadb")]
-        EnvMapping::MariaDb(key) => context.mariadb_bindings().map(|bindings| {
-            (
-                key.clone(),
-                relational_url_for_service(
-                    bindings.connection_url.as_str(),
-                    bindings.database.as_str(),
-                    service_name,
-                    partition_relational,
-                ),
-            )
-        }),
+        EnvMapping::MariaDb {
+            env_var,
+            binding_name,
+        } => context
+            .mariadb_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| {
+                (
+                    env_var.clone(),
+                    relational_url_for_service(
+                        bindings.connection_url.as_str(),
+                        bindings.database.as_str(),
+                        service_name,
+                        partition_relational,
+                    ),
+                )
+            }),
         #[cfg(not(feature = "mariadb"))]
-        EnvMapping::MariaDb(_) => None,
+        EnvMapping::MariaDb { .. } => None,
         #[cfg(feature = "mysql")]
-        EnvMapping::Mysql(key) => context.mysql_bindings().map(|bindings| {
-            (
-                key.clone(),
-                relational_url_for_service(
-                    bindings.connection_url.as_str(),
-                    bindings.database.as_str(),
-                    service_name,
-                    partition_relational,
-                ),
-            )
-        }),
+        EnvMapping::Mysql {
+            env_var,
+            binding_name,
+        } => context
+            .mysql_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| {
+                (
+                    env_var.clone(),
+                    relational_url_for_service(
+                        bindings.connection_url.as_str(),
+                        bindings.database.as_str(),
+                        service_name,
+                        partition_relational,
+                    ),
+                )
+            }),
         #[cfg(not(feature = "mysql"))]
-        EnvMapping::Mysql(_) => None,
+        EnvMapping::Mysql { .. } => None,
         #[cfg(feature = "rabbitmq")]
-        EnvMapping::Rabbitmq(key) => context
-            .rabbit_bindings()
-            .map(|bindings| (key.clone(), bindings.connection_url.clone())),
+        EnvMapping::Rabbitmq {
+            env_var,
+            binding_name,
+        } => context
+            .rabbit_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.connection_url.clone())),
         #[cfg(not(feature = "rabbitmq"))]
-        EnvMapping::Rabbitmq(_) => None,
+        EnvMapping::Rabbitmq { .. } => None,
         #[cfg(any(feature = "redis", feature = "valkey"))]
-        EnvMapping::Redis(key) => context
-            .redis_bindings()
-            .map(|bindings| (key.clone(), bindings.connection_url.clone())),
+        EnvMapping::Redis {
+            env_var,
+            binding_name,
+        } => context
+            .redis_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.connection_url.clone())),
         #[cfg(not(any(feature = "redis", feature = "valkey")))]
-        EnvMapping::Redis(_) => None,
+        EnvMapping::Redis { .. } => None,
         #[cfg(feature = "redis-sentinel")]
         EnvMapping::RedisSentinel { .. } => None,
         #[cfg(feature = "mongodb")]
-        EnvMapping::Mongo(key) => context.mongo_bindings().map(|bindings| {
-            (
-                key.clone(),
-                relational_url_for_service(
-                    bindings.connection_url.as_str(),
-                    bindings.database.as_str(),
-                    service_name,
-                    partition_relational,
-                ),
-            )
-        }),
+        EnvMapping::Mongo {
+            env_var,
+            binding_name,
+        } => context
+            .mongo_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| {
+                (
+                    env_var.clone(),
+                    relational_url_for_service(
+                        bindings.connection_url.as_str(),
+                        bindings.database.as_str(),
+                        service_name,
+                        partition_relational,
+                    ),
+                )
+            }),
         #[cfg(not(feature = "mongodb"))]
-        EnvMapping::Mongo(_) => None,
+        EnvMapping::Mongo { .. } => None,
         #[cfg(feature = "nats")]
-        EnvMapping::Nats(key) => context
-            .nats_bindings()
-            .map(|bindings| (key.clone(), bindings.connection_url.clone())),
+        EnvMapping::Nats {
+            env_var,
+            binding_name,
+        } => context
+            .nats_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.connection_url.clone())),
         #[cfg(not(feature = "nats"))]
-        EnvMapping::Nats(_) => None,
+        EnvMapping::Nats { .. } => None,
         #[cfg(feature = "neo4j")]
-        EnvMapping::Neo4j(key) => context
-            .neo4j_bindings()
-            .map(|bindings| (key.clone(), bindings.bolt_url.clone())),
+        EnvMapping::Neo4j {
+            env_var,
+            binding_name,
+        } => context
+            .neo4j_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.bolt_url.clone())),
         #[cfg(not(feature = "neo4j"))]
-        EnvMapping::Neo4j(_) => None,
+        EnvMapping::Neo4j { .. } => None,
         #[cfg(feature = "duckdb")]
-        EnvMapping::DuckDb(key) => context
-            .duckdb_bindings()
-            .map(|bindings| (key.clone(), bindings.database_url.clone())),
+        EnvMapping::DuckDb {
+            env_var,
+            binding_name,
+        } => context
+            .duckdb_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.database_url.clone())),
         #[cfg(not(feature = "duckdb"))]
-        EnvMapping::DuckDb(_) => None,
+        EnvMapping::DuckDb { .. } => None,
         #[cfg(feature = "elasticsearch")]
-        EnvMapping::Elasticsearch(key) => context
-            .elasticsearch_bindings()
-            .map(|bindings| (key.clone(), bindings.url.clone())),
+        EnvMapping::Elasticsearch {
+            env_var,
+            binding_name,
+        } => context
+            .elasticsearch_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.url.clone())),
         #[cfg(not(feature = "elasticsearch"))]
-        EnvMapping::Elasticsearch(_) => None,
+        EnvMapping::Elasticsearch { .. } => None,
         #[cfg(feature = "opensearch")]
-        EnvMapping::OpenSearch(key) => context
-            .opensearch_bindings()
-            .map(|bindings| (key.clone(), bindings.url.clone())),
+        EnvMapping::OpenSearch {
+            env_var,
+            binding_name,
+        } => context
+            .opensearch_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.url.clone())),
         #[cfg(not(feature = "opensearch"))]
-        EnvMapping::OpenSearch(_) => None,
+        EnvMapping::OpenSearch { .. } => None,
         #[cfg(feature = "qdrant")]
-        EnvMapping::Qdrant(key) => context
-            .qdrant_bindings()
-            .map(|bindings| (key.clone(), bindings.grpc_url.clone())),
+        EnvMapping::Qdrant {
+            env_var,
+            binding_name,
+        } => context
+            .qdrant_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.grpc_url.clone())),
         #[cfg(not(feature = "qdrant"))]
-        EnvMapping::Qdrant(_) => None,
+        EnvMapping::Qdrant { .. } => None,
         #[cfg(feature = "weaviate")]
-        EnvMapping::Weaviate(key) => context
-            .weaviate_bindings()
-            .map(|bindings| (key.clone(), bindings.rest_url.clone())),
+        EnvMapping::Weaviate {
+            env_var,
+            binding_name,
+        } => context
+            .weaviate_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.rest_url.clone())),
         #[cfg(not(feature = "weaviate"))]
-        EnvMapping::Weaviate(_) => None,
+        EnvMapping::Weaviate { .. } => None,
         #[cfg(feature = "influxdb")]
-        EnvMapping::InfluxDb(key) => context
-            .influxdb_bindings()
-            .map(|bindings| (key.clone(), bindings.url.clone())),
+        EnvMapping::InfluxDb {
+            env_var,
+            binding_name,
+        } => context
+            .influxdb_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| (env_var.clone(), bindings.url.clone())),
         #[cfg(not(feature = "influxdb"))]
-        EnvMapping::InfluxDb(_) => None,
+        EnvMapping::InfluxDb { .. } => None,
         #[cfg(feature = "timescaledb")]
-        EnvMapping::Timescaledb(key) => context.timescaledb_bindings().map(|bindings| {
-            (
-                key.clone(),
-                relational_url_for_service(
-                    bindings.connection_url.as_str(),
-                    bindings.database.as_str(),
-                    service_name,
-                    partition_relational,
-                ),
-            )
-        }),
+        EnvMapping::Timescaledb {
+            env_var,
+            binding_name,
+        } => context
+            .timescaledb_bindings_named(binding_lookup_key(binding_name))
+            .map(|bindings| {
+                (
+                    env_var.clone(),
+                    relational_url_for_service(
+                        bindings.connection_url.as_str(),
+                        bindings.database.as_str(),
+                        service_name,
+                        partition_relational,
+                    ),
+                )
+            }),
         #[cfg(not(feature = "timescaledb"))]
-        EnvMapping::Timescaledb(_) => None,
+        EnvMapping::Timescaledb { .. } => None,
         EnvMapping::MockService {
             mock_service_name,
             env_var,

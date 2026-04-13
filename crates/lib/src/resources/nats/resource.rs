@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::NatsUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, NatsUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_nats_subject_prefix, NatsBindings, Resource, ResourceHandle,
 };
@@ -55,7 +55,7 @@ pub struct NatsResource {
     port: Option<u16>,
     connection_url: Option<String>,
     subject_prefix: String,
-    user_seed: Option<NatsUserSeedFn>,
+    user_seed: UserSeedSlot<NatsBindings>,
 }
 
 impl std::fmt::Debug for NatsResource {
@@ -72,7 +72,14 @@ impl std::fmt::Debug for NatsResource {
                 &self.connection_url.as_ref().map(|_| "<url>"),
             )
             .field("subject_prefix", &self.subject_prefix)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -94,7 +101,7 @@ impl NatsResource {
             port: None,
             connection_url: None,
             subject_prefix: String::new(),
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
         .with_image_tag_from_env()
     }
@@ -116,8 +123,9 @@ impl NatsResource {
         self
     }
 
+    /// Async seed closure receiving [`NatsBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: NatsUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn nats_bindings(&self) -> Result<NatsBindings, InfrastructureError> {
@@ -273,7 +281,7 @@ impl Resource for NatsResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.nats_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

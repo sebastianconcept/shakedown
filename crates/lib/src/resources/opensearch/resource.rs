@@ -1,6 +1,6 @@
 use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::search_operations::SearchOperations;
-use crate::resources::user_seed::OpenSearchUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, OpenSearchUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_elasticsearch_index_prefix, OpenSearchBindings, Resource,
     ResourceHandle,
@@ -70,7 +70,7 @@ pub struct OpenSearchResource {
     index_prefix: String,
     username: Option<String>,
     password: Option<String>,
-    user_seed: Option<OpenSearchUserSeedFn>,
+    user_seed: UserSeedSlot<OpenSearchBindings>,
 }
 
 impl std::fmt::Debug for OpenSearchResource {
@@ -87,7 +87,14 @@ impl std::fmt::Debug for OpenSearchResource {
             .field("index_prefix", &self.index_prefix)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -112,7 +119,7 @@ impl OpenSearchResource {
             index_prefix: String::new(),
             username: None,
             password: None,
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -151,8 +158,9 @@ impl OpenSearchResource {
         )
     }
 
+    /// Async seed closure receiving [`OpenSearchBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: OpenSearchUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn opensearch_bindings(&self) -> Result<OpenSearchBindings, InfrastructureError> {
@@ -337,7 +345,7 @@ impl Resource for OpenSearchResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.opensearch_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

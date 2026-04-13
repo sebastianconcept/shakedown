@@ -1,6 +1,6 @@
 use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::search_operations::SearchOperations;
-use crate::resources::user_seed::ElasticsearchUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, ElasticsearchUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_elasticsearch_index_prefix, ElasticsearchBindings, Resource,
     ResourceHandle,
@@ -63,7 +63,7 @@ pub struct ElasticsearchResource {
     index_prefix: String,
     username: Option<String>,
     password: Option<String>,
-    user_seed: Option<ElasticsearchUserSeedFn>,
+    user_seed: UserSeedSlot<ElasticsearchBindings>,
 }
 
 impl std::fmt::Debug for ElasticsearchResource {
@@ -80,7 +80,14 @@ impl std::fmt::Debug for ElasticsearchResource {
             .field("index_prefix", &self.index_prefix)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -105,7 +112,7 @@ impl ElasticsearchResource {
             index_prefix: String::new(),
             username: None,
             password: None,
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -144,8 +151,9 @@ impl ElasticsearchResource {
         )
     }
 
+    /// Async seed closure receiving [`ElasticsearchBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: ElasticsearchUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn elasticsearch_bindings(&self) -> Result<ElasticsearchBindings, InfrastructureError> {
@@ -319,7 +327,7 @@ impl Resource for ElasticsearchResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.elasticsearch_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

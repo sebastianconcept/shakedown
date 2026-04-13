@@ -77,55 +77,106 @@ pub enum PullPolicy {
 #[allow(missing_docs)]
 pub enum EnvMapping {
     /// Kafka bootstrap / connection string → custom env var name.
-    Kafka(String),
+    Kafka {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// Scenario-namespaced Kafka topic for a logical name ([`crate::KafkaBindings::topic_namespace`]) → env var.
     ///
     /// Use when a service subscribes to a logical topic (e.g. `portfolio`) that Shakedown prefixes per scenario.
     KafkaTopic {
         env_var: String,
         logical_topic: String,
+        binding_name: Option<String>,
     },
     /// Scenario-namespaced Kafka consumer group ([`crate::KafkaBindings::consumer_group_namespace`]) → env var.
     KafkaConsumerGroup {
         env_var: String,
         logical_group_id: String,
+        binding_name: Option<String>,
     },
     /// Postgres `DATABASE_URL` (or equivalent) → custom env var name.
-    Postgres(String),
+    Postgres {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// MariaDB URL → custom env var name.
-    MariaDb(String),
+    MariaDb {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// MySQL URL → custom env var name.
-    Mysql(String),
+    Mysql {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// RabbitMQ AMQP URL → custom env var name.
-    Rabbitmq(String),
+    Rabbitmq {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// Redis or Valkey `redis://` URL (`redis` / `valkey` features) → custom env var name.
-    Redis(String),
+    Redis {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// Redis Sentinel discovery: comma-separated `host:port` list and logical master name (`redis-sentinel` + `services`).
     #[cfg(feature = "redis-sentinel")]
     RedisSentinel {
         sentinel_hosts_var: String,
         master_name_var: String,
+        binding_name: Option<String>,
     },
     /// MongoDB connection URI (`mongodb` feature) → custom env var name.
-    Mongo(String),
+    Mongo {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// NATS server URL (`nats` feature) → custom env var name.
-    Nats(String),
+    Nats {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// Neo4j Bolt URL (`neo4j` feature) → custom env var name.
-    Neo4j(String),
+    Neo4j {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// DuckDB database path string (`duckdb` feature) → custom env var name.
-    DuckDb(String),
+    DuckDb {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// Elasticsearch HTTP API base URL (`elasticsearch` feature) → custom env var name.
-    Elasticsearch(String),
+    Elasticsearch {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// OpenSearch HTTP API base URL (`opensearch` feature) → custom env var name.
-    OpenSearch(String),
+    OpenSearch {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// Qdrant gRPC URL (`qdrant` feature) → custom env var name.
-    Qdrant(String),
+    Qdrant {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// Weaviate REST base URL (`weaviate` feature) → custom env var name.
-    Weaviate(String),
+    Weaviate {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// InfluxDB 2.x HTTP API base URL (`influxdb` feature) → custom env var name.
-    InfluxDb(String),
+    InfluxDb {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// TimescaleDB libpq URL (`timescaledb` feature) → custom env var name (default `TIMESCALEDB_URL`).
-    Timescaledb(String),
+    Timescaledb {
+        env_var: String,
+        binding_name: Option<String>,
+    },
     /// Named HTTP/gRPC mock service base URL → custom env var name.
     MockService {
         mock_service_name: String,
@@ -150,7 +201,10 @@ pub enum EnvMapping {
 impl EnvMapping {
     /// Map Kafka bindings to `environment_variable_name`.
     pub fn kafka(environment_variable_name: impl Into<String>) -> Self {
-        Self::Kafka(environment_variable_name.into())
+        Self::Kafka {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map the scenario-namespaced Kafka topic for `logical_topic` to `environment_variable_name`.
@@ -161,6 +215,7 @@ impl EnvMapping {
         Self::KafkaTopic {
             env_var: environment_variable_name.into(),
             logical_topic: logical_topic.into(),
+            binding_name: None,
         }
     }
 
@@ -172,32 +227,48 @@ impl EnvMapping {
         Self::KafkaConsumerGroup {
             env_var: environment_variable_name.into(),
             logical_group_id: logical_group_id.into(),
+            binding_name: None,
         }
     }
 
     /// Map Postgres bindings to `environment_variable_name`.
     pub fn postgres(environment_variable_name: impl Into<String>) -> Self {
-        Self::Postgres(environment_variable_name.into())
+        Self::Postgres {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map MariaDB bindings to `environment_variable_name`.
     pub fn mariadb(environment_variable_name: impl Into<String>) -> Self {
-        Self::MariaDb(environment_variable_name.into())
+        Self::MariaDb {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map MySQL bindings to `environment_variable_name`.
     pub fn mysql(environment_variable_name: impl Into<String>) -> Self {
-        Self::Mysql(environment_variable_name.into())
+        Self::Mysql {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map RabbitMQ bindings to `environment_variable_name`.
     pub fn rabbitmq(environment_variable_name: impl Into<String>) -> Self {
-        Self::Rabbitmq(environment_variable_name.into())
+        Self::Rabbitmq {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map Redis / Valkey bindings to `environment_variable_name`.
     pub fn redis(environment_variable_name: impl Into<String>) -> Self {
-        Self::Redis(environment_variable_name.into())
+        Self::Redis {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map Redis Sentinel bindings to custom env var names (defaults **`REDIS_SENTINEL_HOSTS`** and **`REDIS_SENTINEL_MASTER_NAME`**).
@@ -209,57 +280,125 @@ impl EnvMapping {
         Self::RedisSentinel {
             sentinel_hosts_var: sentinel_hosts_environment_variable.into(),
             master_name_var: master_name_environment_variable.into(),
+            binding_name: None,
         }
     }
 
     /// Map MongoDB bindings to `environment_variable_name`.
     pub fn mongo(environment_variable_name: impl Into<String>) -> Self {
-        Self::Mongo(environment_variable_name.into())
+        Self::Mongo {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map NATS bindings to `environment_variable_name`.
     pub fn nats(environment_variable_name: impl Into<String>) -> Self {
-        Self::Nats(environment_variable_name.into())
+        Self::Nats {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map Neo4j Bolt URL bindings to `environment_variable_name`.
     pub fn neo4j(environment_variable_name: impl Into<String>) -> Self {
-        Self::Neo4j(environment_variable_name.into())
+        Self::Neo4j {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map DuckDB bindings to `environment_variable_name`.
     pub fn duckdb(environment_variable_name: impl Into<String>) -> Self {
-        Self::DuckDb(environment_variable_name.into())
+        Self::DuckDb {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map Elasticsearch HTTP URL bindings to `environment_variable_name`.
     pub fn elasticsearch(environment_variable_name: impl Into<String>) -> Self {
-        Self::Elasticsearch(environment_variable_name.into())
+        Self::Elasticsearch {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map OpenSearch HTTP URL bindings to `environment_variable_name`.
     pub fn opensearch(environment_variable_name: impl Into<String>) -> Self {
-        Self::OpenSearch(environment_variable_name.into())
+        Self::OpenSearch {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map Qdrant gRPC URL bindings to `environment_variable_name`.
     pub fn qdrant(environment_variable_name: impl Into<String>) -> Self {
-        Self::Qdrant(environment_variable_name.into())
+        Self::Qdrant {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map Weaviate REST URL bindings to `environment_variable_name`.
     pub fn weaviate(environment_variable_name: impl Into<String>) -> Self {
-        Self::Weaviate(environment_variable_name.into())
+        Self::Weaviate {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map InfluxDB HTTP API URL bindings to `environment_variable_name`.
     pub fn influxdb(environment_variable_name: impl Into<String>) -> Self {
-        Self::InfluxDb(environment_variable_name.into())
+        Self::InfluxDb {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
     }
 
     /// Map TimescaleDB connection URL bindings to `environment_variable_name`.
     pub fn timescaledb(environment_variable_name: impl Into<String>) -> Self {
-        Self::Timescaledb(environment_variable_name.into())
+        Self::Timescaledb {
+            env_var: environment_variable_name.into(),
+            binding_name: None,
+        }
+    }
+
+    /// Select a named harness binding ([`crate::lifecycle::Context::kafka_bindings_named`], etc.).
+    ///
+    /// When omitted, [`crate::lifecycle::DEFAULT_RESOURCE_BINDING_NAME`] is used.
+    pub fn binding(mut self, name: impl Into<String>) -> Self {
+        let resolved = Some(name.into());
+        match &mut self {
+            EnvMapping::Kafka { binding_name, .. }
+            | EnvMapping::KafkaTopic { binding_name, .. }
+            | EnvMapping::KafkaConsumerGroup { binding_name, .. }
+            | EnvMapping::Postgres { binding_name, .. }
+            | EnvMapping::MariaDb { binding_name, .. }
+            | EnvMapping::Mysql { binding_name, .. }
+            | EnvMapping::Rabbitmq { binding_name, .. }
+            | EnvMapping::Redis { binding_name, .. }
+            | EnvMapping::Mongo { binding_name, .. }
+            | EnvMapping::Nats { binding_name, .. }
+            | EnvMapping::Neo4j { binding_name, .. }
+            | EnvMapping::DuckDb { binding_name, .. }
+            | EnvMapping::Elasticsearch { binding_name, .. }
+            | EnvMapping::OpenSearch { binding_name, .. }
+            | EnvMapping::Qdrant { binding_name, .. }
+            | EnvMapping::Weaviate { binding_name, .. }
+            | EnvMapping::InfluxDb { binding_name, .. }
+            | EnvMapping::Timescaledb { binding_name, .. } => {
+                *binding_name = resolved;
+            }
+            #[cfg(feature = "redis-sentinel")]
+            EnvMapping::RedisSentinel { binding_name, .. } => {
+                *binding_name = resolved;
+            }
+            EnvMapping::MockService { .. }
+            | EnvMapping::Service { .. }
+            | EnvMapping::ServiceNamedPort { .. } => {}
+        }
+        self
     }
 
     /// Map the mock service named `mock_service_name` to `environment_variable_name`.
@@ -323,38 +462,86 @@ mod tests {
         // Given kafka("CUSTOM_KAFKA")
         let mapping = EnvMapping::kafka("CUSTOM_KAFKA");
         // Then the enum holds the expected variant
-        assert_eq!(mapping, EnvMapping::Kafka("CUSTOM_KAFKA".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Kafka {
+                env_var: "CUSTOM_KAFKA".to_string(),
+                binding_name: None,
+            }
+        );
+    }
+
+    #[test]
+    fn env_mapping_mariadb_binding_sets_name() {
+        let mapping = EnvMapping::mariadb("ORDERS_DB_URL").binding("orders");
+        assert_eq!(
+            mapping,
+            EnvMapping::MariaDb {
+                env_var: "ORDERS_DB_URL".to_string(),
+                binding_name: Some("orders".to_string()),
+            }
+        );
     }
 
     #[test]
     fn env_mapping_postgres() {
         let mapping = EnvMapping::postgres("PG_URL");
-        assert_eq!(mapping, EnvMapping::Postgres("PG_URL".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Postgres {
+                env_var: "PG_URL".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_mariadb() {
         // Given mariadb rename factory
         let mapping = EnvMapping::mariadb("MARIADB_JDBC");
-        assert_eq!(mapping, EnvMapping::MariaDb("MARIADB_JDBC".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::MariaDb {
+                env_var: "MARIADB_JDBC".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_mysql() {
         let mapping = EnvMapping::mysql("MYSQL_DSN");
-        assert_eq!(mapping, EnvMapping::Mysql("MYSQL_DSN".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Mysql {
+                env_var: "MYSQL_DSN".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_rabbitmq() {
         let mapping = EnvMapping::rabbitmq("AMQP_URI");
-        assert_eq!(mapping, EnvMapping::Rabbitmq("AMQP_URI".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Rabbitmq {
+                env_var: "AMQP_URI".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_redis() {
         let mapping = EnvMapping::redis("CACHE_URL");
-        assert_eq!(mapping, EnvMapping::Redis("CACHE_URL".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Redis {
+                env_var: "CACHE_URL".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[cfg(feature = "redis-sentinel")]
@@ -366,6 +553,7 @@ mod tests {
             EnvMapping::RedisSentinel {
                 sentinel_hosts_var: "S_HOSTS".to_string(),
                 master_name_var: "S_MASTER".to_string(),
+                binding_name: None,
             }
         );
     }
@@ -373,43 +561,85 @@ mod tests {
     #[test]
     fn env_mapping_mongo() {
         let mapping = EnvMapping::mongo("MONGO_DSN");
-        assert_eq!(mapping, EnvMapping::Mongo("MONGO_DSN".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Mongo {
+                env_var: "MONGO_DSN".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_nats() {
         let mapping = EnvMapping::nats("MSG_BUS_URL");
-        assert_eq!(mapping, EnvMapping::Nats("MSG_BUS_URL".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Nats {
+                env_var: "MSG_BUS_URL".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_neo4j() {
         let mapping = EnvMapping::neo4j("GRAPH_URI");
-        assert_eq!(mapping, EnvMapping::Neo4j("GRAPH_URI".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Neo4j {
+                env_var: "GRAPH_URI".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_duckdb() {
         let mapping = EnvMapping::duckdb("ANALYTICS_DUCK");
-        assert_eq!(mapping, EnvMapping::DuckDb("ANALYTICS_DUCK".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::DuckDb {
+                env_var: "ANALYTICS_DUCK".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_elasticsearch() {
         let mapping = EnvMapping::elasticsearch("ES_URL");
-        assert_eq!(mapping, EnvMapping::Elasticsearch("ES_URL".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Elasticsearch {
+                env_var: "ES_URL".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_opensearch() {
         let mapping = EnvMapping::opensearch("OS_URL");
-        assert_eq!(mapping, EnvMapping::OpenSearch("OS_URL".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::OpenSearch {
+                env_var: "OS_URL".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_qdrant() {
         let mapping = EnvMapping::qdrant("VECTOR_DB_GRPC");
-        assert_eq!(mapping, EnvMapping::Qdrant("VECTOR_DB_GRPC".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Qdrant {
+                env_var: "VECTOR_DB_GRPC".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
@@ -417,20 +647,35 @@ mod tests {
         let mapping = EnvMapping::weaviate("VECTOR_SEARCH_URL");
         assert_eq!(
             mapping,
-            EnvMapping::Weaviate("VECTOR_SEARCH_URL".to_string())
+            EnvMapping::Weaviate {
+                env_var: "VECTOR_SEARCH_URL".to_string(),
+                binding_name: None,
+            }
         );
     }
 
     #[test]
     fn env_mapping_influxdb() {
         let mapping = EnvMapping::influxdb("TSDB_URL");
-        assert_eq!(mapping, EnvMapping::InfluxDb("TSDB_URL".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::InfluxDb {
+                env_var: "TSDB_URL".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]
     fn env_mapping_timescaledb() {
         let mapping = EnvMapping::timescaledb("TS_URL");
-        assert_eq!(mapping, EnvMapping::Timescaledb("TS_URL".to_string()));
+        assert_eq!(
+            mapping,
+            EnvMapping::Timescaledb {
+                env_var: "TS_URL".to_string(),
+                binding_name: None,
+            }
+        );
     }
 
     #[test]

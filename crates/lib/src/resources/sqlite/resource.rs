@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::SqliteUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, SqliteUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sqlite_named_memory_uri, Resource, ResourceHandle, SqliteBindings,
 };
@@ -24,7 +24,7 @@ pub struct SqliteResource {
     connection: Option<Arc<Mutex<Connection>>>,
     /// Retained for debugging; matches metadata `database_url`.
     database_url: String,
-    user_seed: Option<SqliteUserSeedFn>,
+    user_seed: UserSeedSlot<SqliteBindings>,
 }
 
 impl std::fmt::Debug for SqliteResource {
@@ -33,7 +33,14 @@ impl std::fmt::Debug for SqliteResource {
             .debug_struct("SqliteResource")
             .field("connection", &self.connection.as_ref().map(|_| "<open>"))
             .field("database_url", &self.database_url)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -44,8 +51,9 @@ impl SqliteResource {
         Self::default()
     }
 
+    /// Async seed closure receiving [`SqliteBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: SqliteUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn sqlite_bindings(&self) -> Result<SqliteBindings, InfrastructureError> {
@@ -132,7 +140,7 @@ impl Resource for SqliteResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.sqlite_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

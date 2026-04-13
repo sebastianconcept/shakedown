@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::PostgresUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, PostgresUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_sql_database_name, PostgresBindings, Resource, ResourceHandle,
 };
@@ -98,7 +98,7 @@ pub struct PostgresResource {
     sqlx_migrations_path: Option<PathBuf>,
     /// Single `.sql` file executed as a batch after migrations (static reference data).
     seed_sql_path: Option<PathBuf>,
-    user_seed: Option<PostgresUserSeedFn>,
+    user_seed: UserSeedSlot<PostgresBindings>,
 }
 
 impl std::fmt::Debug for PostgresResource {
@@ -117,7 +117,14 @@ impl std::fmt::Debug for PostgresResource {
         debug_struct.field("sqlx_migrations_path", &self.sqlx_migrations_path);
         debug_struct
             .field("seed_sql_path", &self.seed_sql_path)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -143,7 +150,7 @@ impl PostgresResource {
             #[cfg(all(feature = "postgres", feature = "sqlx"))]
             sqlx_migrations_path: None,
             seed_sql_path: None,
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -187,7 +194,7 @@ impl PostgresResource {
     /// Receives [`PostgresBindings`] for the scenario database. Use when data depends on isolation keys,
     /// async helpers, or dynamic values.
     pub fn set_seed(&mut self, seed: PostgresUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn postgres_bindings(&self) -> Result<PostgresBindings, InfrastructureError> {
@@ -393,7 +400,7 @@ impl Resource for PostgresResource {
             })?;
         }
 
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }
 
