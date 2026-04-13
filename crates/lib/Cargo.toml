@@ -150,6 +150,8 @@ grpc = [
 ]
 # TCP mock services (tokio listener + optional TLS); extends `mock-services`
 tcp-mock-services = ["mock-services", "dep:tokio-rustls"]
+# UDP mock services (datagram listener); extends `mock-services`
+udp-mock-services = ["mock-services"]
 # Infrastructure diagnostics (bollard); implied by Docker-backed resource features unless `no-diagnostics` is set
 diagnostics = ["dep:bollard"]
 # Disables Docker socket diagnostics at compile time (stub APIs; no bollard client)
@@ -489,6 +491,12 @@ required-features = ["grpc"]
 name = "mock_service_tcp"
 path = "tests/mock_service_tcp.rs"
 required-features = ["tcp-mock-services"]
+
+# UDP mock service (`udp-mock-services`)
+[[test]]
+name = "mock_service_udp"
+path = "tests/mock_service_udp.rs"
+required-features = ["udp-mock-services"]
 
 # Service container → host.docker.internal connectivity (Docker); ignored in test body
 [[test]]

@@ -1,4 +1,4 @@
-//! Service virtualization for integration tests — HTTP, gRPC, and (with **`tcp-mock-services`**) TCP mock services.
+//! Service virtualization for integration tests — HTTP, gRPC, and (with **`tcp-mock-services`** / **`udp-mock-services`**) TCP/UDP mock services.
 //!
 //! A service under test often calls external APIs (payment processors, inventory
 //! services, notification gateways) that are unavailable in a test environment. Replacing those
@@ -7,16 +7,17 @@
 //! network ports so your service's HTTP client hits the same code path it would in production.
 //!
 //! Create an [`HttpMockService`] (or [`GrpcMockService`] with the `grpc`
-//! feature, or [`TcpMockService`] / [`TcpMockCustom`] with **`tcp-mock-services`**), register scenario-specific routes or handlers, then inject its URL into the service
+//! feature, [`TcpMockService`] / [`TcpMockCustom`] with **`tcp-mock-services`**, or [`UdpMockService`] with **`udp-mock-services`**), register scenario-specific routes or handlers, then inject its URL into the service
 //! container via [`crate::service::EnvMapping`]. The harness starts and stops the mock server as
 //! part of the normal lifecycle. After the scenario, assert call counts and request bodies through
 //! the [`MockServiceHandle`].
 //!
-//! Implement [`HttpMockServiceTrait`] / [`GrpcMockServiceTrait`] / [`TcpMockServiceTrait`] for stateful or branching
+//! Implement [`HttpMockServiceTrait`] / [`GrpcMockServiceTrait`] / [`TcpMockServiceTrait`] / [`UdpMockServiceTrait`] for stateful or branching
 //! per-request logic.
 //!
 //! Enabled with the **`mock-services`** feature (default). Add **`grpc`** for gRPC
 //! support (`tonic` + `prost`). Add **`tcp-mock-services`** for TCP mocks (`TcpCodec` + optional TLS).
+//! Add **`udp-mock-services`** for UDP datagram mocks.
 //!
 //! # Book reference
 //!
@@ -33,6 +34,8 @@ pub(crate) mod http;
 pub mod tcp;
 #[cfg(feature = "mock-services")]
 pub(crate) mod types;
+#[cfg(all(feature = "mock-services", feature = "udp-mock-services"))]
+pub mod udp;
 
 #[cfg(feature = "mock-services")]
 pub use handle::{MockServiceHandle, RecordedCall, RecordedExchange};
@@ -59,3 +62,5 @@ pub use tcp::{
 };
 #[cfg(feature = "mock-services")]
 pub use types::{MockServiceContext, MockServiceError, MockServiceResources};
+#[cfg(all(feature = "mock-services", feature = "udp-mock-services"))]
+pub use udp::{UdpMockService, UdpMockServiceRegistration, UdpMockServiceTrait};
