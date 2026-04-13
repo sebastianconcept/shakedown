@@ -37,6 +37,7 @@ async fn weaviate_provisions_and_sets_bindings() {
                     "expected scenario class prefix"
                 );
                 ctx.weaviate()
+                    .expect("weaviate helpers")
                     .create_class(json!({
                         "class": "VerticalThing",
                         "vectorizer": "none",
@@ -48,10 +49,12 @@ async fn weaviate_provisions_and_sets_bindings() {
                     .expect("create_class");
                 let object_id = ctx
                     .weaviate()
+                    .expect("weaviate helpers")
                     .create_object("VerticalThing", json!({ "title": "proof" }))
                     .await
                     .expect("create_object");
                 ctx.weaviate()
+                    .expect("weaviate helpers")
                     .assert_object_exists(object_id.as_str())
                     .await
                     .expect("assert_object_exists");

@@ -30,10 +30,12 @@ async fn valkey_provisions_and_sets_bindings() {
                 assert_eq!(bindings.host, "127.0.0.1");
                 assert!(bindings.port > 0);
                 ctx.redis()
+                    .expect("redis helpers")
                     .set("valkey_k", "valkey_v")
                     .await
                     .expect("set via helpers");
                 ctx.redis()
+                    .expect("redis helpers")
                     .assert_key_equals("valkey_k", "valkey_v")
                     .await
                     .expect("assert value");

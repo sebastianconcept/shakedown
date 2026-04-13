@@ -40,10 +40,12 @@ async fn qdrant_provisions_and_sets_bindings() {
                     "expected scenario collection prefix"
                 );
                 ctx.qdrant()
+                    .expect("qdrant helpers")
                     .create_collection("vertical_col", 4, Distance::Cosine)
                     .await
                     .expect("create_collection");
                 ctx.qdrant()
+                    .expect("qdrant helpers")
                     .upsert_points(
                         "vertical_col",
                         vec![qdrant_client::qdrant::PointStruct::new(
@@ -55,6 +57,7 @@ async fn qdrant_provisions_and_sets_bindings() {
                     .await
                     .expect("upsert");
                 ctx.qdrant()
+                    .expect("qdrant helpers")
                     .assert_point_exists("vertical_col", 1)
                     .await
                     .expect("assert point");

@@ -35,6 +35,7 @@ async fn opensearch_provisions_and_sets_bindings() {
                     "expected scenario index prefix"
                 );
                 ctx.opensearch()
+                    .expect("opensearch helpers")
                     .index_document(
                         "vertical_idx",
                         "doc1",
@@ -43,6 +44,7 @@ async fn opensearch_provisions_and_sets_bindings() {
                     .await
                     .expect("index via helpers");
                 ctx.opensearch()
+                    .expect("opensearch helpers")
                     .assert_document_indexed("vertical_idx", "doc1")
                     .await
                     .expect("assert indexed");

@@ -33,7 +33,7 @@ async fn mongo_replica_set_load_step_down_meets_window_and_recovery_assertions()
         "mongo_rs_capstone_load_disruption",
         |ctx: &mut Context| {
             Box::pin(async move {
-                ctx.mongo()
+                ctx.mongo().expect("mongodb helpers")
                     .insert_document("us019_seed", json!({ "seed": true }))
                     .await
                     .expect("seed insert");

@@ -6,9 +6,10 @@
 use duckdb::types::Value;
 use duckdb::{Connection, Params};
 
-use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
+use crate::error::named_binding::not_provisioned_named_binding;
+use crate::error::{AssertionError, ScenarioError, ShakedownError};
 use crate::helper_prelude::map_backend_error;
-use crate::lifecycle::Context;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 use crate::resources::DuckDbBindings;
 
 fn open_connection(database_url: &str) -> Result<Connection, duckdb::Error> {
@@ -28,19 +29,32 @@ fn row_to_values(row: &duckdb::Row<'_>) -> duckdb::Result<Vec<Value>> {
 /// Facade for DuckDB helpers bound to [`Context`].
 pub struct DuckDbHelpers<'ctx> {
     context: &'ctx Context,
+    binding_name: String,
 }
 
 impl<'ctx> DuckDbHelpers<'ctx> {
-    pub(crate) fn new(context: &'ctx Context) -> Self {
-        Self { context }
+    /// Helpers scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
+    pub fn new(context: &'ctx Context) -> Result<Self, ShakedownError> {
+        Self::named(context, DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Helpers scoped to the binding registered under `name` in [`Context`].
+    pub fn named(context: &'ctx Context, name: &str) -> Result<Self, ShakedownError> {
+        if context.duckdb_bindings_named(name).is_none() {
+            return Err(not_provisioned_named_binding("duckdb bindings", name));
+        }
+        Ok(Self {
+            context,
+            binding_name: name.to_string(),
+        })
     }
 
     fn duckdb_bindings(&self) -> Result<&DuckDbBindings, ShakedownError> {
-        self.context.duckdb_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "duckdb bindings".to_string(),
-            ))
-        })
+        self.context
+            .duckdb_bindings_named(self.binding_name.as_str())
+            .ok_or_else(|| {
+                not_provisioned_named_binding("duckdb bindings", self.binding_name.as_str())
+            })
     }
 
     /// Run an `INSERT`, `UPDATE`, `DELETE`, or DDL statement. Returns the number of rows affected.

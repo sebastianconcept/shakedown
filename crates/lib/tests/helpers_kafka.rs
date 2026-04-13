@@ -53,6 +53,7 @@ async fn kafka_bindings_future_producer_round_trip(ctx: &mut shakedown::Context)
 
     let consumed = ctx
         .kafka()
+        .expect("kafka helpers")
         .consume_one("fp_roundtrip", None)
         .await
         .expect("consume_one after future_producer send");
@@ -76,6 +77,7 @@ async fn kafka_helpers_produce_and_await_fresh_topic(ctx: &mut shakedown::Contex
     // When: we call produce_and_await on a brand-new topic.
     let consumed = ctx
         .kafka()
+        .expect("kafka helpers")
         .produce_and_await("fresh_topic_paa", "paa-key-1", payload, None)
         .await
         .expect("produce_and_await should not lose messages on a fresh topic");
@@ -94,6 +96,7 @@ async fn kafka_helpers_parallel_same_logical_topic_a(ctx: &mut shakedown::Contex
     let payload = b"parallel-thread-a".to_vec();
     let consumed = ctx
         .kafka()
+        .expect("kafka helpers")
         .produce_and_await("shared_logical_topic", "k", payload.clone(), None)
         .await
         .expect("produce_and_await should isolate by scenario namespace");
@@ -106,6 +109,7 @@ async fn kafka_helpers_parallel_same_logical_topic_b(ctx: &mut shakedown::Contex
     let payload = b"parallel-thread-b".to_vec();
     let consumed = ctx
         .kafka()
+        .expect("kafka helpers")
         .produce_and_await("shared_logical_topic", "k", payload.clone(), None)
         .await
         .expect("produce_and_await should isolate by scenario namespace");
@@ -126,6 +130,7 @@ async fn kafka_helpers_produce_json_consume_one_and_consume_until_with_predicate
 
     // When: we publish a single JSON order to the logical topic `orders`.
     ctx.kafka()
+        .expect("kafka helpers")
         .produce_json("orders", "order-1", &order)
         .await
         .expect("produce_json should succeed with provisioned Kafka bindings");
@@ -133,6 +138,7 @@ async fn kafka_helpers_produce_json_consume_one_and_consume_until_with_predicate
     // Then: `consume_one` returns that message; key and payload round-trip through JSON.
     let consumed = ctx
         .kafka()
+        .expect("kafka helpers")
         .consume_one("orders", None)
         .await
         .expect("consume_one should see the produced record");
@@ -145,6 +151,7 @@ async fn kafka_helpers_produce_json_consume_one_and_consume_until_with_predicate
 
     // Given: a second logical topic with two messages where only one matches our assertion.
     ctx.kafka()
+        .expect("kafka helpers")
         .produce_json(
             "orders_filtered",
             "noise",
@@ -156,6 +163,7 @@ async fn kafka_helpers_produce_json_consume_one_and_consume_until_with_predicate
         .await
         .expect("produce_json noise");
     ctx.kafka()
+        .expect("kafka helpers")
         .produce_json(
             "orders_filtered",
             "order-target",
@@ -171,6 +179,7 @@ async fn kafka_helpers_produce_json_consume_one_and_consume_until_with_predicate
     // Then: `consume_until` yields the matching message only.
     let matched = ctx
         .kafka()
+        .expect("kafka helpers")
         .consume_until(
             "orders_filtered",
             |message| {

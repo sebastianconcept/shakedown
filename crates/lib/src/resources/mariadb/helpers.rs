@@ -3,8 +3,9 @@
 use mysql_async::Params;
 use mysql_async::Row;
 
-use crate::error::{InfrastructureError, ShakedownError};
-use crate::lifecycle::Context;
+use crate::error::named_binding::not_provisioned_named_binding;
+use crate::error::ShakedownError;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 use crate::resources::mysql_family;
 use crate::resources::MariaDBBindings;
 use crate::resources::MigrationRunner;
@@ -12,19 +13,32 @@ use crate::resources::MigrationRunner;
 /// Facade for MariaDB helpers bound to [`Context`].
 pub struct MariaDbHelpers<'ctx> {
     context: &'ctx Context,
+    binding_name: String,
 }
 
 impl<'ctx> MariaDbHelpers<'ctx> {
-    pub(crate) fn new(context: &'ctx Context) -> Self {
-        Self { context }
+    /// Helpers scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
+    pub fn new(context: &'ctx Context) -> Result<Self, ShakedownError> {
+        Self::named(context, DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Helpers scoped to the binding registered under `name` in [`Context`].
+    pub fn named(context: &'ctx Context, name: &str) -> Result<Self, ShakedownError> {
+        if context.mariadb_bindings_named(name).is_none() {
+            return Err(not_provisioned_named_binding("mariadb bindings", name));
+        }
+        Ok(Self {
+            context,
+            binding_name: name.to_string(),
+        })
     }
 
     fn mariadb_bindings(&self) -> Result<&MariaDBBindings, ShakedownError> {
-        self.context.mariadb_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "mariadb bindings".to_string(),
-            ))
-        })
+        self.context
+            .mariadb_bindings_named(self.binding_name.as_str())
+            .ok_or_else(|| {
+                not_provisioned_named_binding("mariadb bindings", self.binding_name.as_str())
+            })
     }
 
     /// Run an `INSERT`, `UPDATE`, `DELETE`, or DDL statement. Returns the number of rows affected

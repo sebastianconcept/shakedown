@@ -35,7 +35,7 @@ async fn influxdb_provisions_and_sets_bindings() {
                 assert!(!bindings.bucket.is_empty());
                 assert!(!bindings.token.is_empty());
 
-                ctx.influxdb()
+                ctx.influxdb().expect("influxdb helpers")
                     .write_point(
                         "vertical_mem",
                         &[("host", "proof-host")],
@@ -45,7 +45,7 @@ async fn influxdb_provisions_and_sets_bindings() {
                     .await
                     .expect("write_point");
 
-                ctx.influxdb()
+                ctx.influxdb().expect("influxdb helpers")
                     .assert_point_exists("vertical_mem", &[("host", "proof-host")])
                     .await
                     .expect("assert_point_exists");
@@ -54,7 +54,7 @@ async fn influxdb_provisions_and_sets_bindings() {
                     "from(bucket: \"{}\") |> range(start: -1h) |> filter(fn: (r) => r._measurement == \"vertical_mem\") |> limit(n:1)",
                     bindings.bucket
                 );
-                let csv = ctx.influxdb().query(flux.as_str()).await.expect("query");
+                let csv = ctx.influxdb().expect("influxdb helpers").query(flux.as_str()).await.expect("query");
                 assert!(
                     csv.contains("vertical_mem"),
                     "expected measurement in Flux CSV: {csv}"

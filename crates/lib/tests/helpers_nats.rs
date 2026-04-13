@@ -27,6 +27,7 @@ async fn nats_helpers_publish_and_await_fresh_subject(ctx: &mut shakedown::Conte
     // When: we call publish_and_await on a brand-new subject.
     let consumed = ctx
         .nats()
+        .expect("nats helpers")
         .publish_and_await("fresh_subject_paa", payload, Some(Duration::from_secs(10)))
         .await
         .expect("publish_and_await should not lose messages on a fresh subject");
@@ -41,6 +42,7 @@ async fn nats_helpers_parallel_same_logical_subject_a(ctx: &mut shakedown::Conte
     let payload: &[u8] = b"parallel-nats-a";
     let consumed = ctx
         .nats()
+        .expect("nats helpers")
         .publish_and_await("shared_logical_subj", payload, None)
         .await
         .expect("publish_and_await should isolate by scenario namespace");
@@ -53,6 +55,7 @@ async fn nats_helpers_parallel_same_logical_subject_b(ctx: &mut shakedown::Conte
     let payload: &[u8] = b"parallel-nats-b";
     let consumed = ctx
         .nats()
+        .expect("nats helpers")
         .publish_and_await("shared_logical_subj", payload, None)
         .await
         .expect("publish_and_await should isolate by scenario namespace");
@@ -81,6 +84,7 @@ async fn nats_helpers_publish_then_subscribe(ctx: &mut shakedown::Context) {
 
     let messages = ctx
         .nats()
+        .expect("nats helpers")
         .subscribe_until(
             "helpers_evt",
             |message| message.payload.as_deref() == Some(payload),

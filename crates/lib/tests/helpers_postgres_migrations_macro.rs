@@ -9,6 +9,7 @@
 #[ignore = "requires Docker; run: cargo test -p shakedown --features postgres,sqlx --test helpers_postgres_migrations_macro -- --ignored"]
 async fn postgres_macro_migrations_attribute(ctx: &mut shakedown::Context) {
     ctx.postgres()
+        .expect("postgres helpers")
         .assert_row_exists("SELECT 1 FROM sqlx_migration_proof LIMIT 1", &[])
         .await
         .expect("migration created sqlx_migration_proof");

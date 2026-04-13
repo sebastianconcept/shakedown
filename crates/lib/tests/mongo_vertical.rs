@@ -40,6 +40,7 @@ async fn mongo_provisions_and_sets_bindings() {
                     "expected authSource in URI"
                 );
                 ctx.mongo()
+                    .expect("mongodb helpers")
                     .insert_document(
                         "vertical_coll",
                         serde_json::json!({ "vertical_field": "vertical_value" }),
@@ -47,6 +48,7 @@ async fn mongo_provisions_and_sets_bindings() {
                     .await
                     .expect("insert via helpers");
                 ctx.mongo()
+                    .expect("mongodb helpers")
                     .assert_document_exists(
                         "vertical_coll",
                         doc! { "vertical_field": "vertical_value" },

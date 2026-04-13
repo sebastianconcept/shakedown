@@ -13,10 +13,12 @@ async fn duckdb_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
 
     // When: we create a table and insert a row using only `DuckDbHelpers` (async API over spawn_blocking).
     ctx.duckdb()
+        .expect("duckdb helpers")
         .execute("DROP TABLE IF EXISTS helper_items", ())
         .await
         .expect("execute DROP TABLE via helpers");
     ctx.duckdb()
+        .expect("duckdb helpers")
         .execute(
             "CREATE TABLE helper_items (value_text VARCHAR NOT NULL)",
             (),
@@ -25,6 +27,7 @@ async fn duckdb_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
         .expect("execute CREATE TABLE via helpers");
     let inserted_value = "hello-duckdb";
     ctx.duckdb()
+        .expect("duckdb helpers")
         .execute(
             "INSERT INTO helper_items (value_text) VALUES (?)",
             (inserted_value,),
@@ -34,6 +37,7 @@ async fn duckdb_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
 
     // Then: the row exists and the table has exactly one row.
     ctx.duckdb()
+        .expect("duckdb helpers")
         .assert_row_exists(
             "SELECT 1 FROM helper_items WHERE value_text = ?",
             (inserted_value,),
@@ -41,6 +45,7 @@ async fn duckdb_helpers_execute_create_insert_then_assert(ctx: &mut shakedown::C
         .await
         .expect("assert_row_exists");
     ctx.duckdb()
+        .expect("duckdb helpers")
         .assert_row_count("SELECT * FROM helper_items", (), 1)
         .await
         .expect("assert_row_count");

@@ -6,27 +6,41 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use futures_util::stream::StreamExt;
 
-use crate::error::{InfrastructureError, ShakedownError};
+use crate::error::named_binding::not_provisioned_named_binding;
+use crate::error::ShakedownError;
 use crate::helper_prelude::{map_backend_error, ConsumedMessage, DEFAULT_HELPER_CONSUME_TIMEOUT};
-use crate::lifecycle::Context;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 use crate::resources::NatsBindings;
 
 /// Facade for NATS helpers bound to [`Context`].
 pub struct NatsHelpers<'ctx> {
     context: &'ctx Context,
+    binding_name: String,
 }
 
 impl<'ctx> NatsHelpers<'ctx> {
-    pub(crate) fn new(context: &'ctx Context) -> Self {
-        Self { context }
+    /// Helpers scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
+    pub fn new(context: &'ctx Context) -> Result<Self, ShakedownError> {
+        Self::named(context, DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Helpers scoped to the binding registered under `name` in [`Context`].
+    pub fn named(context: &'ctx Context, name: &str) -> Result<Self, ShakedownError> {
+        if context.nats_bindings_named(name).is_none() {
+            return Err(not_provisioned_named_binding("nats bindings", name));
+        }
+        Ok(Self {
+            context,
+            binding_name: name.to_string(),
+        })
     }
 
     fn nats_bindings(&self) -> Result<&NatsBindings, ShakedownError> {
-        self.context.nats_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "nats bindings".to_string(),
-            ))
-        })
+        self.context
+            .nats_bindings_named(self.binding_name.as_str())
+            .ok_or_else(|| {
+                not_provisioned_named_binding("nats bindings", self.binding_name.as_str())
+            })
     }
 
     /// Publish a payload to a logical subject (auto-prefixed with the scenario namespace).

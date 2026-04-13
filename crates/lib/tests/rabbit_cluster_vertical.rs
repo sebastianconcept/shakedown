@@ -40,6 +40,7 @@ async fn rabbit_cluster_three_nodes_helpers_and_quorum_queue(ctx: &mut shakedown
     );
 
     ctx.rabbit()
+        .expect("rabbitmq helpers")
         .declare_topology(
             "cluster_ex",
             shakedown::ExchangeKind::Direct,
@@ -53,12 +54,14 @@ async fn rabbit_cluster_three_nodes_helpers_and_quorum_queue(ctx: &mut shakedown
         proof: "cluster-vertical".to_string(),
     };
     ctx.rabbit()
+        .expect("rabbitmq helpers")
         .publish_json("cluster_ex", "rk", &payload)
         .await
         .expect("publish_json");
 
     let consumed = ctx
         .rabbit()
+        .expect("rabbitmq helpers")
         .consume_until(
             "cluster_q",
             |message| {
@@ -164,6 +167,7 @@ async fn rabbit_cluster_quorum_queue_leader_election_after_stop(ctx: &mut shaked
     );
 
     ctx.rabbit()
+        .expect("rabbitmq helpers")
         .declare_topology(
             "leader_election_ex",
             shakedown::ExchangeKind::Direct,
@@ -177,12 +181,14 @@ async fn rabbit_cluster_quorum_queue_leader_election_after_stop(ctx: &mut shaked
         proof: "after-leader-election".to_string(),
     };
     ctx.rabbit()
+        .expect("rabbitmq helpers")
         .publish_json("leader_election_ex", "leader_rk", &payload)
         .await
         .expect("publish_json after election");
 
     let consumed = ctx
         .rabbit()
+        .expect("rabbitmq helpers")
         .consume_until(
             "leader_election_q",
             |message| {

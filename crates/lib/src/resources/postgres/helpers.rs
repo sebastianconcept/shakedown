@@ -8,13 +8,12 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, NoTls, Row};
 
 #[cfg(feature = "postgres")]
-use crate::error::InfrastructureError;
+use crate::error::named_binding::not_provisioned_named_binding;
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]
 use crate::error::{AssertionError, ScenarioError, ShakedownError};
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]
 use crate::helper_prelude::map_backend_error;
-#[cfg(feature = "postgres")]
-use crate::lifecycle::Context;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 #[cfg(feature = "postgres")]
 use crate::resources::MigrationRunner;
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]
@@ -107,20 +106,33 @@ pub(crate) async fn postgres_query_all(
 #[cfg(feature = "postgres")]
 pub struct PostgresHelpers<'ctx> {
     context: &'ctx Context,
+    binding_name: String,
 }
 
 #[cfg(feature = "postgres")]
 impl<'ctx> PostgresHelpers<'ctx> {
-    pub(crate) fn new(context: &'ctx Context) -> Self {
-        Self { context }
+    /// Helpers scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
+    pub fn new(context: &'ctx Context) -> Result<Self, ShakedownError> {
+        Self::named(context, DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Helpers scoped to the binding registered under `name` in [`Context`].
+    pub fn named(context: &'ctx Context, name: &str) -> Result<Self, ShakedownError> {
+        if context.postgres_bindings_named(name).is_none() {
+            return Err(not_provisioned_named_binding("postgres bindings", name));
+        }
+        Ok(Self {
+            context,
+            binding_name: name.to_string(),
+        })
     }
 
     fn postgres_bindings(&self) -> Result<&PostgresBindings, ShakedownError> {
-        self.context.postgres_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "postgres bindings".to_string(),
-            ))
-        })
+        self.context
+            .postgres_bindings_named(self.binding_name.as_str())
+            .ok_or_else(|| {
+                not_provisioned_named_binding("postgres bindings", self.binding_name.as_str())
+            })
     }
 
     /// Run an `INSERT`, `UPDATE`, `DELETE`, or DDL statement. Returns the number of rows affected.

@@ -12,6 +12,7 @@ use serde_json::json;
 #[ignore = "requires Docker; run: cargo test -p shakedown --features neo4j --test helpers_neo4j -- --ignored"]
 async fn neo4j_helpers_create_then_assert(ctx: &mut shakedown::Context) {
     ctx.neo4j()
+        .expect("neo4j helpers")
         .execute_cypher(
             "CREATE (p:Person { name: $name, role: $role })",
             &[("name", json!("Ada")), ("role", json!("engineer"))],
@@ -19,13 +20,14 @@ async fn neo4j_helpers_create_then_assert(ctx: &mut shakedown::Context) {
         .await
         .expect("execute_cypher");
     ctx.neo4j()
+        .expect("neo4j helpers")
         .execute_cypher(
             "CREATE (p:Person { name: $name })",
             &[("name", json!("Bob"))],
         )
         .await
         .expect("second person");
-    ctx.neo4j()
+    ctx.neo4j().expect("neo4j helpers")
         .execute_cypher(
             "MATCH (a:Person { name: $a }), (b:Person { name: $b }) CREATE (a)-[r:KNOWS { since: $since }]->(b)",
             &[
@@ -38,6 +40,7 @@ async fn neo4j_helpers_create_then_assert(ctx: &mut shakedown::Context) {
         .expect("create relationship");
     let rows = ctx
         .neo4j()
+        .expect("neo4j helpers")
         .query_cypher(
             "MATCH (p:Person { name: $name }) RETURN p.name AS name LIMIT 1",
             &[("name", json!("Ada"))],
@@ -48,10 +51,12 @@ async fn neo4j_helpers_create_then_assert(ctx: &mut shakedown::Context) {
     let name: String = rows[0].get("name").expect("name column");
     assert_eq!(name, "Ada");
     ctx.neo4j()
+        .expect("neo4j helpers")
         .assert_node_exists("Person", json!({ "name": "Ada" }))
         .await
         .expect("assert_node_exists");
     ctx.neo4j()
+        .expect("neo4j helpers")
         .assert_relationship_exists("KNOWS", json!({ "since": 2024 }))
         .await
         .expect("assert_relationship_exists");

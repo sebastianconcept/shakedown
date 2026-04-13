@@ -12,6 +12,7 @@ use serde_json::json;
 #[ignore = "requires Docker; run: cargo test -p shakedown --features weaviate --test helpers_weaviate -- --ignored"]
 async fn weaviate_helpers_class_object(ctx: &mut shakedown::Context) {
     ctx.weaviate()
+        .expect("weaviate helpers")
         .create_class(json!({
             "class": "HArticle",
             "vectorizer": "none",
@@ -21,14 +22,17 @@ async fn weaviate_helpers_class_object(ctx: &mut shakedown::Context) {
         .expect("create_class");
     let object_id = ctx
         .weaviate()
+        .expect("weaviate helpers")
         .create_object("HArticle", json!({ "title": "hello-weaviate" }))
         .await
         .expect("create_object");
     ctx.weaviate()
+        .expect("weaviate helpers")
         .assert_object_exists(object_id.as_str())
         .await
         .expect("assert_object_exists");
     ctx.weaviate()
+        .expect("weaviate helpers")
         .assert_class_count("HArticle", 1)
         .await
         .expect("assert_class_count");

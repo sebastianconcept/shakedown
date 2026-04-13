@@ -2,9 +2,10 @@
 
 use std::error::Error;
 
+use crate::error::named_binding::not_provisioned_named_binding;
 use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
 use crate::helper_prelude::map_backend_error;
-use crate::lifecycle::Context;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 use crate::resources::InfluxDbBindings;
 
 /// HTTP error from an InfluxDB REST API call.
@@ -93,19 +94,32 @@ fn csv_response_has_data_row(csv_body: &str) -> bool {
 /// Facade for InfluxDB 2.x HTTP helpers bound to [`Context`] (`influxdb` feature).
 pub struct InfluxDbHelpers<'ctx> {
     context: &'ctx Context,
+    binding_name: String,
 }
 
 impl<'ctx> InfluxDbHelpers<'ctx> {
-    pub(crate) fn new(context: &'ctx Context) -> Self {
-        Self { context }
+    /// Helpers scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
+    pub fn new(context: &'ctx Context) -> Result<Self, ShakedownError> {
+        Self::named(context, DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Helpers scoped to the binding registered under `name` in [`Context`].
+    pub fn named(context: &'ctx Context, name: &str) -> Result<Self, ShakedownError> {
+        if context.influxdb_bindings_named(name).is_none() {
+            return Err(not_provisioned_named_binding("influxdb bindings", name));
+        }
+        Ok(Self {
+            context,
+            binding_name: name.to_string(),
+        })
     }
 
     fn influxdb_bindings(&self) -> Result<&InfluxDbBindings, ShakedownError> {
-        self.context.influxdb_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "influxdb bindings".to_string(),
-            ))
-        })
+        self.context
+            .influxdb_bindings_named(self.binding_name.as_str())
+            .ok_or_else(|| {
+                not_provisioned_named_binding("influxdb bindings", self.binding_name.as_str())
+            })
     }
 
     /// `POST /api/v2/write` with line protocol into the scenario bucket (`precision=ns`).

@@ -1862,106 +1862,211 @@ impl Context {
         Outbox::new(self)
     }
 
-    /// Kafka produce/consume helpers (`kafka` feature).
+    /// Kafka produce/consume helpers (`kafka` feature), scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
     #[cfg(feature = "kafka")]
-    pub fn kafka(&self) -> KafkaHelpers<'_> {
+    pub fn kafka(&self) -> Result<KafkaHelpers<'_>, ShakedownError> {
         KafkaHelpers::new(self)
+    }
+
+    /// Kafka helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "kafka")]
+    pub fn kafka_named(&self, name: &str) -> Result<KafkaHelpers<'_>, ShakedownError> {
+        KafkaHelpers::named(self, name)
     }
 
     /// RabbitMQ publish/topology helpers (`rabbitmq` feature).
     #[cfg(feature = "rabbitmq")]
-    pub fn rabbit(&self) -> RabbitHelpers<'_> {
+    pub fn rabbit(&self) -> Result<RabbitHelpers<'_>, ShakedownError> {
         RabbitHelpers::new(self)
+    }
+
+    /// RabbitMQ helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "rabbitmq")]
+    pub fn rabbit_named(&self, name: &str) -> Result<RabbitHelpers<'_>, ShakedownError> {
+        RabbitHelpers::named(self, name)
     }
 
     /// PostgreSQL execute/query helpers (`postgres` feature).
     #[cfg(feature = "postgres")]
-    pub fn postgres(&self) -> PostgresHelpers<'_> {
+    pub fn postgres(&self) -> Result<PostgresHelpers<'_>, ShakedownError> {
         PostgresHelpers::new(self)
+    }
+
+    /// PostgreSQL helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "postgres")]
+    pub fn postgres_named(&self, name: &str) -> Result<PostgresHelpers<'_>, ShakedownError> {
+        PostgresHelpers::named(self, name)
     }
 
     /// MariaDB execute/query helpers (`mariadb` feature).
     #[cfg(feature = "mariadb")]
-    pub fn mariadb(&self) -> MariaDbHelpers<'_> {
+    pub fn mariadb(&self) -> Result<MariaDbHelpers<'_>, ShakedownError> {
         MariaDbHelpers::new(self)
+    }
+
+    /// MariaDB helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "mariadb")]
+    pub fn mariadb_named(&self, name: &str) -> Result<MariaDbHelpers<'_>, ShakedownError> {
+        MariaDbHelpers::named(self, name)
     }
 
     /// Oracle MySQL execute/query helpers (`mysql` feature).
     #[cfg(feature = "mysql")]
-    pub fn mysql(&self) -> MysqlHelpers<'_> {
+    pub fn mysql(&self) -> Result<MysqlHelpers<'_>, ShakedownError> {
         MysqlHelpers::new(self)
+    }
+
+    /// Oracle MySQL helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "mysql")]
+    pub fn mysql_named(&self, name: &str) -> Result<MysqlHelpers<'_>, ShakedownError> {
+        MysqlHelpers::named(self, name)
     }
 
     /// SQLite execute/query helpers (`sqlite` feature).
     #[cfg(feature = "sqlite")]
-    pub fn sqlite(&self) -> SqliteHelpers<'_> {
+    pub fn sqlite(&self) -> Result<SqliteHelpers<'_>, ShakedownError> {
         SqliteHelpers::new(self)
+    }
+
+    /// SQLite helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "sqlite")]
+    pub fn sqlite_named(&self, name: &str) -> Result<SqliteHelpers<'_>, ShakedownError> {
+        SqliteHelpers::named(self, name)
     }
 
     /// DuckDB execute/query helpers (`duckdb` feature).
     #[cfg(feature = "duckdb")]
-    pub fn duckdb(&self) -> DuckDbHelpers<'_> {
+    pub fn duckdb(&self) -> Result<DuckDbHelpers<'_>, ShakedownError> {
         DuckDbHelpers::new(self)
+    }
+
+    /// DuckDB helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "duckdb")]
+    pub fn duckdb_named(&self, name: &str) -> Result<DuckDbHelpers<'_>, ShakedownError> {
+        DuckDbHelpers::named(self, name)
     }
 
     /// Redis / Valkey key/value helpers (`redis` and/or `valkey` features).
     #[cfg(any(feature = "redis", feature = "valkey"))]
-    pub fn redis(&self) -> RedisHelpers<'_> {
+    pub fn redis(&self) -> Result<RedisHelpers<'_>, ShakedownError> {
         RedisHelpers::new(self)
+    }
+
+    /// Redis / Valkey helpers scoped to the binding registered under `name`.
+    #[cfg(any(feature = "redis", feature = "valkey"))]
+    pub fn redis_named(&self, name: &str) -> Result<RedisHelpers<'_>, ShakedownError> {
+        RedisHelpers::named(self, name)
     }
 
     /// MongoDB document helpers (`mongodb` feature).
     #[cfg(feature = "mongodb")]
-    pub fn mongo(&self) -> MongoHelpers<'_> {
+    pub fn mongo(&self) -> Result<MongoHelpers<'_>, ShakedownError> {
         MongoHelpers::new(self)
+    }
+
+    /// MongoDB helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "mongodb")]
+    pub fn mongo_named(&self, name: &str) -> Result<MongoHelpers<'_>, ShakedownError> {
+        MongoHelpers::named(self, name)
     }
 
     /// NATS client helpers — publish/subscribe on scenario-namespaced subjects (`nats` feature). The suite broker runs with JetStream for [`crate::outbox::Outbox::assert_nats_published`].
     #[cfg(feature = "nats")]
-    pub fn nats(&self) -> NatsHelpers<'_> {
+    pub fn nats(&self) -> Result<NatsHelpers<'_>, ShakedownError> {
         NatsHelpers::new(self)
+    }
+
+    /// NATS helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "nats")]
+    pub fn nats_named(&self, name: &str) -> Result<NatsHelpers<'_>, ShakedownError> {
+        NatsHelpers::named(self, name)
     }
 
     /// Neo4j Cypher helpers (`neo4j` feature).
     #[cfg(feature = "neo4j")]
-    pub fn neo4j(&self) -> Neo4jHelpers<'_> {
+    pub fn neo4j(&self) -> Result<Neo4jHelpers<'_>, ShakedownError> {
         Neo4jHelpers::new(self)
+    }
+
+    /// Neo4j helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "neo4j")]
+    pub fn neo4j_named(&self, name: &str) -> Result<Neo4jHelpers<'_>, ShakedownError> {
+        Neo4jHelpers::named(self, name)
     }
 
     /// Elasticsearch index/search helpers (`elasticsearch` feature).
     #[cfg(feature = "elasticsearch")]
-    pub fn elasticsearch(&self) -> ElasticsearchHelpers<'_> {
+    pub fn elasticsearch(&self) -> Result<ElasticsearchHelpers<'_>, ShakedownError> {
         ElasticsearchHelpers::new(self)
+    }
+
+    /// Elasticsearch helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "elasticsearch")]
+    pub fn elasticsearch_named(
+        &self,
+        name: &str,
+    ) -> Result<ElasticsearchHelpers<'_>, ShakedownError> {
+        ElasticsearchHelpers::named(self, name)
     }
 
     /// OpenSearch index/search helpers (`opensearch` feature).
     #[cfg(feature = "opensearch")]
-    pub fn opensearch(&self) -> OpenSearchHelpers<'_> {
+    pub fn opensearch(&self) -> Result<OpenSearchHelpers<'_>, ShakedownError> {
         OpenSearchHelpers::new(self)
+    }
+
+    /// OpenSearch helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "opensearch")]
+    pub fn opensearch_named(&self, name: &str) -> Result<OpenSearchHelpers<'_>, ShakedownError> {
+        OpenSearchHelpers::named(self, name)
     }
 
     /// Qdrant vector helpers (`qdrant` feature).
     #[cfg(feature = "qdrant")]
-    pub fn qdrant(&self) -> QdrantHelpers<'_> {
+    pub fn qdrant(&self) -> Result<QdrantHelpers<'_>, ShakedownError> {
         QdrantHelpers::new(self)
+    }
+
+    /// Qdrant helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "qdrant")]
+    pub fn qdrant_named(&self, name: &str) -> Result<QdrantHelpers<'_>, ShakedownError> {
+        QdrantHelpers::named(self, name)
     }
 
     /// Weaviate schema/object helpers (`weaviate` feature).
     #[cfg(feature = "weaviate")]
-    pub fn weaviate(&self) -> WeaviateHelpers<'_> {
+    pub fn weaviate(&self) -> Result<WeaviateHelpers<'_>, ShakedownError> {
         WeaviateHelpers::new(self)
+    }
+
+    /// Weaviate helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "weaviate")]
+    pub fn weaviate_named(&self, name: &str) -> Result<WeaviateHelpers<'_>, ShakedownError> {
+        WeaviateHelpers::named(self, name)
     }
 
     /// InfluxDB 2.x write/query helpers (`influxdb` feature).
     #[cfg(feature = "influxdb")]
-    pub fn influxdb(&self) -> InfluxDbHelpers<'_> {
+    pub fn influxdb(&self) -> Result<InfluxDbHelpers<'_>, ShakedownError> {
         InfluxDbHelpers::new(self)
+    }
+
+    /// InfluxDB helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "influxdb")]
+    pub fn influxdb_named(&self, name: &str) -> Result<InfluxDbHelpers<'_>, ShakedownError> {
+        InfluxDbHelpers::named(self, name)
     }
 
     /// TimescaleDB SQL + hypertable helpers (`timescaledb` feature).
     #[cfg(feature = "timescaledb")]
-    pub fn timescaledb(&self) -> TimescaledbHelpers<'_> {
+    pub fn timescaledb(&self) -> Result<TimescaledbHelpers<'_>, ShakedownError> {
         TimescaledbHelpers::new(self)
+    }
+
+    /// TimescaleDB helpers scoped to the binding registered under `name`.
+    #[cfg(feature = "timescaledb")]
+    pub fn timescaledb_named(&self, name: &str) -> Result<TimescaledbHelpers<'_>, ShakedownError> {
+        TimescaledbHelpers::named(self, name)
     }
 
     /// Check if the context has any registered resources.

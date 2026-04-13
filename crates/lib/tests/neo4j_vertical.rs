@@ -39,6 +39,7 @@ async fn neo4j_provisions_and_sets_bindings() {
                 assert!(bindings.bolt_url.contains("bolt://"));
                 assert!(bindings.bolt_url.contains(&bindings.host));
                 ctx.neo4j()
+                    .expect("neo4j helpers")
                     .execute_cypher(
                         "CREATE (n:VerticalProof { proof: $proof })",
                         &[("proof", json!("neo4j_vertical"))],
@@ -46,6 +47,7 @@ async fn neo4j_provisions_and_sets_bindings() {
                     .await
                     .expect("create node");
                 ctx.neo4j()
+                    .expect("neo4j helpers")
                     .assert_node_exists("VerticalProof", json!({ "proof": "neo4j_vertical" }))
                     .await
                     .expect("assert node");

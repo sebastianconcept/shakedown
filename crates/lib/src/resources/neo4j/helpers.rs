@@ -5,9 +5,10 @@ use neo4rs::{
     Graph, Row,
 };
 
+use crate::error::named_binding::not_provisioned_named_binding;
 use crate::error::{AssertionError, InfrastructureError, ScenarioError, ShakedownError};
 use crate::helper_prelude::map_backend_error;
-use crate::lifecycle::Context;
+use crate::lifecycle::{Context, DEFAULT_RESOURCE_BINDING_NAME};
 use crate::resources::Neo4jBindings;
 
 fn sanitize_cypher_token(token: &str) -> Result<String, ShakedownError> {
@@ -76,19 +77,32 @@ async fn graph_for_bindings(neo4j_bindings: &Neo4jBindings) -> Result<Graph, Sha
 /// Facade for Neo4j Cypher helpers bound to [`Context`] (`neo4j` feature).
 pub struct Neo4jHelpers<'ctx> {
     context: &'ctx Context,
+    binding_name: String,
 }
 
 impl<'ctx> Neo4jHelpers<'ctx> {
-    pub(crate) fn new(context: &'ctx Context) -> Self {
-        Self { context }
+    /// Helpers scoped to the [`DEFAULT_RESOURCE_BINDING_NAME`] binding.
+    pub fn new(context: &'ctx Context) -> Result<Self, ShakedownError> {
+        Self::named(context, DEFAULT_RESOURCE_BINDING_NAME)
+    }
+
+    /// Helpers scoped to the binding registered under `name` in [`Context`].
+    pub fn named(context: &'ctx Context, name: &str) -> Result<Self, ShakedownError> {
+        if context.neo4j_bindings_named(name).is_none() {
+            return Err(not_provisioned_named_binding("neo4j bindings", name));
+        }
+        Ok(Self {
+            context,
+            binding_name: name.to_string(),
+        })
     }
 
     fn neo4j_bindings(&self) -> Result<&Neo4jBindings, ShakedownError> {
-        self.context.neo4j_bindings().ok_or_else(|| {
-            ShakedownError::Infrastructure(InfrastructureError::NotProvisioned(
-                "neo4j bindings".to_string(),
-            ))
-        })
+        self.context
+            .neo4j_bindings_named(self.binding_name.as_str())
+            .ok_or_else(|| {
+                not_provisioned_named_binding("neo4j bindings", self.binding_name.as_str())
+            })
     }
 
     /// Run a write Cypher statement with named parameters (`$key` in Cypher matches `key` here).
