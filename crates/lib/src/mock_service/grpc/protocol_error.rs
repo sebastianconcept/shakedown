@@ -1,4 +1,4 @@
-//! Typed failures while decoding HTTP/2 unary gRPC frames in the mock service server (`grpc-mock-services`).
+//! Typed failures while decoding HTTP/2 unary gRPC frames in the mock service server (`grpc`).
 //!
 //! Each variant maps to a [`tonic::Code`] via [`GrpcMockServiceProtocolError::status_code`] and becomes
 //! the gRPC status message via [`std::fmt::Display`] (displaydoc).

@@ -1,4 +1,4 @@
-//! gRPC mock service types and implementations (`grpc-mock-services` feature).
+//! gRPC mock service types and implementations (`grpc` feature).
 //!
 //! ## When to use [`GrpcMockService`] vs [`GrpcMockServiceTrait`]
 //!
@@ -13,7 +13,7 @@
 //! table.
 
 mod protocol_error;
-#[cfg(feature = "grpc-mock-services")]
+#[cfg(feature = "grpc")]
 pub(crate) mod server;
 mod service;
 #[cfg(test)]

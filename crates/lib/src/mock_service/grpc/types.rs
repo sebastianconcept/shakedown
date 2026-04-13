@@ -1,4 +1,4 @@
-//! gRPC mock service request and response types (`grpc-mock-services` feature).
+//! gRPC mock service request and response types (`grpc` feature).
 
 use bytes::Bytes;
 use prost::Message;

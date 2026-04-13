@@ -533,7 +533,7 @@ mod mock_service_registration_tests {
     }
 }
 
-#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+#[cfg(all(feature = "mock-services", feature = "grpc"))]
 mod mock_service_grpc_registration_tests {
     use crate::error::{InternalError, ShakedownError};
     use crate::mock_service::{GrpcMockService, HttpMockService, StatusCode};

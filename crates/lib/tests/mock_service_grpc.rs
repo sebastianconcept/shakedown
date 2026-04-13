@@ -1,5 +1,5 @@
-#![cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
-//! gRPC mock service + [`run_scenario`] integration (`grpc-mock-services` feature).
+#![cfg(all(feature = "mock-services", feature = "grpc"))]
+//! gRPC mock service + [`run_scenario`] integration (`grpc` feature).
 //!
 //! Reference scenario: register a [`GrpcMockService`], issue a real unary gRPC call via **tonic** and
 //! **tonic-prost** using hand-written [`prost::Message`] types (no `.proto` / build script), assert

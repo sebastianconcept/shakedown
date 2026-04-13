@@ -247,7 +247,7 @@ pub use crate::mock_service::{
     MockServiceResources, RecordedCall, RecordedExchange, RouteMatch, StatusCode,
 };
 
-#[cfg(all(feature = "mock-services", feature = "grpc-mock-services"))]
+#[cfg(all(feature = "mock-services", feature = "grpc"))]
 pub use crate::mock_service::{
     GrpcMockService, GrpcMockServiceMethodPending, GrpcMockServiceRequest, GrpcMockServiceResponse,
     GrpcMockServiceTrait,
