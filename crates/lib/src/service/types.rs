@@ -3,8 +3,10 @@
 //! Pure configuration; applied when starting containers and building injection maps.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::health::HealthCheck;
+use super::pre_start::ServicePreStart;
 
 /// Container port exposure for a service-under-test (optional logical name for multi-port services).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,7 +18,7 @@ pub struct PortMapping {
 /// Validated description of a service container to run in a scenario (built via [`crate::service::ServiceUnderTest`]).
 ///
 /// Fields are crate-private; callers pass [`ServiceSpec`] to the harness — configuration is opaque at the crate boundary.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct ServiceSpec {
     pub(crate) name: String,
     pub(crate) image: String,
@@ -27,6 +29,26 @@ pub struct ServiceSpec {
     pub(crate) depends_on: Vec<String>,
     pub(crate) auto_inject: bool,
     pub(crate) pull_policy: PullPolicy,
+    /// Declared-order hooks: run after seed, before this service's container starts.
+    pub(crate) pre_start_callbacks: Arc<Vec<Box<dyn ServicePreStart>>>,
+}
+
+impl std::fmt::Debug for ServiceSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ServiceSpec")
+            .field("name", &self.name)
+            .field("image", &self.image)
+            .field("ports", &self.ports)
+            .field("env_vars", &self.env_vars)
+            .field("env_mappings", &self.env_mappings)
+            .field("health_check", &self.health_check)
+            .field("depends_on", &self.depends_on)
+            .field("auto_inject", &self.auto_inject)
+            .field("pull_policy", &self.pull_policy)
+            .field("pre_start_callback_count", &self.pre_start_callbacks.len())
+            .finish()
+    }
 }
 
 impl ServiceSpec {

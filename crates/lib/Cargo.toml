@@ -510,6 +510,12 @@ name = "services_lifecycle"
 path = "tests/services_lifecycle.rs"
 required-features = ["services"]
 
+# pre_start hooks before service container (Docker); ignored unless --ignored
+[[test]]
+name = "services_pre_start"
+path = "tests/services_pre_start.rs"
+required-features = ["services"]
+
 # Multi-service depends_on + inter-service env (Docker); ignored unless --ignored
 [[test]]
 name = "services_multi_dependency"
