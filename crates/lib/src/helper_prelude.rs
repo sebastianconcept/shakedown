@@ -8,6 +8,9 @@
 //! This module is `pub(crate)` and not part of the public API. If you are implementing a
 //! custom [`crate::resources::Resource`], use the public types re-exported at the crate root
 //! instead of importing from here directly.
+//!
+//! [`crate::assert_eventually`] is re-exported at the crate root and from [`crate::prelude`]
+//! (`use shakedown::prelude::*`).
 
 use std::time::Duration;
 

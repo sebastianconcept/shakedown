@@ -58,6 +58,21 @@ pub enum AssertionError {
         matching_call_count: usize,
         recorded_calls_diagnostic: String,
     },
+    /// polling assertion '{description}' timed out after {elapsed:?} (limit {timeout:?}), {attempts} attempts: {last_error}
+    ///
+    /// Cause: [`crate::assert_eventually`] did not observe success before the deadline (see DD-7 fixed-interval polling).
+    EventuallyTimeout {
+        /// Human-readable label for the condition (e.g. `"row exists"`).
+        description: String,
+        /// Configured wall-clock budget.
+        timeout: std::time::Duration,
+        /// Time from the first poll to the timeout decision.
+        elapsed: std::time::Duration,
+        /// Number of completed poll attempts (including the last failed one).
+        attempts: u32,
+        /// Display string of the last error returned by the check closure.
+        last_error: String,
+    },
     /// {detail}
     ///
     /// Cause: generic assertion message until a dedicated variant exists.
