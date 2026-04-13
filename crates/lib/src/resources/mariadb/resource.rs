@@ -2,7 +2,7 @@ use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::sql_seed::statements_from_sql_script;
 use crate::resources::user_seed::{take_user_seed, MariaDbUserSeedFn, UserSeedSlot};
 use crate::resources::{
-    map_seed_error, sanitize_sql_database_name, MariaDBBindings, Resource, ResourceHandle,
+    map_seed_error, scenario_sql_database_name, MariaDBBindings, Resource, ResourceHandle,
 };
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
@@ -79,6 +79,8 @@ pub(crate) fn scenario_connection_url(
 pub struct MariaDBResource {
     image: Mariadb,
     image_tag: Option<String>,
+    /// Macro `name = "..."` key; determines DB name suffix and [`Context`] map key.
+    logical_binding_key: Option<String>,
     holds_suite_ref: bool,
     host: Option<String>,
     port: Option<u16>,
@@ -97,6 +99,7 @@ impl std::fmt::Debug for MariaDBResource {
         debug_struct
             .field("image", &self.image)
             .field("image_tag", &self.image_tag)
+            .field("logical_binding_key", &self.logical_binding_key)
             .field("holds_suite_ref", &self.holds_suite_ref)
             .field("host", &self.host)
             .field("port", &self.port)
@@ -131,6 +134,7 @@ impl MariaDBResource {
         Self {
             image: Mariadb::default(),
             image_tag: Some(DEFAULT_MARIADB_IMAGE_TAG.to_string()),
+            logical_binding_key: None,
             holds_suite_ref: false,
             host: None,
             port: None,
@@ -142,6 +146,12 @@ impl MariaDBResource {
             seed_sql_path: None,
             user_seed: UserSeedSlot::new(None),
         }
+    }
+
+    /// Logical binding name from `#[shakedown::test(resources = [MariaDB(name = "...")])]`.
+    pub fn with_logical_binding_name(mut self, name: impl Into<String>) -> Self {
+        self.logical_binding_key = Some(name.into());
+        self
     }
 
     /// Override the image tag (e.g. pin `11` or `11.4` for production parity). Name stays `mariadb`.
@@ -225,7 +235,9 @@ impl Resource for MariaDBResource {
             return Err(InfrastructureError::AlreadyProvisioned("mariadb".into()));
         }
 
-        let database_name = sanitize_sql_database_name(scenario_id.as_str());
+        let database_name =
+            scenario_sql_database_name(scenario_id.as_str(), self.logical_binding_key.as_deref());
+        let binding_map_key = self.logical_binding_key.as_deref().unwrap_or("default");
         let want_key = image_fingerprint(&self.image, &self.image_tag);
 
         let mut guard = suite_mariadb_mutex().lock().await;
@@ -327,6 +339,7 @@ impl Resource for MariaDBResource {
                 "password": password,
                 "connection_url": connection_url,
                 "engine": "mariadb",
+                "binding_name": binding_map_key,
             })),
         }])
     }

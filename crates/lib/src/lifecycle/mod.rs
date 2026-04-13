@@ -2468,15 +2468,22 @@ fn apply_resource_handles_to_postgres_bindings(ctx: &mut Context, handles: &[Res
                 .get("replica_port")
                 .and_then(|value| value.as_u64())
                 .map(|port| port as u16);
-            ctx.set_postgres_bindings(PostgresBindings {
-                host: host.to_string(),
-                port,
-                database: database.to_string(),
-                username: username.to_string(),
-                password: password.to_string(),
-                connection_url: connection_url.to_string(),
-                replica_port,
-            });
+            let binding_key = meta
+                .get("binding_name")
+                .and_then(|value| value.as_str())
+                .unwrap_or(DEFAULT_RESOURCE_BINDING_NAME);
+            ctx.set_postgres_bindings_named(
+                binding_key,
+                PostgresBindings {
+                    host: host.to_string(),
+                    port,
+                    database: database.to_string(),
+                    username: username.to_string(),
+                    password: password.to_string(),
+                    connection_url: connection_url.to_string(),
+                    replica_port,
+                },
+            );
         }
     }
 }
@@ -2509,14 +2516,21 @@ fn apply_resource_handles_to_mariadb_bindings(ctx: &mut Context, handles: &[Reso
             Some(connection_url),
         ) = (host, port, database, username, password, connection_url)
         {
-            ctx.set_mariadb_bindings(MariaDBBindings {
-                host: host.to_string(),
-                port,
-                database: database.to_string(),
-                username: username.to_string(),
-                password: password.to_string(),
-                connection_url: connection_url.to_string(),
-            });
+            let binding_key = meta
+                .get("binding_name")
+                .and_then(|value| value.as_str())
+                .unwrap_or(DEFAULT_RESOURCE_BINDING_NAME);
+            ctx.set_mariadb_bindings_named(
+                binding_key,
+                MariaDBBindings {
+                    host: host.to_string(),
+                    port,
+                    database: database.to_string(),
+                    username: username.to_string(),
+                    password: password.to_string(),
+                    connection_url: connection_url.to_string(),
+                },
+            );
         }
     }
 }
@@ -2593,14 +2607,21 @@ fn apply_resource_handles_to_mysql_bindings(ctx: &mut Context, handles: &[Resour
             Some(connection_url),
         ) = (host, port, database, username, password, connection_url)
         {
-            ctx.set_mysql_bindings(MysqlBindings {
-                host: host.to_string(),
-                port,
-                database: database.to_string(),
-                username: username.to_string(),
-                password: password.to_string(),
-                connection_url: connection_url.to_string(),
-            });
+            let binding_key = meta
+                .get("binding_name")
+                .and_then(|value| value.as_str())
+                .unwrap_or(DEFAULT_RESOURCE_BINDING_NAME);
+            ctx.set_mysql_bindings_named(
+                binding_key,
+                MysqlBindings {
+                    host: host.to_string(),
+                    port,
+                    database: database.to_string(),
+                    username: username.to_string(),
+                    password: password.to_string(),
+                    connection_url: connection_url.to_string(),
+                },
+            );
         }
     }
 }
@@ -2952,15 +2973,22 @@ fn apply_resource_handles_to_timescaledb_bindings(ctx: &mut Context, handles: &[
             Some(connection_url),
         ) = (host, port, database, username, password, connection_url)
         {
-            ctx.set_timescaledb_bindings(PostgresBindings {
-                host: host.to_string(),
-                port,
-                database: database.to_string(),
-                username: username.to_string(),
-                password: password.to_string(),
-                connection_url: connection_url.to_string(),
-                replica_port: None,
-            });
+            let binding_key = meta
+                .get("binding_name")
+                .and_then(|value| value.as_str())
+                .unwrap_or(DEFAULT_RESOURCE_BINDING_NAME);
+            ctx.set_timescaledb_bindings_named(
+                binding_key,
+                PostgresBindings {
+                    host: host.to_string(),
+                    port,
+                    database: database.to_string(),
+                    username: username.to_string(),
+                    password: password.to_string(),
+                    connection_url: connection_url.to_string(),
+                    replica_port: None,
+                },
+            );
         }
     }
 }

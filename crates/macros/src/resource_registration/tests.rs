@@ -1,5 +1,22 @@
-use super::build_resource_registration;
+use super::{build_resource_registration, ResourceSpec};
 use syn::parse_str;
+
+#[test]
+fn mariadb_named_resource_spec_builds() {
+    let resource_ident: ResourceSpec =
+        parse_str(r#"MariaDB(name = "primary")"#).expect("parse MariaDB with name");
+    assert!(
+        build_resource_registration(&resource_ident).is_ok(),
+        "MariaDB(name = \"primary\") should expand",
+    );
+    let expansion = build_resource_registration(&resource_ident)
+        .expect("build")
+        .to_string();
+    assert!(
+        expansion.contains("with_logical_binding_name") && expansion.contains("MariaDBResource"),
+        "expansion should chain with_logical_binding_name on MariaDBResource: {expansion}",
+    );
+}
 
 #[test]
 fn accepts_relational_builtins() {

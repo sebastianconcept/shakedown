@@ -1,7 +1,7 @@
 use crate::error::{InfrastructureError, ScenarioId};
 use crate::resources::user_seed::{take_user_seed, TimescaleDbUserSeedFn, UserSeedSlot};
 use crate::resources::{
-    map_seed_error, sanitize_sql_database_name, PostgresBindings, Resource, ResourceHandle,
+    map_seed_error, scenario_sql_database_name, PostgresBindings, Resource, ResourceHandle,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -87,6 +87,7 @@ async fn connect_with_url(url: &str) -> Result<tokio_postgres::Client, Infrastru
 pub struct TimescaledbResource {
     image_repository: String,
     image_tag: Option<String>,
+    logical_binding_key: Option<String>,
     holds_suite_ref: bool,
     host: Option<String>,
     port: Option<u16>,
@@ -105,6 +106,7 @@ impl std::fmt::Debug for TimescaledbResource {
         debug_struct
             .field("image_repository", &self.image_repository)
             .field("image_tag", &self.image_tag)
+            .field("logical_binding_key", &self.logical_binding_key)
             .field("holds_suite_ref", &self.holds_suite_ref)
             .field("host", &self.host)
             .field("port", &self.port)
@@ -139,6 +141,7 @@ impl TimescaledbResource {
         Self {
             image_repository: DEFAULT_TIMESCALEDB_IMAGE_REPOSITORY.to_string(),
             image_tag: Some(DEFAULT_TIMESCALEDB_IMAGE_TAG.to_string()),
+            logical_binding_key: None,
             holds_suite_ref: false,
             host: None,
             port: None,
@@ -150,6 +153,12 @@ impl TimescaledbResource {
             seed_sql_path: None,
             user_seed: UserSeedSlot::new(None),
         }
+    }
+
+    /// Logical binding from `#[shakedown::test(resources = [Timescaledb(name = "...")])]`.
+    pub fn with_logical_binding_name(mut self, name: impl Into<String>) -> Self {
+        self.logical_binding_key = Some(name.into());
+        self
     }
 
     /// Override the image tag (pin another `timescale/timescaledb` tag). Repository stays
@@ -237,7 +246,9 @@ impl Resource for TimescaledbResource {
             ));
         }
 
-        let database_name = sanitize_sql_database_name(scenario_id.as_str());
+        let database_name =
+            scenario_sql_database_name(scenario_id.as_str(), self.logical_binding_key.as_deref());
+        let binding_map_key = self.logical_binding_key.as_deref().unwrap_or("default");
         let want_key = image_fingerprint(self.image_repository.as_str(), &self.image_tag);
 
         let mut guard = suite_timescaledb_mutex().lock().await;
@@ -338,6 +349,7 @@ impl Resource for TimescaledbResource {
                 "password": password,
                 "connection_url": connection_url,
                 "engine": "timescaledb",
+                "binding_name": binding_map_key,
             })),
         }])
     }
