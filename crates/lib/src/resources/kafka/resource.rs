@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::KafkaUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, KafkaUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_kafka_topic_prefix, KafkaBindings, Resource, ResourceHandle,
 };
@@ -56,7 +56,7 @@ pub struct KafkaResource {
     holds_suite_ref: bool,
     bootstrap_servers: Option<String>,
     topic_prefix: String,
-    user_seed: Option<KafkaUserSeedFn>,
+    user_seed: UserSeedSlot<KafkaBindings>,
 }
 
 impl std::fmt::Debug for KafkaResource {
@@ -68,7 +68,14 @@ impl std::fmt::Debug for KafkaResource {
             .field("holds_suite_ref", &self.holds_suite_ref)
             .field("bootstrap_servers", &self.bootstrap_servers)
             .field("topic_prefix", &self.topic_prefix)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -88,7 +95,7 @@ impl KafkaResource {
             holds_suite_ref: false,
             bootstrap_servers: None,
             topic_prefix: String::new(),
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -121,7 +128,7 @@ impl KafkaResource {
 
     /// Optional user seed after the proof topic is created ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: KafkaUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn kafka_bindings(&self) -> Result<KafkaBindings, InfrastructureError> {
@@ -296,7 +303,7 @@ impl Resource for KafkaResource {
             }
         }
 
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.kafka_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

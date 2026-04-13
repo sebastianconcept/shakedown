@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Mutex;
 
 use crate::error::{InfrastructureError, ShakedownError};
 
@@ -24,8 +25,28 @@ pub type UserSeedFn<Bindings> = Box<
     dyn FnOnce(Bindings) -> Pin<Box<dyn Future<Output = Result<(), ShakedownError>> + Send>> + Send,
 >;
 
+/// Optional one-shot seed callback stored on built-in resources.
+///
+/// [`FnOnce`] trait objects are not [`Sync`], but [`Resource`](super::Resource) requires `Sync`.
+/// Wrapping in [`Mutex`] keeps resources shareable across async boundaries while preserving
+/// run-once semantics via [`Option::take`] inside the lock.
+///
+/// Referenced only from optional engine modules; with default features (`mock-services` only) this
+/// module is still compiled so `dead_code` is suppressed.
+#[allow(dead_code)]
+pub(crate) type UserSeedSlot<Bindings> = Mutex<Option<UserSeedFn<Bindings>>>;
+
+/// Take the optional seed closure so the [`MutexGuard`] is dropped before any `.await` in the
+/// caller's async fn (avoids non-`Send` futures when `if let` extends temporary lifetimes).
+#[allow(dead_code)]
+pub(crate) fn take_user_seed<Bindings>(
+    slot: &UserSeedSlot<Bindings>,
+) -> Option<UserSeedFn<Bindings>> {
+    slot.lock().unwrap().take()
+}
+
 /// Map user/harness [`ShakedownError`] into [`InfrastructureError`] for [`super::Resource::apply_default_seed`].
-pub(crate) fn map_seed_error(error: ShakedownError) -> InfrastructureError {
+pub fn map_seed_error(error: ShakedownError) -> InfrastructureError {
     match error {
         ShakedownError::Infrastructure(infrastructure_error) => infrastructure_error,
         other => InfrastructureError::Backend(Box::new(std::io::Error::other(other.to_string()))),

@@ -27,7 +27,7 @@ use tokio_postgres::NoTls;
 use crate::cluster::{create_cluster_network, remove_cluster_network};
 use crate::docker_labels::{SHAKEDOWN_DOCKER_LABEL_KEY, SHAKEDOWN_DOCKER_LABEL_VALUE};
 use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
-use crate::resources::user_seed::PostgresUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, PostgresUserSeedFn, UserSeedSlot};
 use crate::resources::{map_seed_error, sanitize_sql_database_name, PostgresBindings, Resource};
 
 pub(crate) const DEFAULT_POSTGRES_CLUSTER_IMAGE_TAG: &str = "16";
@@ -169,7 +169,7 @@ pub struct PostgresReplicaSetResource {
     #[cfg(all(feature = "postgres-cluster", feature = "sqlx"))]
     sqlx_migrations_path: Option<PathBuf>,
     seed_sql_path: Option<PathBuf>,
-    user_seed: Option<PostgresUserSeedFn>,
+    user_seed: UserSeedSlot<PostgresBindings>,
 }
 
 impl std::fmt::Debug for PostgresReplicaSetResource {
@@ -187,7 +187,14 @@ impl std::fmt::Debug for PostgresReplicaSetResource {
             .field("username", &self.username)
             .field("password", &"<redacted>")
             .field("seed_sql_path", &self.seed_sql_path)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -217,7 +224,7 @@ impl PostgresReplicaSetResource {
             #[cfg(all(feature = "postgres-cluster", feature = "sqlx"))]
             sqlx_migrations_path: None,
             seed_sql_path: None,
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -253,7 +260,7 @@ impl PostgresReplicaSetResource {
 
     /// Programmatic seed after migrations and optional seed file.
     pub fn set_seed(&mut self, seed: PostgresUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn postgres_cluster_bindings(&self) -> Result<PostgresBindings, InfrastructureError> {
@@ -378,7 +385,7 @@ impl Resource for PostgresReplicaSetResource {
             })?;
         }
 
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }
 

@@ -15,7 +15,7 @@
 //! Mismatched image fingerprints while the Shakedown server is running return an error (one image per
 //! process).
 
-use super::user_seed::RedisUserSeedFn;
+use super::user_seed::{take_user_seed, RedisUserSeedFn, UserSeedSlot};
 use super::{map_seed_error, sanitize_redis_key_prefix, RedisBindings, Resource, ResourceHandle};
 use crate::error::{InfrastructureError, ScenarioId};
 use async_trait::async_trait;
@@ -55,7 +55,7 @@ where
     port: Option<u16>,
     connection_url: Option<String>,
     key_prefix: String,
-    user_seed: Option<RedisUserSeedFn>,
+    user_seed: UserSeedSlot<RedisBindings>,
 }
 
 impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> std::fmt::Debug
@@ -65,7 +65,14 @@ impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> std::fmt::Debug
         f.debug_struct("RespResource")
             .field("engine", &self.engine)
             .field("image_tag", &self.image_tag)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -90,13 +97,13 @@ impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> RespResource<I>
             port: None,
             connection_url: None,
             key_prefix: String::new(),
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
     /// User-provided async seed ([`Resource::apply_default_seed`]) after readiness.
     pub fn set_seed(&mut self, seed: RedisUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn redis_bindings(&self) -> Result<RedisBindings, InfrastructureError> {
@@ -344,7 +351,7 @@ impl<I: Image + Clone + Send + Sync + std::fmt::Debug + 'static> Resource for Re
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.redis_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

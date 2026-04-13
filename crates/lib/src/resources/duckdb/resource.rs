@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::DuckDbUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, DuckDbUserSeedFn, UserSeedSlot};
 use crate::resources::{
     duckdb_named_memory_database_path, map_seed_error, DuckDbBindings, Resource, ResourceHandle,
 };
@@ -22,7 +22,7 @@ const RESOURCE_NAME: &str = "duckdb";
 pub struct DuckDbResource {
     connection: Option<Arc<Mutex<Connection>>>,
     database_url: String,
-    user_seed: Option<DuckDbUserSeedFn>,
+    user_seed: UserSeedSlot<DuckDbBindings>,
 }
 
 impl std::fmt::Debug for DuckDbResource {
@@ -31,7 +31,14 @@ impl std::fmt::Debug for DuckDbResource {
             .debug_struct("DuckDbResource")
             .field("connection", &self.connection.as_ref().map(|_| "<open>"))
             .field("database_url", &self.database_url)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -42,8 +49,9 @@ impl DuckDbResource {
         Self::default()
     }
 
+    /// Async seed closure receiving [`DuckDbBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: DuckDbUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn duckdb_bindings(&self) -> Result<DuckDbBindings, InfrastructureError> {
@@ -124,7 +132,7 @@ impl Resource for DuckDbResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.duckdb_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

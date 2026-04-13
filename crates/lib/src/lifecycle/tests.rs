@@ -1,7 +1,7 @@
 use super::*;
 use crate::error::{ResourceHandle, ScenarioId};
 use crate::event::{Event, EventSnapshot};
-use crate::resources::Resource;
+use crate::resources::{KafkaBindings, Resource};
 use crate::ScenarioError;
 use async_trait::async_trait;
 
@@ -25,6 +25,18 @@ fn test_context_new() {
     // When we ask whether it has resources
     // Then it starts empty
     assert!(ctx.is_empty());
+}
+
+#[test]
+fn context_kafka_default_and_named_bindings() {
+    let mut ctx = Context::new();
+    let default_bindings = KafkaBindings::new("127.0.0.1:9092", "def_");
+    let shard_bindings = KafkaBindings::new("127.0.0.1:9092", "shard_");
+    ctx.set_kafka_bindings(default_bindings.clone());
+    ctx.set_kafka_bindings_named("shard", shard_bindings.clone());
+    assert_eq!(ctx.kafka_bindings(), Some(&default_bindings));
+    assert_eq!(ctx.kafka_bindings_named("shard"), Some(&shard_bindings));
+    assert!(ctx.kafka_bindings_named("missing").is_none());
 }
 
 #[cfg(feature = "fault-injection")]

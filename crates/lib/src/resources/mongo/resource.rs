@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::MongoUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, MongoUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_sql_database_name, MongoBindings, Resource, ResourceHandle,
 };
@@ -70,7 +70,7 @@ pub struct MongoResource {
     username: String,
     password: String,
     database_name: String,
-    user_seed: Option<MongoUserSeedFn>,
+    user_seed: UserSeedSlot<MongoBindings>,
 }
 
 impl std::fmt::Debug for MongoResource {
@@ -85,7 +85,14 @@ impl std::fmt::Debug for MongoResource {
             .field("username", &self.username)
             .field("password", &"<redacted>")
             .field("database_name", &self.database_name)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -108,7 +115,7 @@ impl MongoResource {
             username: SUITE_USER.to_string(),
             password: SUITE_PASSWORD.to_string(),
             database_name: String::new(),
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -129,8 +136,9 @@ impl MongoResource {
         self
     }
 
+    /// Async seed closure receiving [`MongoBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: MongoUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn mongo_bindings(&self) -> Result<MongoBindings, InfrastructureError> {
@@ -294,7 +302,7 @@ impl Resource for MongoResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.mongo_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

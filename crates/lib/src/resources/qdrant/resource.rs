@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::QdrantUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, QdrantUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_elasticsearch_index_prefix, QdrantBindings, Resource, ResourceHandle,
 };
@@ -111,7 +111,7 @@ pub struct QdrantResource {
     rest_url: String,
     grpc_url: String,
     collection_prefix: String,
-    user_seed: Option<QdrantUserSeedFn>,
+    user_seed: UserSeedSlot<QdrantBindings>,
 }
 
 impl std::fmt::Debug for QdrantResource {
@@ -127,7 +127,14 @@ impl std::fmt::Debug for QdrantResource {
             .field("rest_url", &self.rest_url)
             .field("grpc_url", &self.grpc_url)
             .field("collection_prefix", &self.collection_prefix)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -151,7 +158,7 @@ impl QdrantResource {
             rest_url: String::new(),
             grpc_url: String::new(),
             collection_prefix: String::new(),
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -176,8 +183,9 @@ impl QdrantResource {
         InfrastructureError::Backend(Box::new(std::io::Error::other(error.to_string())))
     }
 
+    /// Async seed closure receiving [`QdrantBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: QdrantUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn qdrant_bindings(&self) -> Result<QdrantBindings, InfrastructureError> {
@@ -337,7 +345,7 @@ impl Resource for QdrantResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.qdrant_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

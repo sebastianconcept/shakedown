@@ -1,5 +1,5 @@
 use crate::error::{InfrastructureError, ScenarioId};
-use crate::resources::user_seed::RabbitUserSeedFn;
+use crate::resources::user_seed::{take_user_seed, RabbitUserSeedFn, UserSeedSlot};
 use crate::resources::{
     map_seed_error, sanitize_rabbit_resource_prefix, RabbitBindings, Resource, ResourceHandle,
 };
@@ -53,7 +53,7 @@ pub struct RabbitResource {
     vhost: String,
     amqp_uri: Option<String>,
     resource_prefix: String,
-    user_seed: Option<RabbitUserSeedFn>,
+    user_seed: UserSeedSlot<RabbitBindings>,
 }
 
 impl std::fmt::Debug for RabbitResource {
@@ -70,7 +70,14 @@ impl std::fmt::Debug for RabbitResource {
             .field("vhost", &self.vhost)
             .field("amqp_uri", &self.amqp_uri.as_ref().map(|_| "<uri>"))
             .field("resource_prefix", &self.resource_prefix)
-            .field("user_seed", &self.user_seed.as_ref().map(|_| "<closure>"))
+            .field(
+                "user_seed",
+                &self
+                    .user_seed
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.as_ref().map(|_| "<closure>")),
+            )
             .finish()
     }
 }
@@ -95,7 +102,7 @@ impl RabbitResource {
             vhost: "/".to_string(),
             amqp_uri: None,
             resource_prefix: String::new(),
-            user_seed: None,
+            user_seed: UserSeedSlot::new(None),
         }
     }
 
@@ -124,8 +131,9 @@ impl RabbitResource {
         format!("amqp://{username}:{password}@{host}:{port}")
     }
 
+    /// Async seed closure receiving [`RabbitBindings`] ([`Resource::apply_default_seed`]).
     pub fn set_seed(&mut self, seed: RabbitUserSeedFn) {
-        self.user_seed = Some(seed);
+        *self.user_seed.lock().unwrap() = Some(seed);
     }
 
     fn rabbit_bindings(&self) -> Result<RabbitBindings, InfrastructureError> {
@@ -290,7 +298,7 @@ impl Resource for RabbitResource {
     }
 
     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
-        if let Some(seed_fn) = self.user_seed.take() {
+        if let Some(seed_fn) = take_user_seed(&self.user_seed) {
             let bindings = self.rabbit_bindings()?;
             seed_fn(bindings).await.map_err(map_seed_error)?;
         }

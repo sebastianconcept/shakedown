@@ -228,7 +228,7 @@ pub use crate::event::{
 /// Public types and functions from the lifecycle module.
 pub use crate::lifecycle::{
     run_scenario, Context, EnvironmentBackend, LifecycleState, NoopEnvironmentBackend, Phase,
-    ScenarioKind, ScenarioRunOutcome,
+    ScenarioKind, ScenarioRunOutcome, DEFAULT_RESOURCE_BINDING_NAME,
 };
 
 #[cfg(feature = "mock-services")]
