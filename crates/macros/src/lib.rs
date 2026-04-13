@@ -57,7 +57,9 @@ mod test;
 ///   `run_scenario` (for logs, isolation keys, diagnostics).
 /// - **`resources = [ ... ]`** — compile-time registration of builtins (`Fake`, `Kafka`, `Postgres`,
 ///   …) on `ctx` before your code runs; each name requires the matching feature on the `shakedown`
-///   dependency (e.g. `kafka` for `Kafka`).
+///   dependency (e.g. `kafka` for `Kafka`). Any other identifier or expression (e.g.
+///   `crate::my_tests::VaultDevResource::new()`) is passed to `ctx.register_extension` and must
+///   evaluate to a type implementing [`shakedown::Resource`](https://docs.rs/shakedown/latest/shakedown/resources/trait.Resource.html).
 /// - **`prelude = { ... }`** — statements run on `ctx` after resource registration and before
 ///   [`shakedown::run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html)
 ///   (e.g. register HTTP/gRPC mock services, which must complete before the harness starts mock listeners).
@@ -79,6 +81,9 @@ mod test;
 /// - `#[shakedown::test(resources = [Fake])]` — registers `shakedown::FakeResource`.
 /// - `#[shakedown::test(resources = [Fake, Kafka])]` — also registers Kafka when the `shakedown`
 ///   dependency enables the `kafka` feature.
+/// - `#[shakedown::test(resources = [Fake, crate::my_module::CustomResource::new()])]` — builtins
+///   and custom [`Resource`](https://docs.rs/shakedown/latest/shakedown/resources/trait.Resource.html)
+///   implementations in one list.
 /// - `#[shakedown::test(prelude = { ctx.register_http_mock_service("api", stub).unwrap(); })]` —
 ///   runs the block before the scenario lifecycle (after `resources` registration).
 ///

@@ -2,6 +2,8 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse2;
 
+use crate::resource_registration::ResourceEntry;
+
 fn item_fn_from_expanded(expanded: TokenStream) -> syn::ItemFn {
     parse2(expanded).expect("macro expansion should parse as ItemFn")
 }
@@ -31,10 +33,13 @@ fn resources_only_parses_fake_builtin() {
     let attr: TokenStream = quote!(resources = [Fake]);
     // When parsed as test attribute arguments
     let parsed = super::parse_test_attr(attr).expect("resources = [Fake] should parse");
-    // Then one resource spec is present and names Fake
+    // Then one resource entry is present and names Fake as a builtin
     let specs = parsed.resources.as_ref().expect("resources should be set");
     assert_eq!(specs.len(), 1);
-    assert_eq!(specs[0].ident.to_string(), "Fake");
+    match &specs[0] {
+        ResourceEntry::Builtin(spec) => assert_eq!(spec.ident.to_string(), "Fake"),
+        ResourceEntry::Custom(_) => panic!("expected builtin Fake"),
+    }
 }
 
 #[test]
@@ -157,7 +162,7 @@ fn expand_postgres_with_migrations_emits_with_migrations_path() {
 }
 
 #[test]
-fn expand_unknown_resource_reports_unknown_resource() {
+fn expand_unknown_bare_ident_emits_register_extension() {
     let attr: TokenStream = quote!(resources = [NotARealResource]);
     let item: TokenStream = quote! {
         async fn scenario_unknown(ctx: &mut Context) {}
@@ -165,7 +170,7 @@ fn expand_unknown_resource_reports_unknown_resource() {
     let expanded = super::expand(attr, item);
     let rendered = expanded.to_string();
     assert!(
-        rendered.contains("unknown resource type"),
-        "expected unknown resource error, got: {rendered}"
+        rendered.contains("register_extension"),
+        "expected custom resource via register_extension, got: {rendered}"
     );
 }
