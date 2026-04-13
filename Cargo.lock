@@ -5211,6 +5211,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-postgres",
+ "tokio-rustls 0.26.4",
  "tokio-stream",
  "tonic 0.14.5",
  "tonic-health",

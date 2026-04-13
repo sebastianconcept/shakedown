@@ -253,6 +253,12 @@ pub use crate::mock_service::{
     GrpcMockServiceTrait,
 };
 
+#[cfg(all(feature = "mock-services", feature = "tcp-mock-services"))]
+pub use crate::mock_service::{
+    DeclarativeTcpCodec, DeclarativeTcpRequest, TcpCodec, TcpMockCustom, TcpMockService,
+    TcpMockServiceRegistration, TcpMockServiceRoutePending, TcpMockServiceTrait, TlsAcceptor,
+};
+
 #[cfg(feature = "outbox")]
 pub use crate::publication::{
     message_matches_aggregate_id, PublicationObserveSpec, PublicationVerifier,

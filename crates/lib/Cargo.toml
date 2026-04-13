@@ -82,6 +82,9 @@ bollard = { version = "0.20", optional = true, default-features = false, feature
 # Structured logging for diagnostics and future tracing layer hooks.
 tracing = "0.1"
 
+# TCP mock services (`tcp-mock-services`; TLS via tokio-rustls)
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["ring"] }
+
 # HTTP mock services (`mvp-mock-services`; hyper 1.x + http 1.x)
 hyper = { version = "1", optional = true, default-features = false, features = ["server", "http1"] }
 hyper-util = { version = "0.1", optional = true, default-features = false, features = ["tokio"] }
@@ -145,6 +148,8 @@ grpc = [
     "dep:tokio-stream",
     "dep:tower",
 ]
+# TCP mock services (tokio listener + optional TLS); extends `mock-services`
+tcp-mock-services = ["mock-services", "dep:tokio-rustls"]
 # Infrastructure diagnostics (bollard); implied by Docker-backed resource features unless `no-diagnostics` is set
 diagnostics = ["dep:bollard"]
 # Disables Docker socket diagnostics at compile time (stub APIs; no bollard client)
@@ -478,6 +483,12 @@ required-features = ["mock-services"]
 name = "mock_service_grpc"
 path = "tests/mock_service_grpc.rs"
 required-features = ["grpc"]
+
+# TCP mock service + echo codec (`tcp-mock-services`)
+[[test]]
+name = "mock_service_tcp"
+path = "tests/mock_service_tcp.rs"
+required-features = ["tcp-mock-services"]
 
 # Service container → host.docker.internal connectivity (Docker); ignored in test body
 [[test]]
