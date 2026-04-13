@@ -19,6 +19,57 @@ fn path_string_literal(expr: &Expr, key: &str) -> syn::Result<syn::LitStr> {
     }
 }
 
+type BindingNamePartition = (Option<syn::LitStr>, Option<Vec<(Ident, Expr)>>);
+
+/// Pulls `name = "..."` out of resource parentheses so it is not forwarded to engine-specific keys.
+fn partition_binding_name_config(spec: &ResourceSpec) -> syn::Result<BindingNamePartition> {
+    let Some(config) = &spec.config else {
+        return Ok((None, None));
+    };
+    let mut name_lit: Option<syn::LitStr> = None;
+    let mut rest: Vec<(Ident, Expr)> = Vec::new();
+    for (key, value) in config {
+        if key == "name" {
+            if name_lit.is_some() {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "duplicate `name` in resource configuration",
+                ));
+            }
+            let lit = match value {
+                Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(lit),
+                    ..
+                }) => lit.clone(),
+                _ => {
+                    return Err(syn::Error::new(
+                        value.span(),
+                        "`name` must be a string literal, e.g. `name = \"primary\"`",
+                    ));
+                }
+            };
+            name_lit = Some(lit);
+        } else {
+            rest.push((key.clone(), value.clone()));
+        }
+    }
+    let rest_opt = if rest.is_empty() { None } else { Some(rest) };
+    Ok((name_lit, rest_opt))
+}
+
+fn reject_binding_name_if_unsupported(
+    spec: &ResourceSpec,
+    binding_name_lit: &Option<syn::LitStr>,
+) -> syn::Result<()> {
+    if binding_name_lit.is_some() {
+        return Err(syn::Error::new(
+            spec.ident.span(),
+            "`name` is only supported for MariaDB, Postgres, Mysql, and Timescaledb",
+        ));
+    }
+    Ok(())
+}
+
 /// A single resource specification that can include configuration.
 ///
 /// Either just `MongoReplicaSet` (bare identifier) or `MongoReplicaSet(node_count = 3)` (with config).
@@ -83,12 +134,14 @@ pub(crate) fn parse_resource_spec_list(input: ParseStream) -> syn::Result<Vec<Re
 /// Builds registration code for a single resource spec (bare identifier or with config).
 #[allow(clippy::needless_return)]
 pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<TokenStream> {
-    let name = spec.ident.to_string();
+    let resource_type_name = spec.ident.to_string();
+    let (binding_name_lit, rest_config) = partition_binding_name_config(spec)?;
 
     // Handle known resource types with configuration support
-    match name.as_str() {
+    match resource_type_name.as_str() {
         "Fake" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Fake resource does not support configuration",
@@ -101,7 +154,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Kafka" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Kafka resource does not support configuration (use KafkaCluster instead)",
@@ -115,7 +169,10 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
         }
         "Postgres" => {
             let mut builder = quote! { ::shakedown::PostgresResource::new() };
-            if let Some(config) = &spec.config {
+            if let Some(ref lit) = binding_name_lit {
+                builder = quote! { #builder.with_logical_binding_name(#lit) };
+            }
+            if let Some(config) = &rest_config {
                 for (key, value) in config {
                     match key.to_string().as_str() {
                         "migrations" => {
@@ -158,12 +215,13 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "PostgresReplicaSet" => {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
             // Handle configuration for PostgresReplicaSet
             let mut builder_tokens = quote! {
                 ::shakedown::PostgresReplicaSetResource::new()
             };
 
-            if let Some(config) = &spec.config {
+            if let Some(config) = &rest_config {
                 for (key, value) in config {
                     match key.to_string().as_str() {
                         "image_tag" => {
@@ -219,7 +277,10 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
         }
         "MariaDB" => {
             let mut builder = quote! { ::shakedown::MariaDBResource::new() };
-            if let Some(config) = &spec.config {
+            if let Some(ref lit) = binding_name_lit {
+                builder = quote! { #builder.with_logical_binding_name(#lit) };
+            }
+            if let Some(config) = &rest_config {
                 for (key, value) in config {
                     match key.to_string().as_str() {
                         "migrations" => {
@@ -263,7 +324,10 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
         }
         "Mysql" => {
             let mut builder = quote! { ::shakedown::MysqlResource::new() };
-            if let Some(config) = &spec.config {
+            if let Some(ref lit) = binding_name_lit {
+                builder = quote! { #builder.with_logical_binding_name(#lit) };
+            }
+            if let Some(config) = &rest_config {
                 for (key, value) in config {
                     match key.to_string().as_str() {
                         "migrations" => {
@@ -306,7 +370,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Sqlite" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Sqlite resource does not support configuration",
@@ -319,7 +384,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "DuckDb" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "DuckDb resource does not support configuration",
@@ -332,7 +398,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Rabbit" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Rabbit resource does not support configuration",
@@ -345,7 +412,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Redis" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Redis resource does not support configuration",
@@ -358,12 +426,13 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "RedisSentinel" => {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
             // Handle configuration for RedisSentinel
             let mut builder_tokens = quote! {
                 ::shakedown::RedisSentinelResource::new()
             };
 
-            if let Some(config) = &spec.config {
+            if let Some(config) = &rest_config {
                 for (key, value) in config {
                     match key.to_string().as_str() {
                         "image_tag" => {
@@ -395,7 +464,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Valkey" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Valkey resource does not support configuration",
@@ -408,7 +478,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Mongo" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Mongo resource does not support configuration",
@@ -421,12 +492,13 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "MongoReplicaSet" => {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
             // Handle configuration for MongoReplicaSet
             let mut builder_tokens = quote! {
                 ::shakedown::MongoReplicaSetResource::new()
             };
 
-            if let Some(config) = &spec.config {
+            if let Some(config) = &rest_config {
                 for (key, value) in config {
                     match key.to_string().as_str() {
                         "node_count" => {
@@ -458,12 +530,13 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "KafkaCluster" => {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
             // Handle configuration for KafkaCluster
             let mut builder_tokens = quote! {
                 ::shakedown::KafkaClusterResource::new()
             };
 
-            if let Some(config) = &spec.config {
+            if let Some(config) = &rest_config {
                 for (key, value) in config {
                     match key.to_string().as_str() {
                         "node_count" => {
@@ -501,12 +574,13 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "RabbitCluster" => {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
             // Handle configuration for RabbitCluster
             let mut builder_tokens = quote! {
                 ::shakedown::RabbitClusterResource::new()
             };
 
-            if let Some(config) = &spec.config {
+            if let Some(config) = &rest_config {
                 for (key, value) in config {
                     match key.to_string().as_str() {
                         "node_count" => {
@@ -538,7 +612,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Nats" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Nats resource does not support configuration",
@@ -551,7 +626,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Neo4j" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Neo4j resource does not support configuration",
@@ -564,7 +640,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Elasticsearch" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Elasticsearch resource does not support configuration",
@@ -577,7 +654,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "OpenSearch" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "OpenSearch resource does not support configuration",
@@ -590,7 +668,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Qdrant" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Qdrant resource does not support configuration",
@@ -603,7 +682,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Weaviate" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Weaviate resource does not support configuration",
@@ -616,7 +696,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "InfluxDb" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "InfluxDb resource does not support configuration",
@@ -630,7 +711,10 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
         }
         "Timescaledb" => {
             let mut builder = quote! { ::shakedown::TimescaledbResource::new() };
-            if let Some(config) = &spec.config {
+            if let Some(ref lit) = binding_name_lit {
+                builder = quote! { #builder.with_logical_binding_name(#lit) };
+            }
+            if let Some(config) = &rest_config {
                 for (key, value) in config {
                     match key.to_string().as_str() {
                         "migrations" => {
@@ -673,7 +757,8 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             });
         }
         "Toxiproxy" => {
-            if spec.config.is_some() {
+            reject_binding_name_if_unsupported(spec, &binding_name_lit)?;
+            if rest_config.is_some() {
                 return Err(syn::Error::new(
                     spec.ident.span(),
                     "Toxiproxy resource does not support configuration",
@@ -689,7 +774,7 @@ pub(crate) fn build_resource_registration(spec: &ResourceSpec) -> syn::Result<To
             return Err(syn::Error::new(
                 spec.ident.span(),
                 format!(
-                    "unknown resource type `{name}`; valid builtins are `Fake`, `Kafka`, `KafkaCluster`, `Rabbit`, `RabbitCluster`, `Postgres`, `PostgresReplicaSet`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `RedisSentinel`, `Valkey`, `Mongo`, `MongoReplicaSet`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`"
+                    "unknown resource type `{resource_type_name}`; valid builtins are `Fake`, `Kafka`, `KafkaCluster`, `Rabbit`, `RabbitCluster`, `Postgres`, `PostgresReplicaSet`, `MariaDB`, `Mysql`, `Sqlite`, `DuckDb`, `Redis`, `RedisSentinel`, `Valkey`, `Mongo`, `MongoReplicaSet`, `Nats`, `Neo4j`, `Elasticsearch`, `OpenSearch`, `Qdrant`, `Weaviate`, `InfluxDb`, `Timescaledb`, and `Toxiproxy`"
                 ),
             ));
         }

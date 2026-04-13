@@ -210,6 +210,25 @@ pub fn sanitize_sql_database_name(scenario_id: &str) -> String {
     out
 }
 
+/// Per-scenario SQL database name for suite-shared engines. When `logical_binding_key` is set
+/// (from `resources = [Engine(name = "...")]`), the binding is folded into the id before
+/// [`sanitize_sql_database_name`] so two registrations share one container but distinct databases.
+#[cfg(any(
+    feature = "mariadb",
+    feature = "mysql",
+    feature = "postgres",
+    feature = "timescaledb",
+))]
+pub(crate) fn scenario_sql_database_name(
+    scenario_id: &str,
+    logical_binding_key: Option<&str>,
+) -> String {
+    match logical_binding_key {
+        None => sanitize_sql_database_name(scenario_id),
+        Some(binding_key) => sanitize_sql_database_name(&format!("{scenario_id}_{binding_key}")),
+    }
+}
+
 /// Turn a scenario id into a safe Neo4j 5 **database** name (`shakedown-…`, max 63 bytes).
 ///
 /// Neo4j allows only ASCII letters, digits, dots, and dashes in database names—no underscores.
