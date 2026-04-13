@@ -1,4 +1,4 @@
-//! Service virtualization for integration tests — HTTP and gRPC mock services.
+//! Service virtualization for integration tests — HTTP, gRPC, and (with **`tcp-mock-services`**) TCP mock services.
 //!
 //! A service under test often calls external APIs (payment processors, inventory
 //! services, notification gateways) that are unavailable in a test environment. Replacing those
@@ -7,16 +7,16 @@
 //! network ports so your service's HTTP client hits the same code path it would in production.
 //!
 //! Create an [`HttpMockService`] (or [`GrpcMockService`] with the `grpc`
-//! feature), register scenario-specific routes or handlers, then inject its URL into the service
+//! feature, or [`TcpMockService`] / [`TcpMockCustom`] with **`tcp-mock-services`**), register scenario-specific routes or handlers, then inject its URL into the service
 //! container via [`crate::service::EnvMapping`]. The harness starts and stops the mock server as
 //! part of the normal lifecycle. After the scenario, assert call counts and request bodies through
 //! the [`MockServiceHandle`].
 //!
-//! Implement [`HttpMockServiceTrait`] / [`GrpcMockServiceTrait`] for stateful or branching
+//! Implement [`HttpMockServiceTrait`] / [`GrpcMockServiceTrait`] / [`TcpMockServiceTrait`] for stateful or branching
 //! per-request logic.
 //!
 //! Enabled with the **`mock-services`** feature (default). Add **`grpc`** for gRPC
-//! support (`tonic` + `prost`).
+//! support (`tonic` + `prost`). Add **`tcp-mock-services`** for TCP mocks (`TcpCodec` + optional TLS).
 //!
 //! # Book reference
 //!
@@ -29,6 +29,8 @@ pub(crate) mod grpc;
 pub(crate) mod handle;
 #[cfg(feature = "mock-services")]
 pub(crate) mod http;
+#[cfg(all(feature = "mock-services", feature = "tcp-mock-services"))]
+pub mod tcp;
 #[cfg(feature = "mock-services")]
 pub(crate) mod types;
 
@@ -50,5 +52,10 @@ pub use grpc::{
 pub use grpc::GrpcMockServiceTrait;
 #[cfg(feature = "mock-services")]
 pub use http::HttpMockServiceTrait;
+#[cfg(all(feature = "mock-services", feature = "tcp-mock-services"))]
+pub use tcp::{
+    DeclarativeTcpCodec, DeclarativeTcpRequest, TcpCodec, TcpMockCustom, TcpMockService,
+    TcpMockServiceRegistration, TcpMockServiceRoutePending, TcpMockServiceTrait, TlsAcceptor,
+};
 #[cfg(feature = "mock-services")]
 pub use types::{MockServiceContext, MockServiceError, MockServiceResources};

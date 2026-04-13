@@ -43,4 +43,15 @@ pub enum MockServiceError {
         /// Raw value that `http::StatusCode::from_u16` rejected
         code: u16,
     },
+    /// TCP mock codec decode error: {message}
+    TcpCodecDecode {
+        /// Human-readable detail (framing, UTF-8, …).
+        message: String,
+    },
+    /// TLS handshake on TCP mock accept failed: {source}
+    TlsHandshake {
+        /// Underlying I/O error from `tokio-rustls`.
+        #[source]
+        source: std::io::Error,
+    },
 }
