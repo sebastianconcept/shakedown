@@ -43,14 +43,16 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::error::{InternalError, Result, ShakedownError};
+use crate::lifecycle::Context;
 use crate::service::health::HealthCheck;
+use crate::service::pre_start::{PreStartFn, ServicePreStart};
 use crate::service::types::{EnvMapping, PortMapping, PullPolicy, ServiceSpec};
 
 /// Builder for declaring a Docker-backed service under test.
 #[cfg_attr(docsrs, doc(cfg(feature = "services")))]
-#[derive(Debug, Clone)]
 pub struct ServiceUnderTest {
     image: String,
     name: Option<String>,
@@ -61,6 +63,25 @@ pub struct ServiceUnderTest {
     depends_on: Vec<String>,
     auto_inject: bool,
     pull_policy: PullPolicy,
+    pre_start_callbacks: Vec<Box<dyn ServicePreStart>>,
+}
+
+impl std::fmt::Debug for ServiceUnderTest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ServiceUnderTest")
+            .field("image", &self.image)
+            .field("name", &self.name)
+            .field("ports", &self.ports)
+            .field("env_vars", &self.env_vars)
+            .field("env_mappings", &self.env_mappings)
+            .field("health_check", &self.health_check)
+            .field("depends_on", &self.depends_on)
+            .field("auto_inject", &self.auto_inject)
+            .field("pull_policy", &self.pull_policy)
+            .field("pre_start_callback_count", &self.pre_start_callbacks.len())
+            .finish()
+    }
 }
 
 impl ServiceUnderTest {
@@ -76,7 +97,24 @@ impl ServiceUnderTest {
             depends_on: Vec::new(),
             auto_inject: true,
             pull_policy: PullPolicy::default(),
+            pre_start_callbacks: Vec::new(),
         }
+    }
+
+    /// Runs after resource provisioning, readiness, and seeding, and before this service's Docker
+    /// container is started. Receives read-only [`Context`] — you cannot register resources here.
+    ///
+    /// Multiple calls run in declaration order. For multi-service scenarios, each service's hooks
+    /// run immediately before that service's container start (after dependency services are
+    /// already healthy).
+    pub fn pre_start<F, Fut>(mut self, callback: F) -> Self
+    where
+        F: Fn(&Context) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<()>> + Send,
+    {
+        self.pre_start_callbacks
+            .push(Box::new(PreStartFn(callback)));
+        self
     }
 
     /// Logical service name (used for URLs, labels, and dependency edges).
@@ -194,6 +232,7 @@ impl ServiceUnderTest {
             depends_on: self.depends_on,
             auto_inject: self.auto_inject,
             pull_policy: self.pull_policy,
+            pre_start_callbacks: Arc::new(self.pre_start_callbacks),
         })
     }
 }
@@ -369,6 +408,19 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn pre_start_stores_two_callbacks_in_order() {
+        let specification = ServiceUnderTest::docker("traefik/whoami:v1.10")
+            .name("web")
+            .port(80)
+            .pre_start(|_context| async { Ok(()) })
+            .pre_start(|_context| async { Ok(()) })
+            .build()
+            .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
+
+        assert_eq!(specification.pre_start_callbacks.len(), 2);
     }
 
     #[test]

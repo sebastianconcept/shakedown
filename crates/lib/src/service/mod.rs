@@ -5,19 +5,18 @@
 //! you are running the real service binary in Docker during a scenario and it exercises
 //! the same code path that production does without requiring the full service mesh.
 //!
-//! Build a [`ServiceUnderTest`] with the Docker image, environment variables, and
-//! dependency order, then register it on [`crate::lifecycle::Context`] before calling
-//! [`crate::lifecycle::run_scenario`]. Shakedown starts the container, waits for the
-//! [`HealthCheck`] to pass, injects resource URLs via [`EnvMapping`], and stops the container
-//! during teardown. Access the service's runtime URL from the scenario body via
-//! `ctx.service_url("my-service")`.
+//! Build a [`ServiceUnderTest`] with the Docker image, environment variables, and dependency order,
+//! then register it on [`crate::lifecycle::Context`] before calling [`crate::lifecycle::run_scenario`].
+//! During the run, Shakedown stops the container during teardown. Access the service URL from the
+//! scenario body via `ctx.service_url("my-service")`.
 //!
 //! If the scenario also declares infrastructure resources, [`crate::lifecycle::run_scenario`] runs
 //! **[`crate::lifecycle::Phase::Seed`]** first: default seeding on those resources and any
 //! database migrations you configure on the resource (for example `Postgres(migrations = \"./migrations\")`
 //! on [`crate::test`], or [`crate::PostgresResource::with_migrations_path`](crate::PostgresResource::with_migrations_path)
-//! in a prelude). Mock services and the
-//! service-under-test container start after that setup.
+//! in a prelude). Mock services start next; for each registered service the harness runs
+//! [`ServiceUnderTest::pre_start`] hooks (read-only [`crate::lifecycle::Context`]), then starts that
+//! service's container, waits for [`HealthCheck`], and injects resource URLs via [`EnvMapping`].
 //!
 //! # Book reference
 //!
@@ -31,6 +30,7 @@ mod handle;
 mod health;
 pub(crate) mod injection;
 pub(crate) mod lifecycle;
+mod pre_start;
 mod service_reference;
 mod types;
 

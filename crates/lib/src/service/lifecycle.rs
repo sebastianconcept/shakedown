@@ -103,6 +103,21 @@ async fn start_one_service(
             )))
         })?;
 
+    let pre_start_total = specification.pre_start_callbacks.len();
+    for (index, callback) in specification.pre_start_callbacks.iter().enumerate() {
+        event_log.append_raw(
+            EventLevel::Info,
+            "lifecycle",
+            format!(
+                "service '{service_name}' pre_start ({}/{pre_start_total})",
+                index + 1
+            ),
+        );
+        crate::service::pre_start::ServicePreStart::invoke(callback.as_ref(), &*context)
+            .await
+            .map_err(|error| map_service_provision_error(service_name, error))?;
+    }
+
     let environment = inject_service_env(context, &specification);
 
     let (repository, tag) = split_image_repository_and_tag(specification.image.as_str());
