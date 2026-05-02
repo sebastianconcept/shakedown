@@ -333,8 +333,6 @@ timescaledb = [
     "shakedown-macros/timescaledb",
     "diagnostics",
 ]
-# MCP server support (post-MVP, optional)
-mcp = []
 # Cluster topology — Docker network management and multi-node resources
 cluster = ["dep:bollard"]
 # Service-under-test: Docker-backed application containers in scenarios (opt-in)
