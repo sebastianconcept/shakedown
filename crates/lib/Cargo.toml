@@ -3,11 +3,12 @@ name = "shakedown"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
-publish = false
+authors = ["Sebastian Sastre <sebastianconcept@gmail.com>"]
 description = "Progressive confidence testing for Rust backend services — real infrastructure, structured evidence, safe to ship."
 readme = "README.md"
 repository = "https://github.com/sebastianconcept/shakedown"
 homepage = "https://shakedown.dev"
+documentation = "https://docs.rs/shakedown"
 license = "MIT"
 keywords = ["testing", "integration-testing", "kafka", "postgres", "testcontainers"]
 categories = ["development-tools::testing"]
@@ -18,7 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Procedural macros (greeting smoke test; macros milestone will expand usage)
-shakedown-macros = { path = "../macros" }
+shakedown-macros = { version = "0.1.0", path = "../macros" }
 
 # Error handling and serialization
 thiserror = "1"
@@ -352,6 +353,22 @@ name = "load_performance_us008"
 path = "tests/load_performance_us008.rs"
 required-features = ["load"]
 
+# `#[shakedown::test]` / `#[shakedown::faulty_test]` with Fake only (no Docker)
+[[test]]
+name = "macro_integration"
+path = "tests/macro_integration.rs"
+
+# Custom Resource in `resources = [...]` (no Docker)
+[[test]]
+name = "macro_custom_resource"
+path = "tests/macro_custom_resource.rs"
+
+# Named MariaDB resources in macro list (Docker); ignored unless --ignored
+[[test]]
+name = "macro_named_mariadb"
+path = "tests/macro_named_mariadb.rs"
+required-features = ["mariadb"]
+
 # Optional macro + Kafka Docker integration test; avoids compiling `resources = [Kafka]` without rdkafka
 [[test]]
 name = "macro_kafka"
@@ -454,6 +471,17 @@ name = "sqlite_vertical"
 path = "tests/sqlite_vertical.rs"
 required-features = ["sqlite"]
 
+# Isolatable trait on bindings (sqlite in-process; kafka prefix test when both features on)
+[[test]]
+name = "isolatable_vertical"
+path = "tests/isolatable_vertical.rs"
+required-features = ["sqlite"]
+
+# Harness smoke (no shakedown lifecycle)
+[[test]]
+name = "simple_test"
+path = "tests/simple_test.rs"
+
 # DuckDB bindings + in-process proof (no Docker)
 [[test]]
 name = "duckdb_vertical"
@@ -537,6 +565,18 @@ required-features = ["kafka", "services"]
 name = "services_multi_postgres_whoami"
 path = "tests/services_multi_postgres_whoami.rs"
 required-features = ["postgres", "services"]
+
+# Postgres + Kafka outbox + publication proof (Docker); ignored unless --ignored
+[[test]]
+name = "outbox_postgres"
+path = "tests/outbox_postgres.rs"
+required-features = ["outbox", "postgres", "kafka"]
+
+# SQLite outbox row assertions (no Docker)
+[[test]]
+name = "outbox_sqlite"
+path = "tests/outbox_sqlite.rs"
+required-features = ["outbox", "sqlite"]
 
 # Postgres + RabbitMQ outbox + AMQP publication proof (Docker); no `kafka` feature
 [[test]]

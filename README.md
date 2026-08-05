@@ -1,14 +1,24 @@
 # Shakedown
 
 [![CI](https://github.com/sebastianconcept/shakedown/actions/workflows/ci.yml/badge.svg)](https://github.com/sebastianconcept/shakedown/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![crates.io](https://img.shields.io/crates/v/shakedown.svg)](https://crates.io/crates/shakedown)
 
-The familiar pain is **tests pass, production breaks**: everything looked fine in CI because the hard parts—integrations, ordering, and real I/O—never ran together the way production does. **Shakedown** is a Rust testing library for **progressive confidence**: run scenarios against real infrastructure where it matters, keep fast no-Docker paths for the first win, and leave structured evidence when something fails so you can tell a real regression from a flaky harness.
+**Unit tests are green. Production still breaks.**
+
+CI never ran the hard parts together the way production does: real databases, real buses, real ordering, real I/O. Shakedown is a Rust testing library for that gap. You write scenarios against real infrastructure where it matters, keep a fast path with no Docker for the first win, and get structured evidence when something fails so you can tell a product bug from a flaky harness.
+
+## Requirements
+
+| Requirement | Notes |
+|-------------|--------|
+| **Rust ≥ 1.88** | Workspace MSRV (`rust-version`); aligned with testcontainers |
+| **Docker** | Only for container-backed features (Kafka, Postgres, Redis, …). Not needed for `sqlite` or default `mock-services` |
+| **Tokio** | Scenarios use `#[tokio::test]` via `#[shakedown::test]`; add `tokio` with `macros` + `rt-multi-thread` |
 
 ## Quick start (no Docker)
 
-Add `shakedown` with the **`sqlite`** feature (in-memory SQLite per scenario; no container runtime). You also need a Tokio test runtime.
+Add `shakedown` with the `sqlite` feature (in-memory SQLite per scenario). You also need a Tokio test runtime.
 
 ```toml
 [dev-dependencies]
@@ -19,36 +29,91 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```rust
 use shakedown::Context;
 
-#[shakedown::test(resources = [Sqlite])]
+// `ignore = false`: non-empty `resources = [...]` would otherwise emit `#[ignore]`
+// (Docker-oriented default). SQLite needs no container runtime.
+#[shakedown::test(resources = [Sqlite], ignore = false)]
 async fn quick_start(ctx: &mut Context) {
     ctx.sqlite()
+        .expect("sqlite helpers")
         .execute("CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY)", ())
         .await
         .expect("create table");
 }
 ```
 
-## What you can test
+Default features alone also work with a fake resource (no SQL). Use `ignore = false` so the test runs in a normal `cargo test` pass:
 
-| Area | What Shakedown helps with |
-|------|---------------------------|
-| Standalone resources | Kafka, Postgres, Redis, SQLite, RabbitMQ, and other engines via opt-in Cargo features and testcontainers-backed images |
-| Cluster layouts | Declarative multi-node topologies where the `cluster` feature applies |
-| Fault injection | Network faults on proxied dependencies (`fault-injection` feature) |
-| Load & resilience | Load profiles, metrics assertions, and baselines (`load` feature) |
-| Services | Build and inject configuration for services under test (`services` feature) |
+```rust
+use shakedown::Context;
+
+#[shakedown::test(resources = [Fake], ignore = false)]
+async fn smoke(ctx: &mut Context) {
+    assert!(!ctx.is_empty());
+}
+```
+
+## Feature presets
+
+Enable only what your scenarios need. Full matrix: [Operator documentation](crates/lib/README.md).
+
+| Stack | Suggested features |
+|-------|-------------------|
+| SQL only, no Docker | `sqlite` |
+| Postgres integration | `postgres` (+ `sqlx` if you use the migrator) |
+| Kafka + HTTP mocks | `kafka`, `mock-services`, `services` |
+| Full resilience | add `fault-injection`, `load`, `cluster` as needed |
+
+## What you can prove
+
+| Area | What you get |
+|------|----------------|
+| Standalone resources | Kafka, Postgres, Redis, SQLite, RabbitMQ, and more via opt-in Cargo features (testcontainers-backed where needed) |
+| Cluster layouts | Multi-node topologies via opt-in features such as `kafka-cluster`, `mongodb-cluster`, and `redis-sentinel` (the `cluster` feature provides shared networking) |
+| Fault injection | Network faults on proxied dependencies (`fault-injection`) |
+| Load and resilience | Load profiles, metrics assertions, and baselines (`load`) |
+| Services | Build and inject config for services under test (`services`) |
 
 See [Operator documentation](crates/lib/README.md) for the full feature matrix, CI setup, and `just` recipes.
 
+## Adopting in CI
+
+Keep a **fast** job on every push (no Docker) and a **Docker** job that runs ignored integration tests when you need real infrastructure:
+
+```yaml
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --features sqlite   # or services / mock-services — no Docker
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: >-
+          cargo test --features "kafka,postgres,mock-services,services"
+          -- --include-ignored
+```
+
+Neither `cargo test` nor nextest runs `#[ignore]` tests unless you ask (`--include-ignored` or `--run-ignored all`). Details and maintainer smoke recipes: [Operator docs — Running tests](crates/lib/README.md#running-tests) and [Adopting in CI](docs/adopting-in-ci.md).
+
 ## Going further
 
-- **[API reference on docs.rs](https://docs.rs/shakedown)** — generated type and module documentation
-- **[Online guide](https://shakedown.dev/guide)** — walkthrough-style tutorial
-- **[Operator docs](crates/lib/README.md)** — how to enable features, run tests in CI, and operate the workspace day to day
+- [API reference on docs.rs](https://docs.rs/shakedown): types and modules
+- [Online guide](https://shakedown.dev/guide): walkthrough-style tutorial
+- [Operator docs](crates/lib/README.md): features, CI, day-to-day workspace commands
+- [In-repo example](crates/examples/examples/service_with_mock.rs): Postgres + Kafka + mock + service under test (Docker)
+
+## Stability (0.x)
+
+Until **1.0**, this crate follows Cargo’s `0.x` semver: minor versions may add features; breaking changes are documented in [CHANGELOG.md](CHANGELOG.md). The 1.0 goal is a stable macro surface (`#[shakedown::test]` / `#[shakedown::faulty_test]`) and core lifecycle API (`Context`, `run_scenario`, `Resource`).
 
 ## The Book
 
-***Shakedown Testing for Software*** (working title) is the long-form companion: from your first scenario through outbox flows, diagnostics, cluster topologies, and load. This repository is the implementation; the guide and book outline the methodology and narrative.
+*Shakedown Testing for Software* (working title) is the long-form companion: first scenario through outbox flows, diagnostics, clusters, and load. This repository is the implementation. The guide and book carry the methodology and narrative.
 
 ## Repository layout
 
@@ -56,6 +121,10 @@ See [Operator documentation](crates/lib/README.md) for the full feature matrix, 
 |------|------|
 | `crates/lib` | `shakedown` library crate |
 | `crates/macros` | `#[shakedown::test]` and related procedural macros |
-| `crates/examples` | Scenario catalog aligned with the book |
+| `crates/examples` | Runnable adoption scenarios (not published to crates.io) |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
 
 Licensed under the [MIT License](LICENSE).

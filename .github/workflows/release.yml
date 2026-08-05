@@ -1,0 +1,36 @@
+name: Release
+
+# Publishes shakedown-macros then shakedown when a version tag is pushed.
+# Requires repository secret CARGO_REGISTRY_TOKEN (crates.io API token).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish shakedown-macros
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p shakedown-macros --locked
+
+      - name: Wait for crates.io index
+        run: sleep 30
+
+      - name: Publish shakedown
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p shakedown --locked

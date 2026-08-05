@@ -139,7 +139,8 @@ pub fn faulty_test(attr: ProcMacroTokenStream, item: ProcMacroTokenStream) -> Pr
 /// Placeholder attribute for **resource self-registration** (not implemented yet).
 ///
 /// A no-op attribute that expands to its input item unchanged. It exists so API shape can be
-/// reserved early.
+/// reserved early. **Reserved for a future release — not part of the 0.1 contract.** Do not
+/// build production tests that depend on this attribute doing anything beyond a pass-through.
 ///
 /// Use only if you want to annotate types or modules in preparation for future Shakedown integration.
 ///

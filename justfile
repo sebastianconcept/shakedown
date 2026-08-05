@@ -125,7 +125,7 @@ test-load-performance:
 # Every integration feature, every test target, including `#[ignore]` (needs Docker for ignored tests). Does not enable `no-diagnostics`, so bollard diagnostics tests run. Uses nextest when installed (same idea as `just test`).
 test-all-include-ignored:
   if command -v cargo-nextest >/dev/null 2>&1; then \
-    cargo nextest run -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite,fault-injection" -- --include-ignored; \
+    cargo nextest run -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite,fault-injection" --run-ignored all; \
   else \
     echo "cargo-nextest not installed; falling back to cargo test." >&2; \
     cargo test -p shakedown --features "kafka,postgres,mariadb,mysql,outbox,rabbitmq,sqlite,fault-injection" -- --include-ignored; \

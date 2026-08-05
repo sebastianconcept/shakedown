@@ -11,7 +11,7 @@
 
 use shakedown::{BuiltinResource, FakeResource, RegisteredResource, ScenarioKind};
 
-#[shakedown::test(resources = [Fake])]
+#[shakedown::test(resources = [Fake], ignore = false)]
 async fn macro_test_basic(ctx: &mut shakedown::Context) {
     // Given a context with Fake registered by the attribute
     // When the scenario runs
@@ -19,7 +19,7 @@ async fn macro_test_basic(ctx: &mut shakedown::Context) {
     assert!(!ctx.is_empty());
 }
 
-#[shakedown::test(resources = [Fake])]
+#[shakedown::test(resources = [Fake], ignore = false)]
 async fn test_scenario_kind_is_normal(ctx: &mut shakedown::Context) {
     // Given a normal `#[shakedown::test]` scenario
     // When we read the scenario kind
@@ -27,7 +27,7 @@ async fn test_scenario_kind_is_normal(ctx: &mut shakedown::Context) {
     assert_eq!(ctx.scenario_kind(), ScenarioKind::Normal);
 }
 
-#[shakedown::faulty_test(resources = [Fake])]
+#[shakedown::faulty_test(resources = [Fake], ignore = false)]
 async fn macro_faulty_test_basic(ctx: &mut shakedown::Context) {
     // Given a faulty scenario with Fake registered by the attribute
     // When the scenario runs
@@ -35,7 +35,7 @@ async fn macro_faulty_test_basic(ctx: &mut shakedown::Context) {
     assert!(!ctx.is_empty());
 }
 
-#[shakedown::faulty_test(resources = [Fake])]
+#[shakedown::faulty_test(resources = [Fake], ignore = false)]
 async fn test_scenario_kind_is_faulty(ctx: &mut shakedown::Context) {
     // Given a `#[shakedown::faulty_test]` scenario
     // When we read the scenario kind
@@ -43,7 +43,7 @@ async fn test_scenario_kind_is_faulty(ctx: &mut shakedown::Context) {
     assert_eq!(ctx.scenario_kind(), ScenarioKind::Faulty);
 }
 
-#[shakedown::test(resources = [Fake])]
+#[shakedown::test(resources = [Fake], ignore = false)]
 async fn test_run_scenario_registers_fake(ctx: &mut shakedown::Context) {
     // Given the macro-declared Fake resource list
     // When we inspect registered resources
@@ -54,7 +54,7 @@ async fn test_run_scenario_registers_fake(ctx: &mut shakedown::Context) {
     ));
 }
 
-#[shakedown::test(resources = [Fake])]
+#[shakedown::test(resources = [Fake], ignore = false)]
 async fn test_scenario_id_matches_function_name(ctx: &mut shakedown::Context) {
     // Given this function's Rust identifier as the scenario name source
     // When we read the scenario id from the context
@@ -74,7 +74,7 @@ async fn test_manual_register_before_body(ctx: &mut shakedown::Context) {
     assert!(!ctx.is_empty());
 }
 
-#[shakedown::test(resources = [Fake])]
+#[shakedown::test(resources = [Fake], ignore = false)]
 async fn empty_body(_ctx: &mut shakedown::Context) {
     // Given resources from the attribute and a scenario that asserts nothing
     // When the harness runs this body

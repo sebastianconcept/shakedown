@@ -9,11 +9,12 @@ use shakedown::ResourceHandle;
 use shakedown::ScenarioId;
 
 /// Minimal custom resource for macro expansion tests (no Docker).
+#[derive(Default)]
 pub struct MinimalMacroCustomResource;
 
 impl MinimalMacroCustomResource {
     pub fn new() -> Self {
-        MinimalMacroCustomResource
+        Self
     }
 }
 

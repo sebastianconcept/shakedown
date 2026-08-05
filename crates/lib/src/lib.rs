@@ -1,43 +1,44 @@
 //! # Shakedown
 //!
-//! The familiar pain is **tests pass, production breaks**: CI went green because mocks and unit
-//! tests never exercised the real integrations, ordering, and I/O that production relies on—so
-//! the first serious run of the system is your users, not your pipeline.
+//! **Unit tests are green. Production still breaks.**
 //!
-//! Teams adopted testing vocabulary but often skipped the **methodology** that ties scenarios to
-//! real infrastructure, isolation, and evidence. Without that thread, "green" stops meaning
-//! **safe to ship**.
+//! CI went green because mocks and unit tests never exercised the real integrations, ordering,
+//! and I/O that production relies on. The first serious run of the system becomes your users,
+//! not your pipeline.
 //!
-//! **Shakedown** takes its name from the aerospace and motorsport **shakedown**—the deliberate
+//! Teams often adopt testing vocabulary without the **methodology** that ties scenarios to real
+//! infrastructure, isolation, and evidence. Without that thread, "green" stops meaning **safe to
+//! ship**.
+//!
+//! **Shakedown** takes its name from the aerospace and motorsport **shakedown**: the deliberate
 //! qualification run before something is cleared as **safe to fly**. Here, scenarios are that
-//! runway: prove behavior on real dependencies, record what happened, and promote when the
-//! evidence says the system is ready—not when the easy tests merely pass.
+//! runway. Prove behavior on real dependencies, record what happened, and promote when the
+//! evidence says the system is ready, not when the easy tests merely pass.
 //!
 //! ## Progressive confidence
 //!
-//! The library supports **progressive confidence** in five steps—start where you are and deepen
-//! fidelity as risk demands:
+//! Start where you are and deepen fidelity as risk demands:
 //!
-//! 1. **Scenarios & lifecycle** — run through provision → readiness → seed → run → assert →
+//! 1. **Scenarios and lifecycle:** run through provision → readiness → seed → run → assert →
 //!    teardown so every run has a repeatable shape ([`lifecycle`], [`run_scenario`]).
-//! 2. **Resources** — register databases, buses, and other engines with per-scenario isolation
+//! 2. **Resources:** register databases, buses, and other engines with per-scenario isolation
 //!    while reusing suite-wide infrastructure where it makes sense ([`resources`]).
-//! 3. **Services & data paths** — exercise what you deploy: containers under test, bridges, and
+//! 3. **Services and data paths:** exercise what you deploy: containers under test, bridges, and
 //!    transactional patterns such as outbox flows ([`service`], [`outbox`], [`publication`]).
-//! 4. **Faults & instrumentation** — inject network faults on proxied dependencies and read a
+//! 4. **Faults and instrumentation:** inject network faults on proxied dependencies and read a
 //!    correlated timeline when something breaks ([`fault_injection`], [`instrumentation`]).
-//! 5. **Load & topology** — add open-model load, performance assertions, and multi-node layouts
+//! 5. **Load and topology:** add open-model load, performance assertions, and multi-node layouts
 //!    when you need scale or HA-shaped coverage ([`load`], [`cluster`]).
 //!
 //! ## Three modes of confidence
 //!
-//! Shakedown is built around **three modes of confidence** that reinforce each other:
+//! These reinforce each other:
 //!
-//! - **Transferring confidence** — shared scenarios and structured output give reviewers and
+//! - **Transferring confidence:** shared scenarios and structured output give reviewers and
 //!   teammates evidence they can trust in PRs and release gates.
-//! - **Preserving confidence** — when production misbehaves, the same harness vocabulary helps
+//! - **Preserving confidence:** when production misbehaves, the same harness vocabulary helps
 //!   you lock the failure in as a regression scenario instead of a one-off mystery.
-//! - **Trusting the result** — diagnostics and error classification help you see whether a red
+//! - **Trusting the result:** diagnostics and error classification help you see whether a red
 //!   run points at your product or at the test infrastructure, so flakes do not erode belief in
 //!   the signal.
 //!
@@ -46,7 +47,7 @@
 //! The [`#[shakedown::test]`](crate::test) attribute registers resources and runs your scenario
 //! on the Tokio test runtime. The example below uses [`BuiltinResource::Fake`]
 //! so it compiles with default features (no Docker). For in-memory SQL with no container runtime,
-//! enable the `sqlite` feature and `resources = [Sqlite]`—see [`README.md`](../README.md).
+//! enable the `sqlite` feature and `resources = [Sqlite]`. See [`README.md`](../README.md).
 //!
 //! For full manual control, call [`run_scenario`] with a [`Context`], a scenario id, an async
 //! closure, and an [`EventLog`].
@@ -85,10 +86,10 @@
 //!
 //! ## What this crate provides
 //!
-//! - **Scenario orchestration** — the lifecycle above, with structured errors ([`error`])
-//! - **Resource registration** — [`BuiltinResource`], [`RegisteredResource`], and the async
+//! - **Scenario orchestration:** the lifecycle above, with structured errors ([`error`])
+//! - **Resource registration:** [`BuiltinResource`], [`RegisteredResource`], and the async
 //!   [`Resource`] trait for custom backends
-//! - **Instrumentation** — events, failure timelines, optional Docker diagnostics ([`instrumentation`])
+//! - **Instrumentation:** events, failure timelines, optional Docker diagnostics ([`instrumentation`])
 //!
 //! ## Async [`Resource`] trait
 //!
@@ -121,9 +122,9 @@
 //!
 //! ## Extension points
 //!
-//! - **[`Resource`] trait** — implement for new infrastructure integrations
-//! - **[`EnvironmentBackend`] trait** — plug in alternative execution environments
-//! - **`Context::register_builtin()` / `Context::register_extension()`** — register resources from code
+//! - **[`Resource`] trait:** implement for new infrastructure integrations
+//! - **[`EnvironmentBackend`] trait:** plug in alternative execution environments
+//! - **`Context::register_builtin()` / `Context::register_extension()`:** register resources from code
 //!
 //! ## See also
 //!
@@ -138,10 +139,10 @@
 
 mod docker_labels;
 
-/// Cluster topology — Docker networks and node control (`cluster` feature).
+/// Cluster topology: Docker networks and node control (`cluster` feature).
 #[cfg(feature = "cluster")]
 pub mod cluster;
-/// Events, timelines, and Docker-backed diagnostics — see submodule docs on [`instrumentation`].
+/// Events, timelines, and Docker-backed diagnostics. See submodule docs on [`instrumentation`].
 pub mod instrumentation;
 
 // Stable crate-root paths (`shakedown::event`, `shakedown::timeline`, `shakedown::diagnostics`).
