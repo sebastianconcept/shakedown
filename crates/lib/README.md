@@ -1,22 +1,21 @@
-# Shakedown — Orchestration library for shakedown testing
+# Shakedown (library crate)
 
-**Shakedown** is a Rust framework for shakedown testing — proving systems are safe to
-promote to production by running realistic scenarios that exercise the full stack.
+Prove a system is safe to promote by running realistic scenarios against the real stack: provision, seed, exercise, assert, then tear down with evidence you can trust in CI.
+
+This is the operator README for the `shakedown` crate: features, CI, helpers, and day-to-day workflows. For the short product pitch and a no-Docker quick start, see the [workspace README](../../README.md).
 
 ## Overview
 
-This library provides:
-
-- **Scenario orchestration** — lifecycle phases: provision → readiness → seed → run → assert → teardown
-- **Resource providers** — async [`Resource`] trait for databases, message queues, and other infrastructure
-- **Error classification** — structured errors distinguishing scenario vs infrastructure failures
-- **Event logging hooks** — structured event collection for failure timelines (human-readable stderr summary on infrastructure failure; pretty-printed JSON under `target/shakedown/timelines/{scenario_id}.json` for CI and tooling)
+- **Scenario orchestration:** lifecycle phases: provision → readiness → seed → run → assert → teardown
+- **Resource providers:** async [`Resource`] trait for databases, message queues, and other infrastructure
+- **Error classification:** structured errors that separate scenario failures from infrastructure failures
+- **Event logging:** failure timelines (human-readable stderr on infrastructure failure; pretty-printed JSON under `target/shakedown/timelines/{scenario_id}.json` for CI and tooling)
 
 ## Where to start
 
-- **Minimal features:** add `shakedown` with only the Cargo features your scenarios need (see [Cargo features](#cargo-features) below and [`Cargo features` in the crate root docs](src/lib.rs)). Default `cargo test -p shakedown` stays Docker-free; enabling engines such as `kafka` or `postgres` pulls in Docker-backed resources and, unless you opt out with **`no-diagnostics`**, the **`diagnostics`** feature (bollard) for container observability.
-- **Diagnostics:** `diagnostics` is implied by Docker-backed resource features; set **`no-diagnostics`** when you cannot depend on the Docker socket API — see [Infrastructure diagnostics (bollard)](#infrastructure-diagnostics-bollard).
-- **Bindings vs helpers:** read [Using your existing drivers](#using-your-existing-drivers-bindings-as-bridge) and [Typed helpers](#typed-helpers) (three patterns: bindings-only, helpers, outbox).
+- **Minimal features:** enable only the Cargo features your scenarios need (see [Cargo features](#cargo-features) and the [crate root docs](src/lib.rs)). Default `cargo test -p shakedown` stays Docker-free. Engines such as `kafka` or `postgres` pull in Docker-backed resources and, unless you opt out with **`no-diagnostics`**, the **`diagnostics`** feature (bollard) for container observability.
+- **Diagnostics:** Docker-backed resource features imply `diagnostics`. Set **`no-diagnostics`** when you cannot depend on the Docker socket API. Details: [Infrastructure diagnostics (bollard)](#infrastructure-diagnostics-bollard).
+- **Bindings vs helpers:** [Using your existing drivers](#using-your-existing-drivers-bindings-as-bridge) and [Typed helpers](#typed-helpers) (three patterns: bindings-only, helpers, outbox).
 
 ## Using your existing drivers (bindings as bridge)
 
@@ -31,7 +30,7 @@ Shakedown does not replace your database drivers or message clients. It **provis
 | **Search / vector** | Elasticsearch, OpenSearch, Qdrant, Weaviate bindings and helpers — see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) | `reqwest`, `qdrant-client`, … |
 | **Time-series / analytical** | [`InfluxDbBindings`](src/resources.rs); TimescaleDB via [`Context::timescaledb_bindings`](src/lifecycle/mod.rs) | Influx HTTP client, SQL client for Timescale |
 
-**Reference data and seeding:** There is no first-party Shakedown seeding trait in this release — load reference data and schema in scenario code using helpers, `*_bindings()` plus your own clients, or `#[shakedown::default_seed]` as you do today; the harness owns isolation and lifecycle, not a shared fixture-file format.
+**Reference data and seeding:** There is no first-party Shakedown seeding trait in this release. Load reference data and schema in scenario code using helpers, `*_bindings()` plus your own clients, resource `migrations` / `seed` paths on `#[shakedown::test(resources = [...])]`, or [`Resource::set_seed`](src/resources.rs) closures. The harness owns isolation and lifecycle, not a shared fixture-file format.
 
 ## Workspace layout
 
@@ -50,18 +49,15 @@ shakedown/
 
 ## Milestone status
 
+Internal sequencing for maintainers. Newcomers can skip this section.
+
 | MVP milestone | Status |
 |---------------|--------|
-| `mvp-typed-helpers` | ✅ **Complete** (2026-03-29) — typed helpers on [`Context`](src/lifecycle/mod.rs) ([`KafkaHelpers`](src/resources/kafka/helpers.rs), [`RabbitHelpers`](src/resources/rabbit/helpers.rs), relational [`PostgresHelpers`](src/resources/postgres/helpers.rs) / [`MariaDbHelpers`](src/resources/mariadb/helpers.rs) / [`MysqlHelpers`](src/resources/mysql/helpers.rs) / [`SqliteHelpers`](src/resources/sqlite/helpers.rs)); see [Typed helpers](#typed-helpers) |
-| `extra-infra` | ✅ **Complete** (2026-03-31) — twelve additional first-party resources (Redis, Valkey, MongoDB, NATS, Neo4j, DuckDB, Elasticsearch, OpenSearch, Qdrant, Weaviate, InfluxDB, TimescaleDB); see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) |
-| `mvp-examples` | **Next** — living chapter catalog in the sibling **shakedown-example** repository showcasing common harness patterns |
+| `mvp-typed-helpers` | **Complete** (2026-03-29). Typed helpers on [`Context`](src/lifecycle/mod.rs); see [Typed helpers](#typed-helpers). |
+| `extra-infra` | **Complete** (2026-03-31). Twelve additional first-party resources; see [Extra infrastructure features](#extra-infrastructure-features-extra-infra). |
+| `mvp-examples` | **Next.** Living chapter catalog in the sibling **shakedown-example** repository. |
 
-- **Current (shipped in repo):** `mvp-outbox` plus **publication verification** — row-level `outbox_event` assertions plus **transport-neutral** [`PublicationVerifier`](src/publication/verifier.rs): first-party **Kafka**, **RabbitMQ**, **NATS** (JetStream), and **Redis Streams** publication proof (`assert_kafka_published`, `assert_rabbit_published`, `assert_nats_published`, `assert_redis_streams_published`) on top of relational, document, or in-process storage bindings; custom buses via the same trait (see [Outbox helpers](#outbox-helpers) below). **Extended outbox** (2026-04): **MongoDB** and **DuckDB** storage paths match the same `Outbox` row APIs as SQL engines.
-- **Also shipped:** `mock-services` — mock upstream HTTP/gRPC servers bound on localhost so scenarios assert outbound calls at the **network** layer; see [Mock services](#mock-services).
-- **Also shipped:** **`services`** (service-under-test) — opt-in Cargo feature to run **application containers** via testcontainers during scenarios: [`ServiceUnderTest`](src/service/builder.rs) → [`ServiceSpec`](src/service/types.rs), convention-based **env injection** (Kafka, relational DBs, RabbitMQ, Redis/Valkey, MongoDB, Neo4j, mock services, `depends_on` peers), **convergence health checks**, [`Context::service_url`](src/lifecycle/mod.rs) / [`service_handle`](src/lifecycle/mod.rs) on the test host (`127.0.0.1`), and **bollard** diagnostics labels — see [Service under test](#service-under-test-services-feature).
-- **Also shipped:** `mvp-fault-injection` — suite-level **Toxiproxy** as a [`Resource`](src/resources.rs), [`FaultHandle`](src/fault_injection.rs) on [`Context`](src/lifecycle/mod.rs), and **Kafka** client bootstrap via the proxy for `ScenarioKind::Faulty` when both **Kafka** and **Toxiproxy** are registered (see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
-- **Previous milestone:** `mvp-postgres-mariadb` — first-party relational resources are complete: **PostgreSQL**, **MariaDB**, **Oracle MySQL**, and **SQLite** (`PostgresResource` / `MariaDBResource` / `MysqlResource` / `SqliteResource`, matching `*Bindings` on `Context`) with suite-shared Docker containers for TCP engines and per-scenario isolation.
-- **Roadmap:** Further milestones are tracked in product planning materials linked from the workspace [`docs/README.md`](../../docs/README.md).
+**Shipped and documented below:** outbox + publication verification (Kafka, RabbitMQ, NATS JetStream, Redis Streams; MongoDB and DuckDB storage), mock HTTP/gRPC services, service-under-test containers (`services`), fault injection via Toxiproxy, and first-party relational engines (Postgres, MariaDB, MySQL, SQLite). Further milestones are tracked in product planning materials linked from [`docs/README.md`](../../docs/README.md).
 
 Default `cargo test -p shakedown` does not require Docker.
 
@@ -93,7 +89,7 @@ The following **Cargo features** add first-party [`Resource`](src/resources.rs) 
 | **Docker** (testcontainers, one suite-shared container per engine where applicable) | `redis`, `valkey`, `mongodb`, `nats`, `neo4j`, `elasticsearch`, `opensearch`, `qdrant`, `weaviate`, `influxdb`, `timescaledb` |
 | **In-process** (no container) | `duckdb` — matches the SQLite model (`spawn_blocking`, no `testcontainers`). |
 
-Integration tests that start containers are usually `#[ignore]`; enable with `-- --ignored` when Docker is available. DuckDB tests run in normal `cargo test` when the feature is enabled.
+Integration tests that start containers are usually `#[ignore]`; run them with `--include-ignored` (or `--ignored` for ignored-only) when Docker is available. DuckDB tests run in normal `cargo test` when the feature is enabled.
 
 ### Default env vars and image overrides
 
@@ -127,7 +123,7 @@ Use [`just help`](../../justfile) to list recipes from the repo root [`justfile`
 
 | Command | What it runs | Docker |
 |---------|----------------|--------|
-| `cargo test --workspace` | `shakedown`, `shakedown-macros` (incl. trybuild), CLI; **default features** per crate | Only where tests are not `#[ignore]` |
+| `cargo test --workspace` | `shakedown`, `shakedown-macros` (incl. trybuild), `shakedown-examples`; **default features** per crate | Only where tests are not `#[ignore]` |
 | `just test` | Same targets as `cargo test --workspace`, but uses **`cargo nextest run`** when `cargo-nextest` is installed (faster); falls back to plain Cargo otherwise | Same |
 | `just test-workspace` | Same as `cargo test --workspace` (always plain Cargo; use when you want parity with CI that does not use nextest) | Same |
 | `cargo test --workspace --all-features` | Same targets with **every** optional feature enabled | Ignored Docker tests are still **skipped** unless you pass `-- --include-ignored` |
@@ -187,7 +183,8 @@ Swap `cargo test` for `cargo nextest run … --run-ignored all` when you use nex
 
 | Command | What it runs | Docker |
 |---------|----------------|--------|
-| `cargo test -p shakedown` | Unit + integration tests for default (minimal) features; includes **`mock_service_http`** when `mock-services` is in default features | Not required for the default set |
+| `cargo test -p shakedown` | Unit + integration tests for default (minimal) features; includes **`mock_service_http`**, **`macro_integration`**, and **`macro_custom_resource`** when `mock-services` is in default features | Not required for the default set |
+| `cargo test -p shakedown --features outbox,sqlite --test outbox_sqlite` | SQLite outbox row assertions (no Docker) | Not required |
 | `cargo test -p shakedown --features mock-services --test mock_service_http` | HTTP [`HttpMockService`](src/mock_service/http/stub.rs) + coded [`HttpMockServiceTrait`](src/mock_service/http/mod.rs) integration tests only | No |
 | `cargo test -p shakedown --features grpc --test mock_service_grpc` | gRPC [`GrpcMockService`](src/mock_service/grpc/stub.rs) unary integration test | No |
 | `cargo test -p shakedown --features outbox,sqlite` | Outbox helpers + SQLite vertical tests | Not required |
@@ -313,7 +310,7 @@ Docker-backed tests are opt-in; see [Running tests](#running-tests) for the full
 
 **Kafka (KRaft, `testcontainers-modules::kafka::apache`):**
 
-- [`KafkaResource`](src/resources.rs) uses a **suite-level** broker: the first provision in a process starts one container; further `KafkaResource` instances share it until the last `Resource::teardown` removes the container. For a walkthrough of Docker-backed checks, see [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) when that tree exists in your checkout.
+- [`KafkaResource`](src/resources.rs) uses a **suite-level** broker: the first provision in a process starts one container; further `KafkaResource` instances share it until the last `Resource::teardown` removes the container.
 - **Image tag:** [`KafkaResource::with_image_tag`](src/resources.rs), or set `SHAKEDOWN_KAFKA_IMAGE_TAG` and use [`KafkaResource::with_image_tag_from_env`](src/resources.rs).
 - **JVM image:** [`KafkaResource::with_jvm_image`](src/resources.rs) (`apache/kafka` instead of `apache/kafka-native`).
 
@@ -464,8 +461,6 @@ Use [`run_scenario`](src/lifecycle/mod.rs) with [`ScenarioKind::Faulty`](src/lif
 **Service injection:** with the **`services`** feature, [`EnvMapping::redis`](src/service/types.rs) and convention injection default to **`REDIS_URL`** for [`RedisBindings::connection_url`](src/resources.rs) (shared name for Redis and Valkey). [`EnvMapping::mongo`](src/service/types.rs) and convention injection default to **`MONGODB_URI`** for [`MongoBindings::connection_url`](src/resources.rs) (per-service URL partitioning matches relational DBs when multiple services are registered). [`EnvMapping::nats`](src/service/types.rs) and convention injection default to **`NATS_URL`** for [`NatsBindings::connection_url`](src/resources.rs). [`EnvMapping::neo4j`](src/service/types.rs) and convention injection default to **`NEO4J_URI`** for [`Neo4jBindings::bolt_url`](src/resources.rs). [`EnvMapping::weaviate`](src/service/types.rs) and convention injection default to **`WEAVIATE_URL`** for [`WeaviateBindings::rest_url`](src/resources.rs). [`EnvMapping::influxdb`](src/service/types.rs) and convention injection default to **`INFLUXDB_URL`** for [`InfluxDbBindings::url`](src/resources.rs); **`INFLUXDB_TOKEN`**, **`INFLUXDB_ORG`**, and **`INFLUXDB_BUCKET`** are also set for Influx 2.x clients. [`EnvMapping::timescaledb`](src/service/types.rs) and convention injection default to **`TIMESCALEDB_URL`** (distinct from Postgres **`DATABASE_URL`**).
 
 Integration tests that start containers (Kafka, Postgres, MariaDB, MySQL, Redis, Valkey, MongoDB, NATS, Neo4j, Weaviate, InfluxDB, TimescaleDB, outbox flows, bollard diagnostics) are usually `#[ignore]`; run them with Docker available. Commands and `just` recipes are listed in [Running tests](#running-tests) (Docker-backed `#[ignore]` tests).
-
-Verification steps for Kafka vertical work are summarized in [`feature/mvp-kafka-vertical/README.md`](../../feature/mvp-kafka-vertical/README.md) (checklists and expected outcomes for Docker-backed runs).
 
 ## Infrastructure diagnostics (bollard)
 
@@ -733,15 +728,11 @@ shakedown = { version = "...", features = ["outbox", "sqlite"] }
 ### Example: Postgres + Kafka
 
 ```rust
-#[shakedown::default_seed(resources = [Postgres, Kafka])]
-async fn seed(ctx: &mut Context) -> Result<(), ShakedownError> {
-    ctx.outbox().setup().await?;
-    ctx.kafka().ensure_topics(&["orders"]).await?;
-    Ok(())
-}
-
 #[shakedown::test(resources = [Postgres, Kafka])]
 async fn outbox_order_published(ctx: &mut Context) -> Result<(), ShakedownError> {
+    ctx.outbox().setup().await?;
+    ctx.kafka().ensure_topics(&["orders"]).await?;
+
     // Trigger your service path that writes to outbox_event and publishes to Kafka.
 
     ctx.outbox()

@@ -3,10 +3,19 @@ name = "shakedown-macros"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
-publish = false
+authors = ["Sebastian Sastre <sebastianconcept@gmail.com>"]
 description = "Procedural macros for the Shakedown testing framework."
+readme = "README.md"
 repository = "https://github.com/sebastianconcept/shakedown"
+homepage = "https://shakedown.dev"
+documentation = "https://docs.rs/shakedown-macros"
 license = "MIT"
+keywords = ["proc-macro", "testing", "integration-testing", "shakedown"]
+categories = ["development-tools::testing", "development-tools::procedural-macro-helpers"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lib]
 proc-macro = true

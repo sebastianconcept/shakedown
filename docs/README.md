@@ -1,11 +1,23 @@
 # Shakedown documentation
 
-For a **reusable description** of how code is organized in this workspace (facades, domain modules, feature gates, integration folders, tests), see [code-organization-guide.md](code-organization-guide.md).
+Start here depending on what you need:
 
-This repository keeps **code-adjacent** documentation: crate READMEs under `crates/`, decision notes such as [`DECISIONS.md`](../DECISIONS.md) at the repo root when present, and feature folders under `feature/` when your checkout includes them.
+| If you want… | Go here |
+|--------------|---------|
+| Product pitch and no-Docker quick start | [Workspace README](../README.md) |
+| Features, CI, helpers, operator workflows | [crates/lib/README.md](../crates/lib/README.md) |
+| Adopting Shakedown in your CI | [adopting-in-ci.md](adopting-in-ci.md) |
+| `#[shakedown::test]` and related macros | [crates/macros/README.md](../crates/macros/README.md) |
+| How this workspace organizes code | [code-organization-guide.md](code-organization-guide.md) |
+| API reference | [docs.rs/shakedown](https://docs.rs/shakedown) |
+| Walkthrough tutorial | [shakedown.dev/guide](https://shakedown.dev/guide) |
 
-Some teams also maintain a **separate** product or adoption doc tree (mission, architecture, long-form PRDs). That material is not required to build or test this crate; treat this repo’s READMEs and `docs/` as the source of truth for how to run and extend the library here.
+## What lives in this repo
 
-**Book examples** (chapter tests, companion microservices, gRPC protos, Docker images for those services) live in the sibling **shakedown-example** repository when you clone it next to this one; see that repo’s `README.md` and `justfile`.
+Code-adjacent docs: crate READMEs under `crates/`, this `docs/` folder, and [CHANGELOG.md](../CHANGELOG.md) / [CONTRIBUTING.md](../CONTRIBUTING.md) at the repo root.
 
-Workflow commands for **this** repo are in the root [`justfile`](../justfile) (`just help`, `just qa`, `just test` vs `just test-workspace`, per-target Docker `#[ignore]` recipes for the `shakedown` crate). For every way to run tests on the library (workspace, all-features, Docker `#[ignore]` binaries, full `--include-ignored` sweep, CI recommendations), see [crates/lib/README.md § Running tests](../crates/lib/README.md#running-tests). For a **single sweep** of every `tests/*_vertical.rs` engine smoke binary (`just test-shakedown-resources-smoke`), see [§ Resource smoke coverage](../crates/lib/README.md#resource-smoke-coverage).
+Workflow commands live in the root [`justfile`](../justfile) (`just help`, `just qa`, `just test` vs `just test-workspace`, per-target Docker `#[ignore]` recipes). For every way to run library tests (workspace, all-features, Docker `#[ignore]` binaries, full `--include-ignored` sweep, CI recommendations), see [crates/lib/README.md § Running tests](../crates/lib/README.md#running-tests). For a single sweep of every `tests/*_vertical.rs` engine smoke binary (`just test-shakedown-resources-smoke`), see [§ Resource smoke coverage](../crates/lib/README.md#resource-smoke-coverage).
+
+## Book examples
+
+Long-form book chapter tests and companion microservices will live in a sibling **shakedown-example** repository when that material is ready. Until then, start with the [workspace quick start](../README.md) and the in-repo [service_with_mock](../crates/examples/examples/service_with_mock.rs) example.

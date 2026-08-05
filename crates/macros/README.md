@@ -1,6 +1,6 @@
 # Shakedown Macros
 
-Procedural attribute macros for shakedown testing. They expand to `#[::tokio::test]` wrappers that call [`run_scenario`](../lib/src/lifecycle/mod.rs) on the `shakedown` crate — same lifecycle as manual harness code.
+Procedural attribute macros for Shakedown. They expand to `#[::tokio::test]` wrappers that call [`run_scenario`](../lib/src/lifecycle/mod.rs) on the `shakedown` crate, so you get the same lifecycle as manual harness code without writing the boilerplate.
 
 ## Quick start
 
@@ -8,7 +8,7 @@ Add `shakedown` and `tokio` (with test macros) to your crate’s **dev-dependenc
 
 ```toml
 [dev-dependencies]
-shakedown = { version = "0.1", path = "../path/to/shakedown" }
+shakedown = { version = "0.1", features = ["sqlite"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -25,7 +25,7 @@ use shakedown::Context;
 
 #[shakedown::test]
 async fn order_created_event(ctx: &mut Context) {
-    // Scenario body — e.g. exercise resources and assert on ctx / lifecycle
+    // Scenario body: exercise resources and assert on ctx / lifecycle
     assert!(!ctx.scenario_id().to_string().is_empty());
 }
 ```
@@ -39,7 +39,7 @@ The macro expands to an outer `#[::tokio::test]` async function that calls [`run
 
 ### `#[shakedown::faulty_test]`
 
-Same as `#[shakedown::test]` but marks the scenario as faulty for future fault injection:
+Same as `#[shakedown::test]`, but marks the scenario as faulty so fault injection (Toxiproxy) can apply when you register it:
 
 ```rust,ignore
 use shakedown::Context;
@@ -52,11 +52,11 @@ async fn fault_injected_scenario(ctx: &mut Context) {
 
 The generated code calls `ctx.set_scenario_kind(ScenarioKind::Faulty)` before running the scenario.
 
-**`fault_profile = "..."`** — Recognized and expanded to `ctx.set_fault_profile("...")` immediately after `set_scenario_kind(Faulty)` (before `run_scenario`). Use it to tag a scenario for future harness presets or for your own assertions via [`Context::fault_profile`](../lib/src/lifecycle/mod.rs).
+**`fault_profile = "..."`:** expanded to `ctx.set_fault_profile("...")` immediately after `set_scenario_kind(Faulty)` (before `run_scenario`). Use it to tag a scenario for harness presets or your own assertions via [`Context::fault_profile`](../lib/src/lifecycle/mod.rs).
 
-**Other `key = <expr>` pairs** — Reserved for future macro wiring (same parse shape as today). They are accepted and **ignored** so call sites can stay forward-compatible; toxic specs and fault control during the test remain on [`Context`] / `FaultHandle` APIs.
+**Other `key = <expr>` pairs:** reserved for future macro wiring (same parse shape as today). They are accepted and **ignored** so call sites stay forward-compatible. Toxic specs and fault control during the test remain on [`Context`] / `FaultHandle` APIs.
 
-**`resources = [...]`** — Same as [`test`](#optional-resources-argument): compile-time builtin registration.
+**`resources = [...]`:** same as [`test`](#optional-resources-argument): compile-time builtin registration.
 
 ### Optional `resources` argument
 
@@ -79,15 +79,20 @@ async fn with_relational_resources(ctx: &mut Context) { ... }
 |--------------------------|---------------------|
 | `Fake` | always available |
 | `Kafka` | `kafka` |
+| `KafkaCluster` | `kafka-cluster` |
 | `Rabbit` | `rabbitmq` |
+| `RabbitCluster` | `rabbitmq-cluster` |
 | `Postgres` | `postgres` |
+| `PostgresReplicaSet` | `postgres-cluster` |
 | `MariaDB` | `mariadb` |
 | `Mysql` | `mysql` |
 | `Sqlite` | `sqlite` |
 | `DuckDb` | `duckdb` |
 | `Redis` | `redis` |
+| `RedisSentinel` | `redis-sentinel` |
 | `Valkey` | `valkey` |
 | `Mongo` | `mongodb` |
+| `MongoReplicaSet` | `mongodb-cluster` |
 | `Nats` | `nats` |
 | `Neo4j` | `neo4j` |
 | `Elasticsearch` | `elasticsearch` |
@@ -111,8 +116,8 @@ Compile-time UI coverage for these attributes lives in `tests/trybuild/` (pass +
 
 End-to-end runs (macro expansion → `tokio::test` → `run_scenario`) live in the `shakedown` crate:
 
-- [`crates/lib/tests/macro_integration.rs`](../lib/tests/macro_integration.rs) — `FakeResource` only, no Docker.
-- [`crates/lib/tests/macro_kafka.rs`](../lib/tests/macro_kafka.rs) — `#[shakedown::test(resources = [Kafka])]`. The `macro_kafka` integration target uses `required-features = ["kafka"]` in `crates/lib/Cargo.toml`, so it is omitted from default `cargo test --workspace` builds. With `--features kafka`, the test is still **`#[ignore]`** until you opt in (requires Docker):
+- [`crates/lib/tests/macro_integration.rs`](../lib/tests/macro_integration.rs): `FakeResource` only, no Docker. Tests use `ignore = false` so they run in a normal `cargo test -p shakedown` pass (non-empty `resources` otherwise emits `#[ignore]` by default).
+- [`crates/lib/tests/macro_kafka.rs`](../lib/tests/macro_kafka.rs): `#[shakedown::test(resources = [Kafka])]`. The `macro_kafka` integration target uses `required-features = ["kafka"]` in `crates/lib/Cargo.toml`, so it is omitted from default `cargo test --workspace` builds. With `--features kafka`, the test is still **`#[ignore]`** until you opt in (requires Docker):
 
   ```text
   cargo test -p shakedown --features kafka macro_kafka -- --ignored
@@ -157,6 +162,12 @@ async fn faulty_scenario(ctx: &mut Context) {
 
 From the repo root: `cargo test -p shakedown-macros` (unit tests + trybuild UI tests), or `just test-macros`. Full workspace and Docker-backed `shakedown` integration tests are documented in [`crates/lib/README.md` § Running tests](../lib/README.md#running-tests).
 
+## `#[shakedown::register_resource]`
+
+Reserved for a future release and **not part of the 0.1 contract**. Today it is a pass-through
+(no expansion). Do not build production tests that depend on it doing anything beyond leaving
+the annotated item unchanged.
+
 ## Implementation Notes
 
 - Macros are defined in `crates/macros/src/lib.rs` and re-exported by `shakedown` lib crate.
@@ -166,5 +177,5 @@ From the repo root: `cargo test -p shakedown-macros` (unit tests + trybuild UI t
 
 ## Related docs
 
-- **Crate overview and resource details:** [`crates/lib/README.md`](../lib/README.md) — includes [Extra infrastructure features](../lib/README.md#extra-infrastructure-features-extra-infra) (`redis` … `timescaledb`) and [Typed helpers](../lib/README.md#typed-helpers).
-- **MVP / feature sequencing:** follow the in-repo `feature/*/README.md` files when present, or your team’s external planning docs if you use them.
+- **Crate overview and resource details:** [`crates/lib/README.md`](../lib/README.md), including [Extra infrastructure features](../lib/README.md#extra-infrastructure-features-extra-infra) (`redis` … `timescaledb`) and [Typed helpers](../lib/README.md#typed-helpers).
+- **MVP / feature sequencing:** follow your team's external planning docs or in-repo milestone notes when present.

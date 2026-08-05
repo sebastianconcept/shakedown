@@ -19,13 +19,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
-        run: cargo fmt -p shakedown --check
+        run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-features -p shakedown -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Check
-        run: cargo check --all-features -p shakedown
+        run: cargo check --workspace --all-features
+
+      - name: Doc (docs.rs surface)
+        run: cargo doc --all-features -p shakedown --no-deps
+
+      - name: Test macros (trybuild)
+        run: cargo test -p shakedown-macros
 
       - name: Test (services feature, no Docker)
         run: cargo test --features services -p shakedown
