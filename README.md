@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![crates.io](https://img.shields.io/crates/v/shakedown.svg)](https://crates.io/crates/shakedown)
 
-**Unit tests are green. Production still breaks.**
+**A harness that produces the evidence your team can replay.** Shakedown is a Rust library for realistic system and integration testing. Declare scenarios with `#[shakedown::test]` against real databases, message buses, and other dependencies where it matters, with enough structure to separate product bugs from flaky harness setup. Start without Docker (`sqlite`, mocks); opt into container-backed stacks via Cargo features when you need them.
 
-CI never ran the hard parts together the way production does: real databases, real buses, real ordering, real I/O. Shakedown is a Rust testing library for that gap. You write scenarios against real infrastructure where it matters, keep a fast path with no Docker for the first win, and get structured evidence when something fails so you can tell a product bug from a flaky harness.
+**Unit tests are green. Production still breaks.** CI rarely exercises the hard parts together the way production does: real databases, real buses, ordering, and I/O under stress. Shakedown is built to cover that gap.
 
 ## Requirements
 
