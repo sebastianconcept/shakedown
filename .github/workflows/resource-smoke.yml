@@ -10,12 +10,24 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # `--all-features` links duckdb, rdkafka/openssl, aws-lc, etc. into every [[test]]
+  # binary (~70). Parallel linking OOMs the 7GB ubuntu-latest runner; ld then dies
+  # with SIGBUS (signal 7). Cap jobs and add swap below.
+  CARGO_BUILD_JOBS: 2
 
 jobs:
   vertical-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Add swap (linker headroom)
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
