@@ -20,8 +20,10 @@ When a scenario is red, the harness records a **failure timeline** that classifi
 | **Docker** | Only for container-backed features (Kafka, Postgres, Redis, …). Not needed for `sqlite` or default `mock-services` |
 | **Tokio** | Scenarios use `#[tokio::test]` via `#[shakedown::test]`; add `tokio` with `macros` + `rt-multi-thread` |
 
-## Quick start (no Docker)
+## Quick start
 
+Let's see an example of a simple setup, there is no docker and sqlite is the only resource used in the system test.
+ 
 Add `shakedown` with the `sqlite` feature (in-memory SQLite per scenario). You also need a Tokio test runtime.
 
 ```toml

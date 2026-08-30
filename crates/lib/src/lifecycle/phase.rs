@@ -1,7 +1,9 @@
 //! Lifecycle phase labels shared by Shakedown and infrastructure event records.
 //!
+//! This module is useful when you add a lifecycle phase or stamp a new infra event with the active
+//! step.
 //! Infrastructure [`crate::event::InfraEvent`] records carry a [`Phase`] so logs, Docker events,
-//! and resource samples sort and filter correctly in timelines (e.g. “this OOM happened during Run”).
+//! and resource samples sort and filter correctly in timelines.
 
 use serde::{Deserialize, Serialize};
 

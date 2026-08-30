@@ -1,7 +1,12 @@
+//! Unit tests for lifecycle types and [`super::run_scenario`].
+//!
+//! This module is useful when you change constructors, phase labels, or run-scenario error paths.
+//! This module does not start Docker.
+
 use super::*;
-use crate::error::{ResourceHandle, ScenarioId};
-use crate::event::{Event, EventSnapshot};
-use crate::resources::{KafkaBindings, Resource};
+use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
+use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
+use crate::resources::{BuiltinResource, FakeResource, KafkaBindings, Resource};
 use crate::ScenarioError;
 use async_trait::async_trait;
 
