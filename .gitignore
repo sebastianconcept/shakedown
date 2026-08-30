@@ -1,2 +1,42 @@
-/target
+# Cargo build artifacts (includes target/shakedown timelines, baselines, reports)
+/target/
+/debug/
+
+# rustfmt backups
+**/*.rs.bk
+
+# MSVC Windows rustc debug symbols
+*.pdb
+
+# cargo-mutants
+**/mutants.out*/
+
+# DuckDB / SQLite may materialize ":memory:" paths on disk
 **/:memory:*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs (use a personal global gitignore for more)
+.idea/
+.vscode/
+*.swp
+*~
+
+# Cursor local state
+.cursor/
+
+# AI squads local state (not versioned)
+.ai-squads/
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# Coverage / profiling
+*.profraw
+*.profdata
+/coverage/
+/lcov.info

@@ -7,11 +7,12 @@ authors = ["Sebastian Sastre <sebastianconcept@gmail.com>"]
 description = "Procedural macros for the Shakedown testing framework."
 readme = "README.md"
 repository = "https://github.com/sebastianconcept/shakedown"
-homepage = "https://shakedown.dev"
+homepage = "https://shakedown.dev/docs/guides/quick-start/"
 documentation = "https://docs.rs/shakedown-macros"
 license = "MIT"
 keywords = ["proc-macro", "testing", "integration-testing", "shakedown"]
 categories = ["development-tools::testing", "development-tools::procedural-macro-helpers"]
+exclude = ["tests/**", "examples/**"]
 
 [package.metadata.docs.rs]
 all-features = true

@@ -1,140 +1,57 @@
-//! # Shakedown
+//! shakedown is a Rust library for scenario tests against real infrastructure.
 //!
-//! **Unit tests are green. Production still breaks.**
-//!
-//! CI went green because mocks and unit tests never exercised the real integrations, ordering,
-//! and I/O that production relies on. The first serious run of the system becomes your users,
-//! not your pipeline.
-//!
-//! Teams often adopt testing vocabulary without the **methodology** that ties scenarios to real
-//! infrastructure, isolation, and evidence. Without that thread, "green" stops meaning **safe to
-//! ship**.
-//!
-//! **Shakedown** takes its name from the aerospace and motorsport **shakedown**: the deliberate
-//! qualification run before something is cleared as **safe to fly**. Here, scenarios are that
-//! runway. Prove behavior on real dependencies, record what happened, and promote when the
-//! evidence says the system is ready, not when the easy tests merely pass.
-//!
-//! ## Progressive confidence
-//!
-//! Start where you are and deepen fidelity as risk demands:
-//!
-//! 1. **Scenarios and lifecycle:** run through provision → readiness → seed → run → assert →
-//!    teardown so every run has a repeatable shape ([`lifecycle`], [`run_scenario`]).
-//! 2. **Resources:** register databases, buses, and other engines with per-scenario isolation
-//!    while reusing suite-wide infrastructure where it makes sense ([`resources`]).
-//! 3. **Services and data paths:** exercise what you deploy: containers under test, bridges, and
-//!    transactional patterns such as outbox flows ([`service`], [`outbox`], [`publication`]).
-//! 4. **Faults and instrumentation:** inject network faults on proxied dependencies and read a
-//!    correlated timeline when something breaks ([`fault_injection`], [`instrumentation`]).
-//! 5. **Load and topology:** add open-model load, performance assertions, and multi-node layouts
-//!    when you need scale or HA-shaped coverage ([`load`], [`cluster`]).
-//!
-//! ## Three modes of confidence
-//!
-//! These reinforce each other:
-//!
-//! - **Transferring confidence:** shared scenarios and structured output give reviewers and
-//!   teammates evidence they can trust in PRs and release gates.
-//! - **Preserving confidence:** when production misbehaves, the same harness vocabulary helps
-//!   you lock the failure in as a regression scenario instead of a one-off mystery.
-//! - **Trusting the result:** diagnostics and error classification help you see whether a red
-//!   run points at your product or at the test infrastructure, so flakes do not erode belief in
-//!   the signal.
+//! This crate lets a test crate declare scenarios with [`#[shakedown::test]`](crate::test).
+//! This crate lets those scenarios bind to databases, buses, and services through Cargo features.
+//! This crate does not replace application clients. Scenarios build clients from bindings.
 //!
 //! ## Quick start
 //!
-//! The [`#[shakedown::test]`](crate::test) attribute registers resources and runs your scenario
-//! on the Tokio test runtime. The example below uses [`BuiltinResource::Fake`]
-//! so it compiles with default features (no Docker). For in-memory SQL with no container runtime,
-//! enable the `sqlite` feature and `resources = [Sqlite]`. See [`README.md`](../README.md).
-//!
-//! For full manual control, call [`run_scenario`] with a [`Context`], a scenario id, an async
-//! closure, and an [`EventLog`].
-//!
-//! ## Where to start
-//!
-//! Enable only the Cargo features your scenarios need; keep Docker-backed tests behind
-//! `#[ignore]` in CI unless the job passes `--include-ignored` (Cargo) or `--run-ignored all`
-//! (nextest). **`diagnostics`** is pulled in with Docker-backed resource features unless you set
-//! **`no-diagnostics`**. The six-category **bindings-as-bridge** table, CI split, and parallelism
-//! guidance are in [`README.md`](../README.md).
+//! The example uses [`BuiltinResource::Fake`] so it compiles with default features.
+//! Non-empty `resources` emit `#[ignore]` unless `ignore = false`.
+//! For in-memory SQL, use the `sqlite` feature and `resources = [Sqlite]`.
 //!
 //! ```rust
 //! use shakedown::Context;
 //!
-//! #[shakedown::test(resources = [Fake])]
+//! #[shakedown::test(resources = [Fake], ignore = false)]
 //! async fn my_first_shakedown(ctx: &mut Context) {
 //!     assert!(!ctx.is_empty());
 //! }
 //! ```
 //!
-//! Fault-oriented scenarios use [`#[shakedown::faulty_test]`](crate::faulty_test) instead of
-//! [`#[shakedown::test]`](crate::test) so the harness can treat them as the faulty path when you
-//! wire Toxiproxy and related tooling.
+//! Call [`run_scenario`] with a [`Context`], a scenario id, an async closure, and an [`EventLog`]
+//! when the attribute is not enough.
+//!
+//! Fault-oriented scenarios use [`#[shakedown::faulty_test]`](crate::faulty_test).
 //!
 //! ## Cargo features
 //!
-//! Integrations are **opt-in** so default builds stay light (`mock-services` only). Enable what
-//! you need in `Cargo.toml`: for example `kafka`, `postgres`, `mariadb`, `mysql`, `rabbitmq`,
-//! `sqlite`, `duckdb`, `redis`, `valkey`, `redis-sentinel`, `mongodb`, `nats`, `neo4j`,
-//! `elasticsearch`, `opensearch`, `qdrant`, `weaviate`, `influxdb`, `timescaledb`, `outbox`,
-//! `sqlx` (pools + [`sqlx::migrate::Migrator`] integration with `postgres` / `sqlite`),
-//! `fault-injection`, `load`, `services`, `cluster`, and engine-specific cluster flags such as
-//! `kafka-cluster` or `postgres-cluster`. The full matrix, CI guidance, and operator workflows
-//! are documented in [`README.md`](../README.md).
+//! Integrations are opt-in. Default features include `mock-services` only.
+//! Docker-backed resource features pull in **`diagnostics`** unless **`no-diagnostics`** is set.
+//! docs.rs builds this crate without `duckdb` so the bundled native compile stays inside limits.
+//! DuckDB types stay behind the `duckdb` feature on docs.rs.
+//! The operator matrix is in
+//! [OPERATOR.md](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/OPERATOR.md).
 //!
 //! ## What this crate provides
 //!
-//! - **Scenario orchestration:** the lifecycle above, with structured errors ([`error`])
-//! - **Resource registration:** [`BuiltinResource`], [`RegisteredResource`], and the async
-//!   [`Resource`] trait for custom backends
+//! - **Scenario orchestration:** [`lifecycle`], [`run_scenario`], structured errors ([`error`])
+//! - **Resource registration:** [`BuiltinResource`], [`RegisteredResource`], [`Resource`]
 //! - **Instrumentation:** events, failure timelines, optional Docker diagnostics ([`instrumentation`])
-//!
-//! ## Async [`Resource`] trait
-//!
-//! The [`Resource`] trait is **async and scenario-aware**:
-//!
-//! ```rust,no_run
-//! # use async_trait::async_trait;
-//! # use shakedown::{InfrastructureError, ResourceHandle, ScenarioId};
-//! #[async_trait]
-//! pub trait Resource: Send + Sync {
-//!     async fn provision(&mut self, scenario_id: &ScenarioId) -> Result<Vec<ResourceHandle>, InfrastructureError>;
-//!     async fn check_ready(&self) -> Result<(), InfrastructureError>;
-//!     async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError>;
-//!     async fn teardown(&mut self) -> Result<(), InfrastructureError>;
-//! }
-//! ```
-//!
-//! That contract lets Kafka, Postgres, SQLite, and custom integrations share the same lifecycle
-//! hooks and extension points.
-//!
-//! ## Workspace layout
-//!
-//! ```text
-//! shakedown/
-//! ├── crates/
-//! │   ├── lib/          # this crate: orchestration engine
-//! │   ├── macros/       # procedural macros (shakedown-macros)
-//! │   └── examples/     # optional adoption scenarios (`shakedown-examples`)
-//! ```
 //!
 //! ## Extension points
 //!
-//! - **[`Resource`] trait:** implement for new infrastructure integrations
-//! - **[`EnvironmentBackend`] trait:** plug in alternative execution environments
-//! - **`Context::register_builtin()` / `Context::register_extension()`:** register resources from code
+//! - [`Resource`] for new infrastructure integrations
+//! - [`EnvironmentBackend`] for alternative execution environments
+//! - `Context::register_builtin` / `Context::register_extension` to register resources from code
 //!
-//! ## See also
-//!
-//! The workspace [`docs/README.md`](../../docs/README.md) points maintainers at notes kept
-//! alongside this repository.
+//! Maintainer notes:
+//! [docs/README.md](https://github.com/sebastianconcept/shakedown/blob/master/docs/README.md).
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
-// Crate docs and module docs link to feature-gated items, optional dependencies (e.g. `sqlx`), and
-// re-exports that are absent under `cargo doc`'s default feature set. Fixing every link for every
-// feature matrix is not practical; keep rustdoc warning-clean for the common doc build.
+// Crate and module docs link to feature-gated items that a default `cargo doc` build omits.
+// This allow keeps rustdoc warning-clean across feature combinations.
 #![allow(rustdoc::broken_intra_doc_links, rustdoc::private_intra_doc_links)]
 
 mod docker_labels;

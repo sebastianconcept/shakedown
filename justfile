@@ -167,4 +167,26 @@ test-fault-injection-kafka-ignored:
 test-mongo-cluster-load-disruption-ignored:
   cargo test -p shakedown --features mongodb-cluster,load --test mongo_cluster_load_disruption -- --ignored
 
-# Book chapter tests, sample services (`order-service`, `fulfillment-service`), and Docker images for them live in the sibling `shakedown-example` repository (see its `justfile` and README).
+# ----------------------------
+# crates.io packaging (never publishes)
+# ----------------------------
+
+# Files Cargo would put in each published tarball.
+package-list:
+  cargo package -p shakedown-macros --list --no-verify --allow-dirty
+  cargo package -p shakedown --list --no-verify --allow-dirty
+
+# Fail unless both packages include LICENSE and omit tests/ (macros also omit examples/).
+package-assert:
+  bash scripts/assert-crate-package.sh --allow-dirty
+
+publish-dry-run-macros:
+  cargo publish -p shakedown-macros --dry-run --allow-dirty
+
+# May warn until shakedown-macros exists on crates.io at this version.
+publish-dry-run-lib:
+  cargo publish -p shakedown --dry-run --allow-dirty
+
+# rustdoc with the docs.rs feature set (no duckdb, no no-diagnostics).
+doc-docsrs:
+  bash scripts/cargo-doc-docsrs.sh

@@ -45,7 +45,7 @@ New engines or backends should follow the existing pattern:
 2. Implement the async `Resource` lifecycle and bindings/helpers as appropriate.
 3. Add a `tests/*_vertical.rs` (or focused integration) binary, usually `#[ignore]` when Docker is required.
 4. Register the `[[test]]` target in `crates/lib/Cargo.toml` and keep `scripts/check-vertical-tests-registered.sh` green.
-5. Update operator docs in `crates/lib/README.md`.
+5. Update operator docs in `crates/lib/OPERATOR.md`.
 
 ## Docker smoke (maintainers)
 
@@ -58,6 +58,18 @@ Requires a working Docker socket. Prefer serial / low parallelism on small machi
 ## API stability (0.x)
 
 Until 1.0, breaking changes may ship in minor versions when necessary; document them in [CHANGELOG.md](CHANGELOG.md). Prefer additive, feature-gated APIs. Do not treat `#[shakedown::register_resource]` as part of the 0.1 contract (it is a reserved pass-through).
+
+## Publishing (maintainers)
+
+Packaging is in-repo (`just package-assert`, `just publish-dry-run-macros`, `just publish-dry-run-lib`). A real publish is **not** a just recipe.
+
+1. Confirm `just package-assert` lists `LICENSE` and no `tests/` paths.
+2. Dry-run both crates (`just publish-dry-run-macros`, then `just publish-dry-run-lib` — the library dry-run may warn until the macros crate is on crates.io).
+3. crates.io account: verified email and 2FA. Use trusted publishing for `sebastianconcept/shakedown` **or** set repository secret `CARGO_REGISTRY_TOKEN`.
+4. Publish macros, wait until that version is on the index, publish the library — **or** push a `v*` git tag so `.github/workflows/release.yml` does that wait for you.
+5. Confirm docs.rs builds and the crates.io README renders.
+6. `cargo owner --add` if a backup account or org should own the crates.
+7. After the upload, set the CHANGELOG date and crates.io / GitHub release links for that version.
 
 ## License
 

@@ -5,18 +5,18 @@ Start here depending on what you need:
 | If you want… | Go here |
 |--------------|---------|
 | Product pitch and no-Docker quick start | [Workspace README](../README.md) |
-| Features, CI, helpers, operator workflows | [crates/lib/README.md](../crates/lib/README.md) |
+| Features, CI, helpers, operator workflows | [crates/lib/OPERATOR.md](../crates/lib/OPERATOR.md) |
 | Adopting Shakedown in your CI | [adopting-in-ci.md](adopting-in-ci.md) |
 | `#[shakedown::test]` and related macros | [crates/macros/README.md](../crates/macros/README.md) |
 | How this workspace organizes code | [code-organization-guide.md](code-organization-guide.md) |
 | API reference | [docs.rs/shakedown](https://docs.rs/shakedown) |
-| Walkthrough tutorial | [shakedown.dev/guide](https://shakedown.dev/guide) |
+| Walkthrough tutorial | [shakedown.dev quick start](https://shakedown.dev/docs/guides/quick-start/) |
 
 ## What lives in this repo
 
 Code-adjacent docs: crate READMEs under `crates/`, this `docs/` folder, and [CHANGELOG.md](../CHANGELOG.md) / [CONTRIBUTING.md](../CONTRIBUTING.md) at the repo root.
 
-Workflow commands live in the root [`justfile`](../justfile) (`just help`, `just qa`, `just test` vs `just test-workspace`, per-target Docker `#[ignore]` recipes). For every way to run library tests (workspace, all-features, Docker `#[ignore]` binaries, full `--include-ignored` sweep, CI recommendations), see [crates/lib/README.md § Running tests](../crates/lib/README.md#running-tests). For a single sweep of every `tests/*_vertical.rs` engine smoke binary (`just test-shakedown-resources-smoke`), see [§ Resource smoke coverage](../crates/lib/README.md#resource-smoke-coverage).
+Workflow commands live in the root [`justfile`](../justfile) (`just help`, `just qa`, `just test` vs `just test-workspace`, per-target Docker `#[ignore]` recipes). For every way to run library tests (workspace, all-features, Docker `#[ignore]` binaries, full `--include-ignored` sweep, CI recommendations), see [crates/lib/OPERATOR.md § Running tests](../crates/lib/OPERATOR.md#running-tests). For a single sweep of every `tests/*_vertical.rs` engine smoke binary (`just test-shakedown-resources-smoke`), see [§ Resource smoke coverage](../crates/lib/OPERATOR.md#resource-smoke-coverage).
 
 ## Book examples
 

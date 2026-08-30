@@ -1,6 +1,6 @@
 # Shakedown Macros
 
-Procedural attribute macros for Shakedown. They expand to `#[::tokio::test]` wrappers that call [`run_scenario`](../lib/src/lifecycle/mod.rs) on the `shakedown` crate, so you get the same lifecycle as manual harness code without writing the boilerplate.
+Procedural attribute macros for Shakedown. They expand to `#[::tokio::test]` wrappers that call [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html) on the `shakedown` crate, so you get the same lifecycle as manual harness code without writing the boilerplate.
 
 ## Quick start
 
@@ -30,7 +30,7 @@ async fn order_created_event(ctx: &mut Context) {
 }
 ```
 
-The macro expands to an outer `#[::tokio::test]` async function that calls [`run_scenario`](../lib/src/lifecycle/mod.rs):
+The macro expands to an outer `#[::tokio::test]` async function that calls [`run_scenario`](https://docs.rs/shakedown/latest/shakedown/fn.run_scenario.html):
 
 - Creates `Context::new()` and `EventLog::new()`
 - Registers builtin resources when given `resources = [...]`
@@ -52,7 +52,7 @@ async fn fault_injected_scenario(ctx: &mut Context) {
 
 The generated code calls `ctx.set_scenario_kind(ScenarioKind::Faulty)` before running the scenario.
 
-**`fault_profile = "..."`:** expanded to `ctx.set_fault_profile("...")` immediately after `set_scenario_kind(Faulty)` (before `run_scenario`). Use it to tag a scenario for harness presets or your own assertions via [`Context::fault_profile`](../lib/src/lifecycle/mod.rs).
+**`fault_profile = "..."`:** expanded to `ctx.set_fault_profile("...")` immediately after `set_scenario_kind(Faulty)` (before `run_scenario`). Use it to tag a scenario for harness presets or your own assertions via [`Context::fault_profile`](https://docs.rs/shakedown/latest/shakedown/struct.Context.html#method.fault_profile).
 
 **Other `key = <expr>` pairs:** reserved for future macro wiring (same parse shape as today). They are accepted and **ignored** so call sites stay forward-compatible. Toxic specs and fault control during the test remain on [`Context`] / `FaultHandle` APIs.
 
@@ -110,14 +110,14 @@ Example:
 async fn search_after_write(ctx: &mut Context) { /* ... */ }
 ```
 
-Compile-time UI coverage for these attributes lives in `tests/trybuild/` (pass + `compile_fail` cases with `.stderr` snapshots).
+Compile-time UI coverage for these attributes lives in [`crates/macros/tests/trybuild/`](https://github.com/sebastianconcept/shakedown/tree/master/crates/macros/tests/trybuild) (pass + `compile_fail` cases with `.stderr` snapshots). That tree is not shipped in the crates.io tarball.
 
 ## Runtime integration tests
 
 End-to-end runs (macro expansion → `tokio::test` → `run_scenario`) live in the `shakedown` crate:
 
-- [`crates/lib/tests/macro_integration.rs`](../lib/tests/macro_integration.rs): `FakeResource` only, no Docker. Tests use `ignore = false` so they run in a normal `cargo test -p shakedown` pass (non-empty `resources` otherwise emits `#[ignore]` by default).
-- [`crates/lib/tests/macro_kafka.rs`](../lib/tests/macro_kafka.rs): `#[shakedown::test(resources = [Kafka])]`. The `macro_kafka` integration target uses `required-features = ["kafka"]` in `crates/lib/Cargo.toml`, so it is omitted from default `cargo test --workspace` builds. With `--features kafka`, the test is still **`#[ignore]`** until you opt in (requires Docker):
+- [`macro_integration.rs`](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/tests/macro_integration.rs): `FakeResource` only, no Docker. Tests use `ignore = false` so they run in a normal `cargo test -p shakedown` pass (non-empty `resources` otherwise emits `#[ignore]` by default).
+- [`macro_kafka.rs`](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/tests/macro_kafka.rs): `#[shakedown::test(resources = [Kafka])]`. The `macro_kafka` integration target uses `required-features = ["kafka"]` in `crates/lib/Cargo.toml`, so it is omitted from default `cargo test --workspace` builds. With `--features kafka`, the test is still **`#[ignore]`** until you opt in (requires Docker):
 
   ```text
   cargo test -p shakedown --features kafka macro_kafka -- --ignored
@@ -140,7 +140,7 @@ async fn basic_test(ctx: &mut Context) {
 ### Test with resources
 
 ```rust,ignore
-#[shakedown::test(resources = [Fake])]
+#[shakedown::test(resources = [Fake], ignore = false)]
 async fn with_fake_resource(ctx: &mut Context) {
     assert!(!ctx.resources().is_empty());
 }
@@ -160,7 +160,7 @@ async fn faulty_scenario(ctx: &mut Context) {
 
 ## Testing
 
-From the repo root: `cargo test -p shakedown-macros` (unit tests + trybuild UI tests), or `just test-macros`. Full workspace and Docker-backed `shakedown` integration tests are documented in [`crates/lib/README.md` § Running tests](../lib/README.md#running-tests).
+From the repo root: `cargo test -p shakedown-macros` (unit tests + trybuild UI tests), or `just test-macros`. Full workspace and Docker-backed `shakedown` integration tests are documented in [Operator docs — Running tests](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/OPERATOR.md#running-tests).
 
 ## `#[shakedown::register_resource]`
 
@@ -177,5 +177,5 @@ the annotated item unchanged.
 
 ## Related docs
 
-- **Crate overview and resource details:** [`crates/lib/README.md`](../lib/README.md), including [Extra infrastructure features](../lib/README.md#extra-infrastructure-features-extra-infra) (`redis` … `timescaledb`) and [Typed helpers](../lib/README.md#typed-helpers).
-- **MVP / feature sequencing:** follow your team's external planning docs or in-repo milestone notes when present.
+- **Crate overview and resource details:** [Operator README](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/OPERATOR.md), including [Extra infrastructure features](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/OPERATOR.md#extra-infrastructure-features) (`redis` … `timescaledb`) and [Typed helpers](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/OPERATOR.md#typed-helpers).
+- **Library API:** [docs.rs/shakedown](https://docs.rs/shakedown/latest/shakedown/)

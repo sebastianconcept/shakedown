@@ -80,7 +80,7 @@ For a full sweep of every `tests/*_vertical.rs` engine binary in the `shakedown`
 just test-shakedown-resources-smoke
 ```
 
-That recipe enables ignored tests across the resource matrix. See [crates/lib/README.md § Resource smoke coverage](../crates/lib/README.md#resource-smoke-coverage).
+That recipe enables ignored tests across the resource matrix. See [crates/lib/OPERATOR.md § Resource smoke coverage](../crates/lib/OPERATOR.md#resource-smoke-coverage).
 
 ## Common pitfall
 

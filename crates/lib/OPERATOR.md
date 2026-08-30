@@ -1,8 +1,8 @@
-# Shakedown (library crate)
+# Shakedown operator guide
 
 Prove a system is safe to promote by running realistic scenarios against the real stack: provision, seed, exercise, assert, then tear down with evidence you can trust in CI.
 
-This is the operator README for the `shakedown` crate: features, CI, helpers, and day-to-day workflows. For the short product pitch and a no-Docker quick start, see the [workspace README](../../README.md).
+This is the operator README for the `shakedown` crate: features, CI, helpers, and day-to-day workflows. For the short product pitch and a no-Docker quick start, see the [workspace README](https://github.com/sebastianconcept/shakedown/blob/master/README.md) (that file is also the crates.io landing page).
 
 ## Overview
 
@@ -23,11 +23,11 @@ Shakedown does not replace your database drivers or message clients. It **provis
 
 | Category | Harness surface | You bring |
 |----------|-----------------|-----------|
-| **SQL** | [`PostgresBindings`](src/resources.rs), [`MariaDbBindings`](src/resources.rs), [`MysqlBindings`](src/resources.rs), [`SqliteBindings`](src/resources.rs); TimescaleDB uses Postgres-shaped [`PostgresBindings`](src/resources.rs) via [`Context::timescaledb_bindings`](src/lifecycle/mod.rs) and [`TimescaledbHelpers`](src/resources/timescaledb/helpers.rs) | `tokio-postgres`, `sqlx`, `rusqlite`, … |
-| **Message buses** | [`KafkaBindings`](src/resources.rs), [`RabbitBindings`](src/resources.rs), [`NatsBindings`](src/resources.rs) | `rdkafka`, `lapin`, `async-nats`, … |
-| **Cache / KV** | [`RedisBindings`](src/resources.rs) (Redis and Valkey share this type) | `redis` crate, … |
-| **Document / graph** | [`MongoBindings`](src/resources.rs), [`Neo4jBindings`](src/resources.rs), [`DuckDbBindings`](src/resources.rs) | Official MongoDB driver, `neo4rs`, `duckdb`, … |
-| **Search / vector** | Elasticsearch, OpenSearch, Qdrant, Weaviate bindings and helpers — see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) | `reqwest`, `qdrant-client`, … |
+| **SQL** | [`PostgresBindings`](src/resources.rs), [`MariaDbBindings`](src/resources.rs), [`MysqlBindings`](src/resources.rs), [`SqliteBindings`](src/resources.rs); TimescaleDB uses Postgres-shaped [`PostgresBindings`](src/resources.rs) via [`Context::timescaledb_bindings`](src/lifecycle/mod.rs) and [`TimescaledbHelpers`](src/resources/timescaledb/helpers.rs) | `tokio-postgres`, `rusqlite`, or `shakedown::sqlx` when the `sqlx` feature is on (do not add a second `sqlx` crate) |
+| **Message buses** | [`KafkaBindings`](src/resources.rs), [`RabbitBindings`](src/resources.rs), [`NatsBindings`](src/resources.rs) | `shakedown::rdkafka` / `shakedown::lapin` when those features are on (do not add a second `rdkafka` or `lapin`); `async-nats` for NATS |
+| **Cache / KV** | [`RedisBindings`](src/resources.rs) (Redis and Valkey share this type) | `shakedown::redis` when the `redis` or `valkey` feature is on |
+| **Document / graph** | [`MongoBindings`](src/resources.rs), [`Neo4jBindings`](src/resources.rs), [`DuckDbBindings`](src/resources.rs) | `shakedown::mongodb` when the `mongodb` feature is on; `neo4rs`, `duckdb` for those engines |
+| **Search / vector** | Elasticsearch, OpenSearch, Qdrant, Weaviate bindings and helpers — see [Extra infrastructure features](#extra-infrastructure-features) | `reqwest`, `qdrant-client`, … |
 | **Time-series / analytical** | [`InfluxDbBindings`](src/resources.rs); TimescaleDB via [`Context::timescaledb_bindings`](src/lifecycle/mod.rs) | Influx HTTP client, SQL client for Timescale |
 
 **Reference data and seeding:** There is no first-party Shakedown seeding trait in this release. Load reference data and schema in scenario code using helpers, `*_bindings()` plus your own clients, resource `migrations` / `seed` paths on `#[shakedown::test(resources = [...])]`, or [`Resource::set_seed`](src/resources.rs) closures. The harness owns isolation and lifecycle, not a shared fixture-file format.
@@ -47,21 +47,9 @@ shakedown/
 - **[`EnvironmentBackend`] trait** — implement for alternative execution environments (also `async_trait` for `dyn` use)
 - **`Context::register_builtin` / `register_extension`** — wire first-party or third-party resources
 
-## Milestone status
-
-Internal sequencing for maintainers. Newcomers can skip this section.
-
-| MVP milestone | Status |
-|---------------|--------|
-| `mvp-typed-helpers` | **Complete** (2026-03-29). Typed helpers on [`Context`](src/lifecycle/mod.rs); see [Typed helpers](#typed-helpers). |
-| `extra-infra` | **Complete** (2026-03-31). Twelve additional first-party resources; see [Extra infrastructure features](#extra-infrastructure-features-extra-infra). |
-| `mvp-examples` | **Next.** Living chapter catalog in the sibling **shakedown-example** repository. |
-
-**Shipped and documented below:** outbox + publication verification (Kafka, RabbitMQ, NATS JetStream, Redis Streams; MongoDB and DuckDB storage), mock HTTP/gRPC services, service-under-test containers (`services`), fault injection via Toxiproxy, and first-party relational engines (Postgres, MariaDB, MySQL, SQLite). Further milestones are tracked in product planning materials linked from [`docs/README.md`](../../docs/README.md).
-
 Default `cargo test -p shakedown` does not require Docker.
 
-## Extra infrastructure features (`extra-infra`)
+## Extra infrastructure features
 
 The following **Cargo features** add first-party [`Resource`](src/resources.rs) implementations, [`BuiltinResource`](src/resources.rs) variants, bindings on [`Context`](src/lifecycle/mod.rs), optional [`EnvMapping`](src/service/types.rs) / service injection, and typed helpers. Each feature is **independent** unless noted (for example OpenSearch reuses internal HTTP logic with Elasticsearch but has a separate feature and types).
 
@@ -111,9 +99,19 @@ Integration tests that start containers are usually `#[ignore]`; run them with `
 
 ### Standalone default vs cluster topologies
 
-**First-party builtins target a single standalone node per engine** (one container per engine per test process, suite-shared and refcounted) with **scenario-scoped logical isolation** (prefixes, databases, buckets, etc.). They do **not** start multi-node or highly available clusters.
+**Standalone** first-party builtins start one suite-shared node per engine (one container per engine per test process, refcounted) with scenario-scoped logical isolation (prefixes, databases, buckets).
 
-If you need **cluster** or **replica-set** layouts (Kafka KRaft quorum, Redis Sentinel, MongoDB replica sets, OpenSearch multi-node, and so on), treat that as **custom infrastructure**: implement [`Resource`](src/resources.rs) for your topology, use **Docker Compose** or an external environment, or point bindings at a team-managed endpoint and document the contract in your scenarios. See [Extension points](#extension-points).
+**Cluster** features start first-party multi-node layouts on a shared Docker network:
+
+| Feature | Topology |
+|---------|----------|
+| `kafka-cluster` | Multi-broker KRaft |
+| `postgres-cluster` | Primary + streaming replica |
+| `mongodb-cluster` | Replica set |
+| `redis-sentinel` | Primary + replicas + Sentinel |
+| `rabbitmq-cluster` | Erlang cluster + quorum default queue type |
+
+For topologies that are not first-party (for example an OpenSearch multi-node cluster), implement [`Resource`](src/resources.rs), use Docker Compose or an external environment, or point bindings at a team-managed endpoint. See [Extension points](#extension-points).
 
 ## Running tests
 
@@ -329,7 +327,7 @@ Docker-backed tests are opt-in; see [Running tests](#running-tests) for the full
         println!("Bootstrap: {}", bindings.bootstrap_servers);
         println!("Topic prefix: {}", bindings.topic_prefix);
         
-        // Use bindings to construct an rdkafka client:
+        // Use bindings with the re-exported client (`use shakedown::rdkafka::config::ClientConfig`):
         // let client = ClientConfig::new()
         //     .set("bootstrap.servers", &bindings.bootstrap_servers)
         //     .set("client.id", format!("{}client", bindings.client_id_prefix.as_ref().unwrap_or(&"")))
@@ -514,7 +512,7 @@ There are **three patterns**; pick based on what you are proving:
 
 **When to use this:** You want the **happy path** for scenario steps: produce or consume messages with isolation baked in, or run SQL assertions against the scenario-scoped database without hand-rolling connection URLs. Helpers use the **same effective bindings** as raw accessors (including Toxiproxy-rewritten Kafka bootstrap when fault injection is active — see [Fault injection](#fault-injection-toxiproxy-and-the-kafka-path)).
 
-Entry points: `ctx.kafka()` ([`KafkaHelpers`](src/resources/kafka/helpers.rs)), `ctx.rabbit()` ([`RabbitHelpers`](src/resources/rabbit/helpers.rs)), `ctx.postgres()` ([`PostgresHelpers`](src/resources/postgres/helpers.rs)), `ctx.mariadb()` / `ctx.mysql()` / `ctx.sqlite()` ([`MariaDbHelpers`](src/resources/mariadb/helpers.rs), [`MysqlHelpers`](src/resources/mysql/helpers.rs), [`SqliteHelpers`](src/resources/sqlite/helpers.rs)), `ctx.redis()` ([`RedisHelpers`](src/resources/redis/helpers.rs)), `ctx.mongo()` ([`MongoHelpers`](src/resources/mongo/helpers.rs)), `ctx.nats()` / `ctx.neo4j()` / `ctx.duckdb()` / `ctx.elasticsearch()` / `ctx.opensearch()` / `ctx.qdrant()` / `ctx.weaviate()` / `ctx.influxdb()` / `ctx.timescaledb()` — see [Extra infrastructure features](#extra-infrastructure-features-extra-infra) and the [feature flags table](#feature-flags-helpers) below.
+Entry points: `ctx.kafka()` ([`KafkaHelpers`](src/resources/kafka/helpers.rs)), `ctx.rabbit()` ([`RabbitHelpers`](src/resources/rabbit/helpers.rs)), `ctx.postgres()` ([`PostgresHelpers`](src/resources/postgres/helpers.rs)), `ctx.mariadb()` / `ctx.mysql()` / `ctx.sqlite()` ([`MariaDbHelpers`](src/resources/mariadb/helpers.rs), [`MysqlHelpers`](src/resources/mysql/helpers.rs), [`SqliteHelpers`](src/resources/sqlite/helpers.rs)), `ctx.redis()` ([`RedisHelpers`](src/resources/redis/helpers.rs)), `ctx.mongo()` ([`MongoHelpers`](src/resources/mongo/helpers.rs)), `ctx.nats()` / `ctx.neo4j()` / `ctx.duckdb()` / `ctx.elasticsearch()` / `ctx.opensearch()` / `ctx.qdrant()` / `ctx.weaviate()` / `ctx.influxdb()` / `ctx.timescaledb()` — see [Extra infrastructure features](#extra-infrastructure-features) and the [feature flags table](#feature-flags-helpers) below.
 
 ### Pattern 3: outbox rows + publication verifiers
 

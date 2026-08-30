@@ -1,7 +1,7 @@
 name: Release
 
 # Publishes shakedown-macros then shakedown when a version tag is pushed.
-# Requires repository secret CARGO_REGISTRY_TOKEN (crates.io API token).
+# Requires repository secret CARGO_REGISTRY_TOKEN, or crates.io trusted publishing for this repo.
 
 on:
   push:
@@ -22,13 +22,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Package smoke (no publish)
+        run: |
+          cargo package -p shakedown-macros --no-verify
+          cargo package -p shakedown --no-verify
+
       - name: Publish shakedown-macros
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish -p shakedown-macros --locked
 
       - name: Wait for crates.io index
-        run: sleep 30
+        run: |
+          version="$(awk -F '"' '/^version = / { print $2; exit }' crates/macros/Cargo.toml)"
+          bash scripts/wait-for-crates-io-crate.sh shakedown-macros "$version"
 
       - name: Publish shakedown
         env:

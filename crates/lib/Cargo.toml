@@ -5,20 +5,56 @@ edition.workspace = true
 rust-version.workspace = true
 authors = ["Sebastian Sastre <sebastianconcept@gmail.com>"]
 description = "Progressive confidence testing for Rust backend services — real infrastructure, structured evidence, safe to ship."
-readme = "README.md"
+readme = "../../README.md"
 repository = "https://github.com/sebastianconcept/shakedown"
-homepage = "https://shakedown.dev"
+homepage = "https://shakedown.dev/docs/guides/quick-start/"
 documentation = "https://docs.rs/shakedown"
 license = "MIT"
 keywords = ["testing", "integration-testing", "kafka", "postgres", "testcontainers"]
 categories = ["development-tools::testing"]
+exclude = ["tests/**"]
 
+# docs.rs rustdoc: advertised public API. Omit `duckdb` (bundled native compile) and `no-diagnostics`.
 [package.metadata.docs.rs]
-all-features = true
+all-features = false
+features = [
+    "mock-services",
+    "grpc",
+    "tcp-mock-services",
+    "udp-mock-services",
+    "kafka",
+    "kafka-cluster",
+    "postgres",
+    "postgres-cluster",
+    "mariadb",
+    "mysql",
+    "sqlite",
+    "sqlx",
+    "outbox",
+    "rabbitmq",
+    "rabbitmq-cluster",
+    "fault-injection",
+    "redis",
+    "valkey",
+    "redis-sentinel",
+    "mongodb",
+    "mongodb-cluster",
+    "nats",
+    "neo4j",
+    "elasticsearch",
+    "opensearch",
+    "qdrant",
+    "weaviate",
+    "influxdb",
+    "timescaledb",
+    "cluster",
+    "services",
+    "load",
+]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-# Procedural macros (greeting smoke test; macros milestone will expand usage)
+# Procedural macros (`#[shakedown::test]`, `#[shakedown::faulty_test]`)
 shakedown-macros = { version = "0.1.0", path = "../macros" }
 
 # Error handling and serialization
