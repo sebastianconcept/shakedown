@@ -1,7 +1,7 @@
 use super::*;
-use crate::error::{ResourceHandle, ScenarioId};
-use crate::event::{Event, EventSnapshot};
-use crate::resources::{KafkaBindings, Resource};
+use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
+use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
+use crate::resources::{BuiltinResource, FakeResource, KafkaBindings, Resource};
 use crate::ScenarioError;
 use async_trait::async_trait;
 
