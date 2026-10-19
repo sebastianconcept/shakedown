@@ -56,7 +56,8 @@ pub enum Phase {
     Spike { duration: Duration, peak_rate: Rate },
     /// Zero traffic for `duration`.
     Pause { duration: Duration },
-    /// Closed model: fixed virtual users for `duration`.
+    /// Closed model: fixed virtual users for `duration`. Each user repeats its work back to back,
+    /// so `workers`, `max_workers`, and the saturation policy do not apply to this phase.
     ConstantVus { duration: Duration, count: usize },
     /// Closed model: ramp virtual users between `from` and `to` (inclusive endpoints, linear).
     RampVus {
@@ -188,7 +189,7 @@ pub enum LoadRuntime {
     },
 }
 
-/// Validated load profile: phases, worker bounds, saturation, and runtime hint.
+/// Validated load profile: phases, worker bounds, saturation, runtime hint, and recovery budget.
 #[cfg_attr(docsrs, doc(cfg(feature = "load")))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadProfile {
@@ -197,6 +198,7 @@ pub struct LoadProfile {
     max_workers: usize,
     saturation_policy: SaturationPolicy,
     runtime: LoadRuntime,
+    recovery: Option<RecoveryConfig>,
 }
 
 impl LoadProfile {
@@ -208,6 +210,7 @@ impl LoadProfile {
             max_workers: LoadProfileBuilder::DEFAULT_MAX_WORKERS,
             saturation_policy: SaturationPolicy::default(),
             runtime: LoadRuntime::default(),
+            recovery: None,
         }
     }
 
@@ -235,6 +238,15 @@ impl LoadProfile {
     pub fn runtime(&self) -> &LoadRuntime {
         &self.runtime
     }
+
+    /// Recovery budget the load driver enforces while the run is active.
+    ///
+    /// `None` means the run never stops because of its error rate; only
+    /// [`LoadHandle::await_recovery`](crate::load::LoadHandle::await_recovery) callers see a
+    /// timeout.
+    pub fn recovery(&self) -> Option<&RecoveryConfig> {
+        self.recovery.as_ref()
+    }
 }
 
 /// Builder for [`LoadProfile`].
@@ -245,6 +257,7 @@ pub struct LoadProfileBuilder {
     max_workers: usize,
     saturation_policy: SaturationPolicy,
     runtime: LoadRuntime,
+    recovery: Option<RecoveryConfig>,
 }
 
 impl LoadProfileBuilder {
@@ -278,6 +291,18 @@ impl LoadProfileBuilder {
     /// Hint for whether load runs on the shared runtime or a dedicated pool.
     pub fn runtime(mut self, runtime: LoadRuntime) -> Self {
         self.runtime = runtime;
+        self
+    }
+
+    /// Opt in to a recovery budget the load driver enforces while the run is active.
+    ///
+    /// Without this call the driver never stops a run because of its error rate, so steady
+    /// low-rate failures (for example during fault injection) do not abort the run. With it, the
+    /// driver stops with [`LoadError::RecoveryTimeout`] once the rolling error rate has stayed above
+    /// [`RecoveryConfig::error_rate_threshold`] for [`RecoveryConfig::timeout`]. Time spent
+    /// paused does not count toward the timeout.
+    pub fn recovery(mut self, recovery: RecoveryConfig) -> Self {
+        self.recovery = Some(recovery);
         self
     }
 
@@ -322,18 +347,30 @@ impl LoadProfileBuilder {
             max_workers: self.max_workers,
             saturation_policy: self.saturation_policy,
             runtime: self.runtime,
+            recovery: self.recovery,
         })
     }
 }
 
-/// Tunables for [`LoadHandle::await_recovery`](crate::load::LoadHandle::await_recovery).
-#[derive(Debug, Clone)]
+/// Error-rate recovery budget for a load run.
+///
+/// Two consumers read [`Self::timeout`] with different meanings:
+///
+/// - [`LoadHandle::await_recovery`](crate::load::LoadHandle::await_recovery) waits up to the
+///   timeout for the rolling error rate to fall to [`Self::error_rate_threshold`] after a failure.
+/// - A profile built with [`LoadProfileBuilder::recovery`] makes the driver itself stop with
+///   [`crate::load::LoadError::RecoveryTimeout`] when the rolling error rate stays above that
+///   threshold for the whole timeout.
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecoveryConfig {
-    /// Wall-clock budget for waiting until the rolling error rate is at or below [`Self::error_rate_threshold`].
+    /// Wall-clock budget. For `await_recovery`, how long to wait for the rolling error rate to
+    /// reach [`Self::error_rate_threshold`]. For a profile budget, how long the rate may stay
+    /// continuously above it before the driver stops the run.
     pub timeout: Duration,
     /// Target maximum error rate (failed / completed) over [`Self::rolling_window`], e.g. `0.0` for zero failures in-window.
     pub error_rate_threshold: f64,
-    /// Rolling window for error-rate checks (and threshold-crossing alarms).
+    /// Rolling window for error-rate checks (and threshold-crossing alarms). Metrics are kept in
+    /// 100ms buckets, so the effective resolution is 100ms.
     pub rolling_window: Duration,
     /// Poll interval while waiting for recovery.
     pub poll_interval: Duration,

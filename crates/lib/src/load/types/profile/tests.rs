@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::load::error::LoadError;
 
-use super::{LoadProfile, LoadRuntime, Phase, Rate, SaturationPolicy};
+use super::{LoadProfile, LoadRuntime, Phase, Rate, RecoveryConfig, SaturationPolicy};
 
 #[test]
 fn build_succeeds_for_valid_open_model_profile() {
@@ -179,6 +179,35 @@ fn warmup_invalid_rate_rejected() {
         .build()
         .expect_err("invalid rate");
     assert!(matches!(error, LoadError::InvalidRate { rate } if rate == 0.0));
+}
+
+#[test]
+fn recovery_budget_round_trips_on_the_profile() {
+    // Given a profile built with an explicit recovery budget
+    let configured = RecoveryConfig::new(Duration::from_millis(250)).with_error_rate_threshold(0.2);
+
+    // When the profile is built
+    let profile = LoadProfile::open_model()
+        .phase(Phase::constant_vus(Duration::from_millis(10), 2))
+        .recovery(configured.clone())
+        .build()
+        .expect("profile with recovery budget");
+
+    // Then the profile exposes exactly that budget
+    assert_eq!(profile.recovery(), Some(&configured));
+}
+
+#[test]
+fn recovery_budget_is_opt_in() {
+    // Given a profile built without calling `recovery`
+    // When the profile is built
+    let profile = LoadProfile::open_model()
+        .phase(Phase::pause(Duration::from_millis(1)))
+        .build()
+        .expect("default profile");
+
+    // Then the driver has no budget to enforce
+    assert_eq!(profile.recovery(), None);
 }
 
 #[test]

@@ -122,7 +122,7 @@ lapin = { version = "4.3" }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 serial_test = "3"
 time = { version = "0.3", default-features = false, features = ["formatting", "parsing"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "test-util"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 # Unary gRPC client for `mock_service_grpc` integration test (no codegen; uses `tonic_prost::ProstCodec`).
 http = "1"
