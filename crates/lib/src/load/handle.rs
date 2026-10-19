@@ -4,7 +4,7 @@
 use std::future::Future;
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant as StdInstant};
 
 use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore};
@@ -187,7 +187,20 @@ impl Drop for LoadHandle {
     }
 }
 
-/// Start a load run: open-model phases use wall-clock scheduling; closed-model VU phases run concurrent loops.
+/// Start a load run on the shared scenario runtime.
+///
+/// Open-model phases schedule arrivals on the wall clock. A closed-model
+/// [`Phase::ConstantVus`](super::Phase::ConstantVus) phase starts one loop per virtual user on
+/// that same runtime: the user runs the work future to completion, then starts another, until the
+/// phase duration elapses.
+///
+/// [`LoadRuntime::Dedicated`] is rejected with [`LoadError::UnsupportedRuntime`] before a handle
+/// is returned and before any load timeline event is recorded.
+///
+/// [`RecoveryConfig::timeout`](super::RecoveryConfig::timeout) is enforced by the driver. After the
+/// rolling error rate rises above [`RecoveryConfig::error_rate_threshold`](super::RecoveryConfig::error_rate_threshold),
+/// the driver stops with [`LoadError::RecoveryTimeout`] if the rate stays above that threshold for
+/// the whole timeout.
 pub async fn start_load<E, F, Fut>(
     context: &mut Context,
     load_name: &str,
@@ -199,8 +212,9 @@ where
     Fut: Future<Output = Result<(), E>> + Send + 'static,
     E: std::fmt::Display + Send + 'static,
 {
-    if !matches!(profile.runtime(), LoadRuntime::Shared) {
-        return Err(LoadError::UnsupportedRuntime);
+    match profile.runtime() {
+        LoadRuntime::Shared => {}
+        LoadRuntime::Dedicated { .. } => return Err(LoadError::UnsupportedRuntime),
     }
 
     let work = Arc::new(work);
@@ -214,8 +228,7 @@ where
     let events = context.load_event_sender().cloned();
     let load_name_owned = load_name.to_string();
     let error_rate_alert_band = Arc::new(AtomicU8::new(0));
-    // Rolling-window / alert fields only; `timeout` is unused in the driver task.
-    let recovery_defaults = RecoveryConfig::new(Duration::from_secs(60));
+    let recovery = RecoveryWatch::new(profile.recovery().clone());
 
     let join_handle = tokio::spawn(run_driver(
         load_name_owned.clone(),
@@ -227,7 +240,7 @@ where
         paused.clone(),
         phase_watch_tx,
         error_rate_alert_band.clone(),
-        recovery_defaults.clone(),
+        recovery,
     ));
 
     Ok(LoadHandle {
@@ -284,7 +297,7 @@ async fn run_driver<E, F, Fut>(
     paused: Arc<AtomicBool>,
     phase_watch_tx: watch::Sender<Option<usize>>,
     error_rate_alert_band: Arc<AtomicU8>,
-    recovery_defaults: RecoveryConfig,
+    recovery: RecoveryWatch,
 ) -> Result<(), LoadError>
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -297,6 +310,10 @@ where
     for (phase_index, named) in profile.phases().iter().enumerate() {
         if *shutdown_rx.borrow() {
             break;
+        }
+
+        if !matches!(profile.runtime(), LoadRuntime::Shared) {
+            return Err(LoadError::UnsupportedRuntime);
         }
 
         let phase_display = phase_label(named, phase_index);
@@ -324,7 +341,7 @@ where
                     &paused,
                     phase_display.as_str(),
                     &error_rate_alert_band,
-                    &recovery_defaults,
+                    &recovery,
                 )
                 .await?;
                 if !*shutdown_rx.borrow() {
@@ -345,7 +362,7 @@ where
                     &paused,
                     phase_display.as_str(),
                     &error_rate_alert_band,
-                    &recovery_defaults,
+                    &recovery,
                 )
                 .await?;
             }
@@ -368,7 +385,7 @@ where
                     &paused,
                     phase_display.as_str(),
                     &error_rate_alert_band,
-                    &recovery_defaults,
+                    &recovery,
                 )
                 .await?;
             }
@@ -389,7 +406,7 @@ where
                     &paused,
                     phase_display.as_str(),
                     &error_rate_alert_band,
-                    &recovery_defaults,
+                    &recovery,
                 )
                 .await?;
             }
@@ -414,7 +431,7 @@ where
                     &paused,
                     phase_display.as_str(),
                     &error_rate_alert_band,
-                    &recovery_defaults,
+                    &recovery,
                 )
                 .await?;
             }
@@ -461,7 +478,7 @@ async fn run_open_model_constant<E, F, Fut>(
     paused: &Arc<AtomicBool>,
     phase_label: &str,
     error_rate_alert_band: &Arc<AtomicU8>,
-    recovery_defaults: &RecoveryConfig,
+    recovery: &RecoveryWatch,
 ) -> Result<(), LoadError>
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -474,8 +491,24 @@ where
     let period = rate_period(rate);
 
     while next_arrival < end {
-        if wait_if_paused(paused, shutdown_rx).await {
+        if *shutdown_rx.borrow() || wait_if_paused(paused, shutdown_rx).await {
             break;
+        }
+
+        match recovery.status(metrics) {
+            RecoveryBudget::Exhausted => {
+                return Err(LoadError::RecoveryTimeout {
+                    timeout: recovery.config.timeout,
+                });
+            }
+            RecoveryBudget::Remaining(remaining) => {
+                let budget_at = Instant::now() + remaining;
+                if budget_at < next_arrival {
+                    tokio::time::sleep_until(budget_at).await;
+                    continue;
+                }
+            }
+            RecoveryBudget::WithinTarget => {}
         }
 
         tokio::time::sleep_until(next_arrival).await;
@@ -490,7 +523,7 @@ where
             shutdown_rx,
             phase_label,
             error_rate_alert_band,
-            recovery_defaults,
+            &recovery.config,
         )
         .await?;
         next_arrival += period;
@@ -525,7 +558,7 @@ async fn run_open_model_ramp<E, F, Fut>(
     paused: &Arc<AtomicBool>,
     phase_label: &str,
     error_rate_alert_band: &Arc<AtomicU8>,
-    recovery_defaults: &RecoveryConfig,
+    recovery: &RecoveryWatch,
 ) -> Result<(), LoadError>
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -555,7 +588,7 @@ where
             paused,
             phase_label,
             error_rate_alert_band,
-            recovery_defaults,
+            recovery,
         )
         .await?;
     }
@@ -735,7 +768,7 @@ async fn run_closed_model_constant_vus<E, F, Fut>(
     paused: &Arc<AtomicBool>,
     _phase_label: &str,
     error_rate_alert_band: &Arc<AtomicU8>,
-    recovery_defaults: &RecoveryConfig,
+    recovery: &RecoveryWatch,
 ) -> Result<(), LoadError>
 where
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -749,7 +782,8 @@ where
     );
 
     let deadline = Instant::now() + duration;
-    let mut join_handles = Vec::new();
+    let stop_vus = Arc::new(AtomicBool::new(false));
+    let mut join_handles = Vec::with_capacity(count);
     for virtual_user_index in 0..count {
         let work = work.clone();
         let metrics = metrics.clone();
@@ -758,10 +792,11 @@ where
         let shutdown_rx = shutdown_rx.clone();
         let paused = paused.clone();
         let band = error_rate_alert_band.clone();
-        let recovery = recovery_defaults.clone();
+        let recovery_config = recovery.config.clone();
+        let stop_vus = stop_vus.clone();
         join_handles.push(tokio::spawn(async move {
             loop {
-                if Instant::now() >= deadline {
+                if stop_vus.load(Ordering::Acquire) || Instant::now() >= deadline {
                     break;
                 }
                 if *shutdown_rx.borrow() {
@@ -769,7 +804,7 @@ where
                 }
                 while paused.load(Ordering::Acquire) {
                     tokio::time::sleep(Duration::from_millis(10)).await;
-                    if *shutdown_rx.borrow() {
+                    if *shutdown_rx.borrow() || stop_vus.load(Ordering::Acquire) {
                         return;
                     }
                 }
@@ -789,14 +824,103 @@ where
                     }
                 }
                 maybe_emit_rolling_error_rate_threshold(
-                    &metrics, &events, &load_name, &band, &recovery,
+                    &metrics,
+                    &events,
+                    &load_name,
+                    &band,
+                    &recovery_config,
                 );
             }
         }));
     }
 
-    for handle in join_handles {
-        let _ = handle.await;
+    let mut runners = std::pin::pin!(futures_util::future::join_all(join_handles));
+    let mut finished = false;
+    loop {
+        let pause = match recovery.status(metrics) {
+            RecoveryBudget::Exhausted => {
+                stop_vus.store(true, Ordering::Release);
+                break;
+            }
+            RecoveryBudget::Remaining(remaining) => remaining.min(recovery_poll(recovery)),
+            RecoveryBudget::WithinTarget => recovery_poll(recovery),
+        };
+        tokio::select! {
+            _ = &mut runners => {
+                finished = true;
+                break;
+            }
+            _ = tokio::time::sleep(pause) => {}
+        }
+    }
+    if !finished {
+        runners.await;
+    }
+    if stop_vus.load(Ordering::Acquire) {
+        return Err(LoadError::RecoveryTimeout {
+            timeout: recovery.config.timeout,
+        });
     }
     Ok(())
+}
+
+/// Shared recovery budget for one load run.
+///
+/// `config` is the profile budget. `above_threshold_since` is the instant the rolling error rate
+/// last rose above [`RecoveryConfig::error_rate_threshold`].
+struct RecoveryWatch {
+    config: RecoveryConfig,
+    above_threshold_since: Mutex<Option<StdInstant>>,
+}
+
+impl RecoveryWatch {
+    fn new(config: RecoveryConfig) -> Self {
+        Self {
+            config,
+            above_threshold_since: Mutex::new(None),
+        }
+    }
+
+    fn status(&self, metrics: &Arc<LoadMetricsAccumulator>) -> RecoveryBudget {
+        let snapshot = LoadMetrics::new(metrics.clone());
+        let completed = snapshot.successful_operations() + snapshot.failed_operations();
+        let rate = if completed == 0 {
+            0.0
+        } else {
+            snapshot.error_rate_in_window(self.config.rolling_window)
+        };
+        let mut above_since = self
+            .above_threshold_since
+            .lock()
+            .expect("recovery episode clock");
+        if rate <= self.config.error_rate_threshold {
+            *above_since = None;
+            return RecoveryBudget::WithinTarget;
+        }
+        let started = above_since.get_or_insert_with(StdInstant::now);
+        let elapsed = started.elapsed();
+        if elapsed >= self.config.timeout {
+            RecoveryBudget::Exhausted
+        } else {
+            RecoveryBudget::Remaining(self.config.timeout.saturating_sub(elapsed))
+        }
+    }
+}
+
+/// How much of the profile recovery timeout is left while the error rate is above target.
+enum RecoveryBudget {
+    /// Rolling error rate is at or below the recovery target.
+    WithinTarget,
+    /// Error rate is above target, with this much of the timeout left.
+    Remaining(Duration),
+    /// Error rate stayed above target for the whole timeout.
+    Exhausted,
+}
+
+fn recovery_poll(recovery: &RecoveryWatch) -> Duration {
+    if recovery.config.poll_interval.is_zero() {
+        Duration::from_millis(1)
+    } else {
+        recovery.config.poll_interval
+    }
 }

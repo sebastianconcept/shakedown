@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::load::error::LoadError;
 
-use super::{LoadProfile, LoadRuntime, Phase, Rate, SaturationPolicy};
+use super::{LoadProfile, LoadRuntime, Phase, Rate, RecoveryConfig, SaturationPolicy};
 
 #[test]
 fn build_succeeds_for_valid_open_model_profile() {
@@ -179,6 +179,23 @@ fn warmup_invalid_rate_rejected() {
         .build()
         .expect_err("invalid rate");
     assert!(matches!(error, LoadError::InvalidRate { rate } if rate == 0.0));
+}
+
+#[test]
+fn recovery_timeout_round_trips_on_the_profile() {
+    let configured = Duration::from_millis(250);
+    let profile = LoadProfile::open_model()
+        .phase(Phase::constant_vus(Duration::from_millis(10), 2))
+        .recovery(RecoveryConfig::new(configured))
+        .build()
+        .expect("profile with recovery budget");
+    assert_eq!(profile.recovery().timeout, configured);
+
+    let defaulted = LoadProfile::open_model()
+        .phase(Phase::pause(Duration::from_millis(1)))
+        .build()
+        .expect("default profile");
+    assert_eq!(defaulted.recovery().timeout, Duration::from_secs(60));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 //! Shared load-facing types: profile / phase graph, saturation and runtime hints, and report assertion DTOs.
 //!
-//! - [`profile`] — [`LoadProfile`], [`Phase`], [`Rate`], worker and warmup rules.
+//! - [`profile`] — [`LoadProfile`], [`Phase`], [`Rate`], worker bounds, and the recovery budget.
 //! - [`verdict`] — in-memory and JSON shapes for assertions and baseline comparison rows.
 
 mod profile;

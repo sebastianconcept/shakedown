@@ -188,7 +188,7 @@ pub enum LoadRuntime {
     },
 }
 
-/// Validated load profile: phases, worker bounds, saturation, and runtime hint.
+/// Validated load profile: phases, worker bounds, saturation, runtime hint, and recovery budget.
 #[cfg_attr(docsrs, doc(cfg(feature = "load")))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadProfile {
@@ -197,6 +197,7 @@ pub struct LoadProfile {
     max_workers: usize,
     saturation_policy: SaturationPolicy,
     runtime: LoadRuntime,
+    recovery: RecoveryConfig,
 }
 
 impl LoadProfile {
@@ -208,6 +209,7 @@ impl LoadProfile {
             max_workers: LoadProfileBuilder::DEFAULT_MAX_WORKERS,
             saturation_policy: SaturationPolicy::default(),
             runtime: LoadRuntime::default(),
+            recovery: RecoveryConfig::new(Duration::from_secs(60)),
         }
     }
 
@@ -235,6 +237,11 @@ impl LoadProfile {
     pub fn runtime(&self) -> &LoadRuntime {
         &self.runtime
     }
+
+    /// Recovery budget the load driver enforces while the run is active.
+    pub fn recovery(&self) -> &RecoveryConfig {
+        &self.recovery
+    }
 }
 
 /// Builder for [`LoadProfile`].
@@ -245,6 +252,7 @@ pub struct LoadProfileBuilder {
     max_workers: usize,
     saturation_policy: SaturationPolicy,
     runtime: LoadRuntime,
+    recovery: RecoveryConfig,
 }
 
 impl LoadProfileBuilder {
@@ -278,6 +286,14 @@ impl LoadProfileBuilder {
     /// Hint for whether load runs on the shared runtime or a dedicated pool.
     pub fn runtime(mut self, runtime: LoadRuntime) -> Self {
         self.runtime = runtime;
+        self
+    }
+
+    /// Recovery budget the load driver enforces while the run is active.
+    ///
+    /// Default is a 60 second timeout, a zero error-rate target, and a one second rolling window.
+    pub fn recovery(mut self, recovery: RecoveryConfig) -> Self {
+        self.recovery = recovery;
         self
     }
 
@@ -322,12 +338,18 @@ impl LoadProfileBuilder {
             max_workers: self.max_workers,
             saturation_policy: self.saturation_policy,
             runtime: self.runtime,
+            recovery: self.recovery,
         })
     }
 }
 
-/// Tunables for [`LoadHandle::await_recovery`](crate::load::LoadHandle::await_recovery).
-#[derive(Debug, Clone)]
+/// Error-rate recovery budget for a load run.
+///
+/// [`LoadHandle::await_recovery`](crate::load::LoadHandle::await_recovery) waits until the rolling
+/// error rate is at or below [`Self::error_rate_threshold`], or until [`Self::timeout`] elapses.
+/// The load driver uses the same timeout: if the rolling error rate stays above that threshold for
+/// the whole timeout, the driver stops with [`crate::load::LoadError::RecoveryTimeout`].
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecoveryConfig {
     /// Wall-clock budget for waiting until the rolling error rate is at or below [`Self::error_rate_threshold`].
     pub timeout: Duration,
