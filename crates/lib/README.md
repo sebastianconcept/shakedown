@@ -6,7 +6,7 @@ This is the operator README for the `shakedown` crate: features, CI, helpers, an
 
 ## Overview
 
-- **Scenario orchestration:** lifecycle phases: provision → readiness → seed → run → assert → teardown
+- **Scenario orchestration:** lifecycle phases: provision → readiness → seed → run → assert → teardown. The assert phase does not run your assertions; those stay in the scenario body. See [Not part of the 0.1.0 contract](#not-part-of-the-010-contract).
 - **Resource providers:** async [`Resource`] trait for databases, message queues, and other infrastructure
 - **Error classification:** structured errors that separate scenario failures from infrastructure failures
 - **Event logging:** failure timelines (human-readable stderr on infrastructure failure; pretty-printed JSON under `target/shakedown/timelines/{scenario_id}.json` for CI and tooling)
@@ -43,9 +43,17 @@ shakedown/
 
 ## Extension points
 
-- **[`Resource`] trait** — implement for new infrastructure (with `async_trait` for `Box<dyn Resource>` extensions)
-- **[`EnvironmentBackend`] trait** — implement for alternative execution environments (also `async_trait` for `dyn` use)
-- **`Context::register_builtin` / `register_extension`** — wire first-party or third-party resources
+- **[`Resource`](src/resources.rs) trait** — this is how engines plug in. Implement it for new infrastructure (with `async_trait` for `Box<dyn Resource>` extensions).
+- **`Context::register_builtin` / `register_extension`** — wire first-party or third-party [`Resource`](src/resources.rs)s.
+- **[`EnvironmentBackend`](src/lifecycle/mod.rs)** — not how engines plug in. See [Not part of the 0.1.0 contract](#not-part-of-the-010-contract).
+
+## Not part of the 0.1.0 contract
+
+These names are public in this tree. They are not the 0.1.0 contract.
+
+- **Assert phase.** [`run_scenario`](src/lifecycle/mod.rs) logs “Starting assert phase” and continues. It does not collect or run user assertions. Write assertions in the scenario body, and in helpers that body calls.
+- **`EnvironmentBackend`.** Engines plug in through [`Resource`](src/resources.rs) (`register_builtin` / `register_extension`, or `resources = [...]` on `#[shakedown::test]`). [`EnvironmentBackend::provision_resource`](src/lifecycle/mod.rs) is not called by the harness. The only implementation is [`NoopEnvironmentBackend`](src/lifecycle/mod.rs). Implementing `EnvironmentBackend` does not attach Docker, a local process, or a cloud backend.
+- **`register_resource` and `default_greeting`.** `shakedown` re-exports `test` and `faulty_test` only. On `shakedown-macros`, `#[shakedown::register_resource]` returns the annotated item unchanged, and `default_greeting!` expands to a demo string. Neither macro is part of the 0.1 contract.
 
 ## Milestone status
 
@@ -55,9 +63,9 @@ Internal sequencing for maintainers. Newcomers can skip this section.
 |---------------|--------|
 | `mvp-typed-helpers` | **Complete** (2026-03-29). Typed helpers on [`Context`](src/lifecycle/mod.rs); see [Typed helpers](#typed-helpers). |
 | `extra-infra` | **Complete** (2026-03-31). Twelve additional first-party resources; see [Extra infrastructure features](#extra-infrastructure-features-extra-infra). |
-| `mvp-examples` | **Next.** Living chapter catalog in the sibling **shakedown-example** repository. |
+| `mvp-examples` | **Not in this crate.** Runnable scenarios in this repository are under `crates/examples` (`publish = false`). There is no sibling chapter catalog here. |
 
-**Shipped and documented below:** outbox + publication verification (Kafka, RabbitMQ, NATS JetStream, Redis Streams; MongoDB and DuckDB storage), mock HTTP/gRPC services, service-under-test containers (`services`), fault injection via Toxiproxy, and first-party relational engines (Postgres, MariaDB, MySQL, SQLite). Further milestones are tracked in product planning materials linked from [`docs/README.md`](../../docs/README.md).
+**Shipped and documented below:** outbox + publication verification (Kafka, RabbitMQ, NATS JetStream, Redis Streams; MongoDB and DuckDB storage), mock HTTP/gRPC services, service-under-test containers (`services`), fault injection via Toxiproxy, first-party relational engines (Postgres, MariaDB, MySQL, SQLite), and the cluster layouts in [Standalone default vs cluster topologies](#standalone-default-vs-cluster-topologies).
 
 Default `cargo test -p shakedown` does not require Docker.
 
@@ -111,9 +119,19 @@ Integration tests that start containers are usually `#[ignore]`; run them with `
 
 ### Standalone default vs cluster topologies
 
-**First-party builtins target a single standalone node per engine** (one container per engine per test process, suite-shared and refcounted) with **scenario-scoped logical isolation** (prefixes, databases, buckets, etc.). They do **not** start multi-node or highly available clusters.
+**Standalone builtins** are one node per engine (one container per engine per test process, suite-shared and refcounted) with **scenario-scoped logical isolation** (prefixes, databases, buckets, and so on).
 
-If you need **cluster** or **replica-set** layouts (Kafka KRaft quorum, Redis Sentinel, MongoDB replica sets, OpenSearch multi-node, and so on), treat that as **custom infrastructure**: implement [`Resource`](src/resources.rs) for your topology, use **Docker Compose** or an external environment, or point bindings at a team-managed endpoint and document the contract in your scenarios. See [Extension points](#extension-points).
+**Cluster builtins** are separate opt-in features. Each one starts a multi-node topology on a shared Docker network and exposes node control through [`ClusterControl`](src/cluster/mod.rs). The `cluster` feature is that shared network and control plane (it pulls in bollard). It does not start a topology by itself; enable one of the engine features below.
+
+| Feature | What it starts | `resources = [...]` name |
+|---------|----------------|--------------------------|
+| `kafka-cluster` | Multi-broker KRaft (implies `kafka`) | `KafkaCluster` |
+| `postgres-cluster` | Postgres primary plus replica (implies `postgres`) | `PostgresReplicaSet` |
+| `rabbitmq-cluster` | RabbitMQ Erlang cluster (implies `rabbitmq`) | `RabbitCluster` |
+| `redis-sentinel` | Redis Sentinel group (implies `redis`) | `RedisSentinel` |
+| `mongodb-cluster` | MongoDB replica set (implies `mongodb`) | `MongoReplicaSet` |
+
+Vertical tests for those layouts are in [Resource smoke coverage](#resource-smoke-coverage). Layouts that are not in the table (for example OpenSearch multi-node) are still custom: implement [`Resource`](src/resources.rs), or point bindings at an external cluster.
 
 ## Running tests
 

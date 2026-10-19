@@ -1,6 +1,6 @@
 # Shakedown Macros
 
-Procedural attribute macros for Shakedown. They expand to `#[::tokio::test]` wrappers that call [`run_scenario`](../lib/src/lifecycle/mod.rs) on the `shakedown` crate, so you get the same lifecycle as manual harness code without writing the boilerplate.
+Procedural attribute macros for Shakedown. They expand to `#[::tokio::test]` wrappers that call [`run_scenario`](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/src/lifecycle/mod.rs) on the `shakedown` crate, so you get the same lifecycle as manual harness code without writing the boilerplate. That function lives in the `shakedown` package, not in this crate.
 
 ## Quick start
 
@@ -30,7 +30,7 @@ async fn order_created_event(ctx: &mut Context) {
 }
 ```
 
-The macro expands to an outer `#[::tokio::test]` async function that calls [`run_scenario`](../lib/src/lifecycle/mod.rs):
+The macro expands to an outer `#[::tokio::test]` async function that calls [`run_scenario`](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/src/lifecycle/mod.rs):
 
 - Creates `Context::new()` and `EventLog::new()`
 - Registers builtin resources when given `resources = [...]`
@@ -52,7 +52,7 @@ async fn fault_injected_scenario(ctx: &mut Context) {
 
 The generated code calls `ctx.set_scenario_kind(ScenarioKind::Faulty)` before running the scenario.
 
-**`fault_profile = "..."`:** expanded to `ctx.set_fault_profile("...")` immediately after `set_scenario_kind(Faulty)` (before `run_scenario`). Use it to tag a scenario for harness presets or your own assertions via [`Context::fault_profile`](../lib/src/lifecycle/mod.rs).
+**`fault_profile = "..."`:** expanded to `ctx.set_fault_profile("...")` immediately after `set_scenario_kind(Faulty)` (before `run_scenario`). Use it to tag a scenario for harness presets or your own assertions via [`Context::fault_profile`](https://github.com/sebastianconcept/shakedown/blob/master/crates/lib/src/lifecycle/mod.rs).
 
 **Other `key = <expr>` pairs:** reserved for future macro wiring (same parse shape as today). They are accepted and **ignored** so call sites stay forward-compatible. Toxic specs and fault control during the test remain on [`Context`] / `FaultHandle` APIs.
 
@@ -166,7 +166,12 @@ From the repo root: `cargo test -p shakedown-macros` (unit tests + trybuild UI t
 
 Reserved for a future release and **not part of the 0.1 contract**. Today it is a pass-through
 (no expansion). Do not build production tests that depend on it doing anything beyond leaving
-the annotated item unchanged.
+the annotated item unchanged. The `shakedown` crate does not re-export it.
+
+## `default_greeting!`
+
+**Not part of the 0.1 contract.** It expands to the string literal `"Hello, shakedown!"` and exists
+as a proc-macro smoke demo. Do not use it in scenario code. The `shakedown` crate does not re-export it.
 
 ## Implementation Notes
 

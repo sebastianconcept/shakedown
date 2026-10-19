@@ -2,7 +2,8 @@
 
 [![CI](https://github.com/sebastianconcept/shakedown/actions/workflows/ci.yml/badge.svg)](https://github.com/sebastianconcept/shakedown/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![crates.io](https://img.shields.io/crates/v/shakedown.svg)](https://crates.io/crates/shakedown)
+
+**Not published.** `shakedown` 0.1.0 and `shakedown-macros` 0.1.0 are not on crates.io. This tree does not publish them.
 
 **A harness that produces the evidence your team can replay.** Shakedown is a Rust library for realistic system and integration testing. Declare scenarios with `#[shakedown::test]` against real databases, message buses, and other dependencies where it matters, with enough structure to separate product bugs from flaky harness setup. Start without Docker (`sqlite`, mocks); opt into container-backed stacks via Cargo features when you need them.
 
@@ -102,8 +103,8 @@ Neither `cargo test` nor nextest runs `#[ignore]` tests unless you ask (`--inclu
 
 ## Going further
 
-- [API reference on docs.rs](https://docs.rs/shakedown): types and modules
-- [Online guide](https://shakedown.dev/guide): walkthrough-style tutorial
+- [API reference on docs.rs](https://docs.rs/shakedown): types and modules (empty until a publish; 0.1.0 is not published)
+- Walkthrough: this README, until a guide exists. `https://shakedown.dev/guide` is a coming-soon page.
 - [Operator docs](crates/lib/README.md): features, CI, day-to-day workspace commands
 - [In-repo example](crates/examples/examples/service_with_mock.rs): Postgres + Kafka + mock + service under test (Docker)
 
@@ -113,7 +114,7 @@ Until **1.0**, this crate follows Cargo’s `0.x` semver: minor versions may add
 
 ## The Book
 
-*Shakedown Testing for Software* (working title) is the long-form companion: first scenario through outbox flows, diagnostics, clusters, and load. This repository is the implementation. The guide and book carry the methodology and narrative.
+*Shakedown Testing for Software* (working title) is the long-form companion: first scenario through outbox flows, diagnostics, clusters, and load. This repository is the implementation. Until a guide exists, start with this README.
 
 ## Repository layout
 
