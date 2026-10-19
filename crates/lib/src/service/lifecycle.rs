@@ -15,6 +15,7 @@ use crate::event::{EventLevel, EventLog};
 use crate::lifecycle::Context;
 use crate::service::address::ensure_host_docker_internal_resolution;
 use crate::service::dependency::service_startup_order;
+use crate::service::endpoint::ServiceEndpoint;
 use crate::service::handle::ServiceHandle;
 use crate::service::health::HealthCheck;
 use crate::service::injection::inject_service_env;
@@ -186,11 +187,16 @@ async fn start_one_service(
     }
 
     let primary_host_port = host_ports[0].1;
-    let base_url = format!("http://127.0.0.1:{primary_host_port}");
-    let mut named_urls = std::collections::HashMap::new();
+    // HTTP and gRPC probes dial this origin. TCP and command probes use `host_ports` directly.
+    let probe_origin = format!("http://127.0.0.1:{primary_host_port}");
+    let endpoint = ServiceEndpoint::for_readiness(&specification.health_check, primary_host_port);
+    let mut named_endpoints = std::collections::HashMap::new();
     for (maybe_name, host_port) in &host_ports {
         if let Some(port_name) = maybe_name {
-            named_urls.insert(port_name.clone(), format!("http://127.0.0.1:{host_port}"));
+            named_endpoints.insert(
+                port_name.clone(),
+                ServiceEndpoint::for_readiness(&specification.health_check, *host_port),
+            );
         }
     }
 
@@ -200,7 +206,7 @@ async fn start_one_service(
         service_name,
         &specification.health_check,
         container_ref,
-        &base_url,
+        &probe_origin,
         &host_ports,
     )
     .await
@@ -224,8 +230,8 @@ async fn start_one_service(
 
     let handle = ServiceHandle::new(
         service_name.to_string(),
-        base_url,
-        named_urls,
+        endpoint,
+        named_endpoints,
         container_id,
         true,
     );

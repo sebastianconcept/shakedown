@@ -7,8 +7,9 @@
 //!
 //! Build a [`ServiceUnderTest`] with the Docker image, environment variables, and dependency order,
 //! then register it on [`crate::lifecycle::Context`] before calling [`crate::lifecycle::run_scenario`].
-//! During the run, Shakedown stops the container during teardown. Access the service URL from the
-//! scenario body via `ctx.service_url("my-service")`.
+//! During the run, Shakedown stops the container during teardown. After HTTP or gRPC readiness,
+//! the scenario reads the origin via `ctx.service_url("my-service")`. After TCP or in-container
+//! command readiness, the scenario reads the host and port from [`ServiceHandle::endpoint`].
 //!
 //! If the scenario also declares infrastructure resources, [`crate::lifecycle::run_scenario`] runs
 //! **[`crate::lifecycle::Phase::Seed`]** first: default seeding on those resources and any
@@ -26,6 +27,7 @@
 pub mod address;
 mod builder;
 pub(crate) mod dependency;
+mod endpoint;
 mod handle;
 mod health;
 pub(crate) mod injection;
@@ -41,6 +43,7 @@ pub use address::{
     rewrite_injected_addresses_for_service_container, HOST_DOCKER_INTERNAL,
 };
 pub use builder::ServiceUnderTest;
+pub use endpoint::{MappedHostPort, ServiceEndpoint, ServiceHostPort, ServiceHttpOrigin};
 pub use handle::ServiceHandle;
 pub use health::{HealthCheck, DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_TIMEOUT};
 pub use types::{EnvMapping, PullPolicy, ServiceSpec};
@@ -49,7 +52,11 @@ pub use types::{EnvMapping, PullPolicy, ServiceSpec};
 mod registration_tests {
     use crate::error::{InternalError, ShakedownError};
     use crate::lifecycle::Context;
-    use crate::service::{ServiceHandle, ServiceUnderTest};
+    use crate::service::{HealthCheck, ServiceEndpoint, ServiceHandle, ServiceUnderTest};
+
+    fn http_endpoint(port: u16) -> ServiceEndpoint {
+        ServiceEndpoint::for_readiness(&HealthCheck::http("/"), port)
+    }
 
     fn sample_spec(service_name: &str) -> crate::service::ServiceSpec {
         ServiceUnderTest::docker("traefik/whoami")
@@ -136,22 +143,54 @@ mod registration_tests {
         context.register_service(sample_spec("api")).unwrap();
         let handle = ServiceHandle::new(
             "api".to_string(),
-            "http://127.0.0.1:8080".to_string(),
+            http_endpoint(8080),
             std::collections::HashMap::new(),
             None,
             true,
         );
         // When the harness attaches the handle
         context.set_service_handle("api", handle).unwrap();
-        // Then URL and handle accessors reflect the base URL
+        // Then URL and handle accessors reflect the HTTP origin
         assert_eq!(
             context.service_url("api").as_deref(),
             Some("http://127.0.0.1:8080")
         );
         assert_eq!(
             context.service_handle("api").unwrap().base_url(),
-            "http://127.0.0.1:8080"
+            Some("http://127.0.0.1:8080")
         );
+    }
+
+    #[test]
+    fn service_url_absent_when_readiness_is_tcp() {
+        // Given a registered service whose handle was published from TCP readiness
+        let mut context = Context::new();
+        context.register_service(sample_spec("api")).unwrap();
+        let mut named = std::collections::HashMap::new();
+        named.insert(
+            "admin".to_string(),
+            ServiceEndpoint::for_readiness(&HealthCheck::tcp(), 5433),
+        );
+        let handle = ServiceHandle::new(
+            "api".to_string(),
+            ServiceEndpoint::for_readiness(&HealthCheck::tcp(), 5432),
+            named,
+            None,
+            true,
+        );
+        context.set_service_handle("api", handle).unwrap();
+        // Then the scenario URL is absent and the handle keeps the host and port
+        assert!(context.service_url("api").is_none());
+        let endpoint = context.service_handle("api").unwrap().endpoint();
+        assert!(matches!(
+            endpoint,
+            ServiceEndpoint::HostPort(address) if address.to_string() == "127.0.0.1:5432"
+        ));
+        assert!(context
+            .service_handle("api")
+            .unwrap()
+            .port_url("admin")
+            .is_none());
     }
 
     #[test]
@@ -170,7 +209,7 @@ mod registration_tests {
         let mut context = Context::new();
         let handle = ServiceHandle::new(
             "ghost".to_string(),
-            "http://127.0.0.1:1".to_string(),
+            http_endpoint(1),
             std::collections::HashMap::new(),
             None,
             false,
