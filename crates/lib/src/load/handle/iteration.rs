@@ -60,8 +60,8 @@ impl IterationRecorder {
     }
 
     /// Timeline sink for this run, when the scenario provided one.
-    pub(super) fn events(&self) -> &Option<std::sync::mpsc::Sender<Event>> {
-        &self.events
+    pub(super) fn events(&self) -> Option<&std::sync::mpsc::Sender<Event>> {
+        self.events.as_ref()
     }
 
     /// Run `work` once and record its latency and outcome.
@@ -88,7 +88,7 @@ impl IterationRecorder {
                         format!("vu {index} iteration failed: {error}")
                     }
                 };
-                try_emit_load_event(&self.events, &self.load_name, message);
+                try_emit_load_event(self.events(), &self.load_name, message);
             }
         }
         self.emit_error_rate_alert_on_upward_crossing();
@@ -106,7 +106,7 @@ impl IterationRecorder {
         if above && !previously_above {
             self.error_rate_alert_band.store(1, Ordering::Release);
             try_emit_load_event(
-                &self.events,
+                self.events(),
                 &self.load_name,
                 format!(
                     "error rate crossed above {:.0}% (rolling {:?})",

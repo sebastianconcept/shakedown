@@ -53,84 +53,77 @@ where
             .send(Some(phase_index))
             .map_err(|_| LoadError::DriverStopped)?;
 
-        match &named.phase {
-            Phase::Warmup { duration, rate } => {
-                open_model::run_constant(
-                    &context,
-                    &mut recovery,
-                    *duration,
-                    *rate,
-                    phase_display.as_str(),
-                )
-                .await?;
-                if !*context.shutdown_rx.borrow() {
-                    context.recorder.metrics().set_warmup_end(StdInstant::now());
-                }
-            }
-            Phase::Constant { duration, rate } => {
-                open_model::run_constant(
-                    &context,
-                    &mut recovery,
-                    *duration,
-                    *rate,
-                    phase_display.as_str(),
-                )
-                .await?;
-            }
-            Phase::Ramp {
-                duration,
-                from_rate,
-                to_rate,
-            } => {
-                open_model::run_ramp(
-                    &context,
-                    &mut recovery,
-                    *duration,
-                    *from_rate,
-                    *to_rate,
-                    phase_display.as_str(),
-                )
-                .await?;
-            }
-            Phase::Spike {
-                duration,
-                peak_rate,
-            } => {
-                open_model::run_constant(
-                    &context,
-                    &mut recovery,
-                    *duration,
-                    *peak_rate,
-                    phase_display.as_str(),
-                )
-                .await?;
-            }
-            Phase::Pause { duration } => {
-                try_emit_load_event(
-                    context.recorder.events(),
-                    context.recorder.load_name(),
-                    format!("phase {phase_index} pause for {duration:?}"),
-                );
-                tokio::time::sleep(*duration).await;
-            }
-            Phase::ConstantVus { duration, count } => {
-                closed_model::run_constant_virtual_users(
-                    &context,
-                    &mut recovery,
-                    *duration,
-                    *count,
-                )
-                .await?;
-            }
-            Phase::RampVus { .. } => {
-                return Err(LoadError::UnsupportedPhase {
-                    description: "RampVus (use ConstantVus or wait for a later milestone)",
-                });
-            }
-        }
+        run_phase(
+            &context,
+            &mut recovery,
+            &named.phase,
+            phase_index,
+            &phase_display,
+        )
+        .await?;
     }
 
     Ok(())
+}
+
+/// Hand one phase to the scheduler that runs its traffic model.
+async fn run_phase<E, F, Fut>(
+    context: &DriverContext<F>,
+    recovery: &mut RecoveryWatch,
+    phase: &Phase,
+    phase_index: usize,
+    phase_display: &str,
+) -> Result<(), LoadError>
+where
+    F: Fn() -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), E>> + Send + 'static,
+    E: std::fmt::Display + Send + 'static,
+{
+    match phase {
+        Phase::Warmup { duration, rate } | Phase::Constant { duration, rate } => {
+            open_model::run_constant(context, recovery, *duration, *rate, phase_display).await?;
+            if matches!(phase, Phase::Warmup { .. }) && !*context.shutdown_rx.borrow() {
+                context.recorder.metrics().set_warmup_end(StdInstant::now());
+            }
+            Ok(())
+        }
+        Phase::Spike {
+            duration,
+            peak_rate,
+        } => {
+            open_model::run_constant(context, recovery, *duration, *peak_rate, phase_display).await
+        }
+        Phase::Ramp {
+            duration,
+            from_rate,
+            to_rate,
+        } => {
+            open_model::run_ramp(
+                context,
+                recovery,
+                *duration,
+                *from_rate,
+                *to_rate,
+                phase_display,
+            )
+            .await
+        }
+        Phase::Pause { duration } => {
+            try_emit_load_event(
+                context.recorder.events(),
+                context.recorder.load_name(),
+                format!("phase {phase_index} pause for {duration:?}"),
+            );
+            tokio::time::sleep(*duration).await;
+            Ok(())
+        }
+        Phase::ConstantVus { duration, count } => {
+            closed_model::run_constant_virtual_users(context, recovery, *duration, *count).await
+        }
+        Phase::RampVus { .. } => Err(LoadError::UnsupportedPhase {
+            description: "RampVus (use ConstantVus or wait for a later milestone)",
+        }),
+    }
 }
 
 fn phase_label(named: &NamedPhase, phase_index: usize) -> String {

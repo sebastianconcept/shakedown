@@ -49,8 +49,8 @@ fn unenforced_budget_never_reports_an_episode() {
 
 #[test]
 fn error_rate_above_target_opens_an_episode_with_the_whole_timeout_left() {
-    // Given a budget of 400ms and a run whose every iteration failed
-    let timeout = Duration::from_millis(400);
+    // Given a budget of 2s and a run whose every iteration failed
+    let timeout = Duration::from_secs(2);
     let metrics = fresh_metrics();
     record_failures(&metrics, 5);
     let mut watch = RecoveryWatch::new(Some(&RecoveryConfig::new(timeout)));
@@ -59,7 +59,7 @@ fn error_rate_above_target_opens_an_episode_with_the_whole_timeout_left() {
     let budget = watch.status(&metrics);
 
     // Then an episode has just started and nearly all of the timeout remains
-    assert!(remaining(budget) > Duration::from_millis(350));
+    assert!(remaining(budget) > Duration::from_millis(1500));
 }
 
 #[test]
@@ -83,10 +83,10 @@ fn episode_is_exhausted_once_it_lasts_the_timeout() {
 
 #[test]
 fn episode_restarts_with_a_full_budget_after_the_rate_returns_to_target() {
-    // Given an open episode on a 600ms budget with a 100ms rolling window (one metrics bucket)
+    // Given an open episode on a 1s budget with a 100ms rolling window (one metrics bucket)
     let metrics = fresh_metrics();
     record_failures(&metrics, 5);
-    let configuration = RecoveryConfig::new(Duration::from_millis(600))
+    let configuration = RecoveryConfig::new(Duration::from_secs(1))
         .with_rolling_window(Duration::from_millis(100))
         .with_poll_interval(Duration::from_millis(5));
     let mut watch = RecoveryWatch::new(Some(&configuration));
@@ -99,8 +99,9 @@ fn episode_restarts_with_a_full_budget_after_the_rate_returns_to_target() {
     std::thread::sleep(Duration::from_millis(10));
     let budget = watch.status(&metrics);
 
-    // Then the new episode has a full budget instead of continuing the old one
-    assert!(remaining(budget) > Duration::from_millis(500));
+    // Then the new episode has a full budget instead of continuing the old one, which would have
+    // had under 750ms left
+    assert!(remaining(budget) > Duration::from_millis(850));
 }
 
 #[test]
@@ -124,21 +125,21 @@ fn error_rate_at_or_below_a_non_zero_target_never_opens_an_episode() {
 
 #[test]
 fn paused_time_is_credited_back_to_the_open_episode() {
-    // Given an open episode on a 300ms budget
+    // Given an open episode on a 1s budget
     let metrics = fresh_metrics();
     record_failures(&metrics, 5);
-    let configuration = RecoveryConfig::new(Duration::from_millis(300))
-        .with_poll_interval(Duration::from_millis(5));
+    let configuration =
+        RecoveryConfig::new(Duration::from_secs(1)).with_poll_interval(Duration::from_millis(5));
     let mut watch = RecoveryWatch::new(Some(&configuration));
     remaining(watch.status(&metrics));
 
-    // When the run is paused for 150ms and that time is credited
-    std::thread::sleep(Duration::from_millis(150));
-    watch.credit_paused(Duration::from_millis(150));
+    // When the run is paused for 300ms and that time is credited
+    std::thread::sleep(Duration::from_millis(300));
+    watch.credit_paused(Duration::from_millis(300));
     let budget = watch.status(&metrics);
 
-    // Then the pause did not eat into the budget
-    assert!(remaining(budget) > Duration::from_millis(250));
+    // Then the pause did not eat into the budget, which would have had under 700ms left
+    assert!(remaining(budget) > Duration::from_millis(850));
 }
 
 #[test]

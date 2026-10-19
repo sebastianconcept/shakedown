@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
@@ -17,18 +16,27 @@ use crate::load::LoadError;
 
 use super::driver::DriverContext;
 use super::events::try_emit_load_event;
-use super::iteration::{IterationOrigin, IterationRecorder};
 use super::recovery::{RecoveryBudget, RecoveryWatch};
+use super::virtual_user::run_virtual_user;
 
-/// How long virtual users may finish an in-flight iteration after the run decided to stop them
-/// (recovery budget exhausted, or a user panicked) before their tasks are aborted.
+/// How long virtual users may finish an in-flight iteration once they have been told to stop
+/// before their tasks are aborted.
+///
+/// The clock starts when the phase duration elapses, shutdown arrives, the recovery budget runs
+/// out, or a user panics, whichever comes first.
 const VIRTUAL_USER_STOP_GRACE: Duration = Duration::from_secs(5);
 
 /// Run `count` virtual users for `duration`.
 ///
-/// Returns when every user has stopped. Fails with [`LoadError::RecoveryTimeout`] if the recovery
-/// budget ran out, or [`LoadError::DriverFailed`] if a user task panicked; in both cases the
-/// remaining users are asked to stop and, after [`VIRTUAL_USER_STOP_GRACE`], aborted.
+/// Returns when every user has stopped. A user mid-iteration when the phase ends is given
+/// [`VIRTUAL_USER_STOP_GRACE`] to finish, then aborted (its iteration is not recorded), so work
+/// that never completes cannot hold the phase open. Fails with [`LoadError::RecoveryTimeout`] if
+/// the recovery budget ran out, or [`LoadError::DriverFailed`] if a user task panicked; in both
+/// cases the remaining users are asked to stop and, after the same grace, aborted.
+///
+/// Time the run spends paused is credited back to the recovery budget when the pause is
+/// observed to end. A pause is noticed on the next scheduler tick (at most one
+/// [`RecoveryWatch::poll_interval`] later), so up to one interval of each pause is still charged.
 pub(super) async fn run_constant_virtual_users<E, F, Fut>(
     context: &DriverContext<F>,
     recovery: &mut RecoveryWatch,
@@ -66,16 +74,31 @@ where
 
     let mut outcome = Ok(());
     let mut abort_at: Option<Instant> = None;
-    let mut last_tick = Instant::now();
+    let mut pause_started_at: Option<Instant> = None;
     loop {
         let now = Instant::now();
-        if context.paused.load(Ordering::Acquire) {
-            recovery.credit_paused(now.saturating_duration_since(last_tick));
+        let paused = context.paused.load(Ordering::Acquire);
+        match (paused, pause_started_at) {
+            (true, None) => pause_started_at = Some(now),
+            (false, Some(started_at)) => {
+                recovery.credit_paused(now.saturating_duration_since(started_at));
+                pause_started_at = None;
+            }
+            _ => {}
         }
-        last_tick = now;
+
+        if abort_at.is_none() {
+            if now >= deadline {
+                abort_at = Some(deadline + VIRTUAL_USER_STOP_GRACE);
+            } else if *context.shutdown_rx.borrow() {
+                abort_at = Some(now + VIRTUAL_USER_STOP_GRACE);
+            }
+        }
 
         let wake_at = match abort_at {
             Some(abort_at) => abort_at,
+            // A paused run completes no work, so its error rate cannot move: skip the budget.
+            None if paused => (now + recovery.poll_interval()).min(deadline),
             None => match recovery.status(context.recorder.metrics()) {
                 RecoveryBudget::Exhausted => {
                     stop_virtual_users.store(true, Ordering::Release);
@@ -86,9 +109,9 @@ where
                     continue;
                 }
                 RecoveryBudget::Remaining(remaining) => {
-                    now + remaining.min(recovery.poll_interval())
+                    (now + remaining.min(recovery.poll_interval())).min(deadline)
                 }
-                RecoveryBudget::WithinTarget => now + recovery.poll_interval(),
+                RecoveryBudget::WithinTarget => (now + recovery.poll_interval()).min(deadline),
             },
         };
 
@@ -108,6 +131,16 @@ where
             },
             _ = tokio::time::sleep_until(wake_at) => {
                 if abort_at.is_some_and(|abort_at| Instant::now() >= abort_at) {
+                    try_emit_load_event(
+                        context.recorder.events(),
+                        context.recorder.load_name(),
+                        format!(
+                            "ConstantVus: aborting {} virtual users still running {:?} after \
+                             being told to stop",
+                            virtual_users.len(),
+                            VIRTUAL_USER_STOP_GRACE
+                        ),
+                    );
                     virtual_users.abort_all();
                     while virtual_users.join_next().await.is_some() {}
                     break;
@@ -116,41 +149,4 @@ where
         }
     }
     outcome
-}
-
-/// One virtual user: run the work to completion, record it, and start again until `deadline`,
-/// shutdown, or `stop_virtual_users`.
-async fn run_virtual_user<E, F, Fut>(
-    virtual_user_index: usize,
-    work: Arc<F>,
-    recorder: Arc<IterationRecorder>,
-    shutdown_rx: watch::Receiver<bool>,
-    paused: Arc<AtomicBool>,
-    stop_virtual_users: Arc<AtomicBool>,
-    deadline: Instant,
-) where
-    F: Fn() -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(), E>> + Send + 'static,
-    E: std::fmt::Display + Send + 'static,
-{
-    loop {
-        if stop_virtual_users.load(Ordering::Acquire)
-            || Instant::now() >= deadline
-            || *shutdown_rx.borrow()
-        {
-            return;
-        }
-        while paused.load(Ordering::Acquire) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            if *shutdown_rx.borrow() || stop_virtual_users.load(Ordering::Acquire) {
-                return;
-            }
-        }
-        recorder
-            .run(
-                work.as_ref(),
-                IterationOrigin::VirtualUser(virtual_user_index),
-            )
-            .await;
-    }
 }

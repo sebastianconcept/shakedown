@@ -1,4 +1,5 @@
-//! Integration tests for open-model [`shakedown::LoadHandle`]: scheduling, metrics, phase events, and recovery waits.
+//! Integration tests for [`shakedown::LoadHandle`] on both traffic models: scheduling, metrics, phase
+//! events, recovery budgets, and how a run ends.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -612,5 +613,154 @@ async fn dedicated_runtime_closed_model_fails_before_timeline() {
     assert!(
         event_log.events().all(|entry| entry.source != "load"),
         "unsupported runtime must not record load timeline rows"
+    );
+}
+
+#[tokio::test]
+async fn closed_model_pausing_does_not_consume_the_recovery_budget() {
+    let mut context = Context::new();
+
+    // Given four virtual users that always fail against a 400ms budget
+    let profile = LoadProfile::open_model()
+        .phase(LoadPhase::constant_vus(Duration::from_secs(5), 4))
+        .recovery(
+            RecoveryConfig::new(Duration::from_millis(400))
+                .with_poll_interval(Duration::from_millis(20)),
+        )
+        .build()
+        .expect("profile");
+    let started = std::time::Instant::now();
+    let handle = context
+        .start_load("vus-paused", profile, || async {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            Err::<(), &str>("down")
+        })
+        .await
+        .expect("start_load");
+
+    // When the run is paused for 600ms, which is longer than the whole budget
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    handle.pause();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    handle.resume();
+    let error = handle.stop().await.expect_err("recovery budget");
+
+    // Then the pause was not charged: the budget ran out only after the time left when it began
+    assert!(
+        matches!(error, LoadError::RecoveryTimeout { .. }),
+        "{error}"
+    );
+    assert!(
+        started.elapsed() >= Duration::from_millis(800),
+        "pause was charged to the budget ({:?})",
+        started.elapsed()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn closed_model_work_that_never_finishes_is_aborted_after_the_phase_ends() {
+    let mut context = Context::new();
+
+    // Given one virtual user whose work outlives the 100ms phase by a very long time
+    let profile = LoadProfile::open_model()
+        .phase(LoadPhase::constant_vus(Duration::from_millis(100), 1))
+        .build()
+        .expect("profile");
+    let started = tokio::time::Instant::now();
+    let handle = context
+        .start_load("vus-stuck", profile, || async {
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+            Ok::<(), &str>(())
+        })
+        .await
+        .expect("start_load");
+
+    // When the run is stopped
+    let metrics = handle.stop().await.expect("stop");
+
+    // Then the phase did not stay open for the hour: the user was aborted after its grace period
+    assert!(
+        started.elapsed() < Duration::from_secs(60),
+        "stuck virtual user held the phase open ({:?})",
+        started.elapsed()
+    );
+    assert_eq!(metrics.total_iterations(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn dropping_a_handle_aborts_a_driver_that_does_not_stop() {
+    struct DropFlag(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let mut context = Context::new();
+
+    // Given a driver sitting in an hour-long pause phase, which ignores shutdown
+    let driver_ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = Arc::new(DropFlag(driver_ended.clone()));
+    let profile = LoadProfile::open_model()
+        .phase(LoadPhase::pause(Duration::from_secs(3600)))
+        .build()
+        .expect("profile");
+    let handle = context
+        .start_load("pausing", profile, move || {
+            let _flag = flag.clone();
+            async { Ok::<(), &str>(()) }
+        })
+        .await
+        .expect("start_load");
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    // When the handle is dropped
+    drop(handle);
+
+    // Then the driver gets a grace period and is aborted once it has passed
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        !driver_ended.load(Ordering::SeqCst),
+        "driver was aborted before its grace period"
+    );
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    assert!(
+        driver_ended.load(Ordering::SeqCst),
+        "driver was never aborted after the handle was dropped"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn await_phase_returns_driver_stopped_when_the_run_fails_before_that_phase() {
+    let mut context = Context::new();
+
+    // Given a two-phase profile whose first phase exhausts its 200ms recovery budget
+    let profile = LoadProfile::open_model()
+        .phase(LoadPhase::constant(
+            Duration::from_secs(4),
+            Rate::per_second(80.0),
+        ))
+        .phase(LoadPhase::constant(
+            Duration::from_secs(1),
+            Rate::per_second(10.0),
+        ))
+        .recovery(
+            RecoveryConfig::new(Duration::from_millis(200))
+                .with_poll_interval(Duration::from_millis(20)),
+        )
+        .build()
+        .expect("profile");
+    let handle = context
+        .start_load("failing", profile, || async { Err::<(), &str>("down") })
+        .await
+        .expect("start_load");
+
+    // When a caller awaits the second phase, which the driver never reaches
+    let awaited = tokio::time::timeout(Duration::from_secs(3), handle.await_phase("1")).await;
+
+    // Then the wait ends with DriverStopped instead of hanging
+    assert!(
+        matches!(awaited, Ok(Err(LoadError::DriverStopped))),
+        "expected DriverStopped, got {awaited:?}"
     );
 }

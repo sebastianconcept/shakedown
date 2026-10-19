@@ -2,8 +2,8 @@
 //! face of a running load.
 //!
 //! The run itself lives in submodules by job: `driver` walks the phases, `open_model` and
-//! `closed_model` schedule work, `iteration` records each outcome, and `recovery` enforces the
-//! profile's error-rate budget.
+//! `closed_model` schedule work (the latter running each user from `virtual_user`), `iteration`
+//! records each outcome, and `recovery` enforces the profile's error-rate budget.
 
 mod closed_model;
 mod driver;
@@ -11,6 +11,7 @@ mod events;
 mod iteration;
 mod open_model;
 mod recovery;
+mod virtual_user;
 
 use std::future::Future;
 use std::io::IsTerminal;
@@ -26,12 +27,16 @@ use crate::lifecycle::Context;
 use super::metrics::{LoadMetrics, LoadMetricsAccumulator};
 use super::{LoadError, LoadProfile, LoadRuntime, NamedPhase, RecoveryConfig};
 
+/// How long a dropped [`LoadHandle`] lets its driver wind down before aborting it.
+const DRIVER_STOP_GRACE: Duration = Duration::from_secs(5);
+
 use driver::{run_driver, DriverContext};
 use events::try_emit_load_event;
 use iteration::IterationRecorder;
 use recovery::RecoveryWatch;
 
-/// Open-model load driver handle: pause/resume, phase await, graceful [`LoadHandle::stop`].
+/// Handle to a running load, open or closed model: pause/resume, phase await, graceful
+/// [`LoadHandle::stop`].
 pub struct LoadHandle {
     load_name: String,
     profile: Arc<LoadProfile>,
@@ -109,7 +114,7 @@ impl LoadHandle {
                     .unwrap_or_default();
                 let pct = recovery_config.error_rate_threshold * 100.0;
                 try_emit_load_event(
-                    &self.event_sender,
+                    self.event_sender.as_ref(),
                     &self.load_name,
                     format!("error rate returned to {pct:.0}% after {disruption:?} disruption"),
                 );
@@ -120,7 +125,11 @@ impl LoadHandle {
         }
     }
 
-    /// Wait for the phase identified by `name_or_index` (name string or decimal index) to complete.
+    /// Wait for the phase identified by `name_or_index` (name string or decimal index) to start.
+    ///
+    /// Returns [`LoadError::DriverStopped`] if the driver ends before reaching that phase, whether
+    /// because the handle was shut down or because the run failed (for example with
+    /// [`LoadError::RecoveryTimeout`]). Call [`LoadHandle::stop`] for the failure itself.
     pub async fn await_phase(&self, name_or_index: &str) -> Result<(), LoadError> {
         let index = resolve_phase_index(self.profile.phases(), name_or_index)?;
         let mut phase_rx = self.phase_watch.clone();
@@ -141,7 +150,13 @@ impl LoadHandle {
                         return Err(LoadError::DriverStopped);
                     }
                 }
-                _ = phase_rx.changed() => {}
+                changed = phase_rx.changed() => {
+                    // The driver owns the sender: an error means it ended without reaching the
+                    // phase (the check above already saw every value it announced).
+                    if changed.is_err() {
+                        return Err(LoadError::DriverStopped);
+                    }
+                }
             }
         }
     }
@@ -149,7 +164,8 @@ impl LoadHandle {
     /// Wait for the driver to finish all phases, then return final [`LoadMetrics`].
     ///
     /// Does not short-circuit the profile: the work loop runs until each phase duration elapses.
-    /// Dropping a handle without calling `stop` aborts the driver and sends shutdown (see [`Drop`]).
+    /// Dropping a handle without calling `stop` sends shutdown and aborts the driver if it has not
+    /// stopped within a grace period (see [`Drop`]).
     pub async fn stop(mut self) -> Result<LoadMetrics, LoadError> {
         let join_result = match self.join_handle.take() {
             Some(handle) => handle.await,
@@ -184,15 +200,32 @@ impl LoadHandle {
 }
 
 impl Drop for LoadHandle {
+    /// Ask the driver to shut down, then abort it if it is still running after
+    /// [`DRIVER_STOP_GRACE`] (immediately when there is no Tokio runtime to wait on).
     fn drop(&mut self) {
         let _ = self.shutdown_tx.send(true);
-        if let Some(handle) = self.join_handle.take() {
-            tokio::spawn(async move {
-                if let Err(e) = handle.await {
-                    eprintln!("load driver task panicked during drop: {e}");
+        let Some(mut driver) = self.join_handle.take() else {
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            driver.abort();
+            return;
+        };
+        runtime.spawn(async move {
+            match tokio::time::timeout(DRIVER_STOP_GRACE, &mut driver).await {
+                Ok(Err(join_error)) if join_error.is_panic() => {
+                    eprintln!("load driver task panicked during drop: {join_error}");
                 }
-            });
-        }
+                Ok(_) => {}
+                Err(_) => {
+                    driver.abort();
+                    eprintln!(
+                        "load driver did not stop within {DRIVER_STOP_GRACE:?} of its handle being \
+                         dropped; aborted it"
+                    );
+                }
+            }
+        });
     }
 }
 
