@@ -1219,7 +1219,7 @@ async fn register_rabbit_cluster_control(ctx: &mut Context, handles: &[ResourceH
 /// - Check readiness (async)
 /// - Seed data (async)
 /// - Run scenario logic
-/// - Assert outcomes
+/// - Record the scenario body's outcome on the timeline
 /// - Teardown resources (always attempted at the end, async)
 ///
 /// # Errors
@@ -1852,6 +1852,30 @@ async fn start_and_readiness_mock_services(
     Ok(())
 }
 
+/// Writes the scenario body's result into the event log during the assert phase.
+///
+/// User assertions stay in the scenario body. This is the harness copy of that result so the
+/// timeline shows success, or the error the body returned, before teardown. Call it only after
+/// the body has run. Infrastructure failures that return earlier are not assert-phase outcomes.
+fn record_assert_phase_outcome(event_log: &mut EventLog, body_result: &Result<(), ShakedownError>) {
+    match body_result {
+        Ok(()) => {
+            event_log.append_raw(
+                EventLevel::Info,
+                "lifecycle",
+                "Assert phase outcome: success",
+            );
+        }
+        Err(error) => {
+            event_log.append_raw(
+                EventLevel::Error,
+                "lifecycle",
+                format!("Assert phase outcome: {error}"),
+            );
+        }
+    }
+}
+
 /// Final value produced by a [`run_scenario`] async body: `()` for legacy scenarios, or `Result<(), ShakedownError>` to fail without panicking (e.g. performance assertions).
 ///
 /// Return `()` on success, or [`Result::Err`] with [`ShakedownError`] to fail the scenario without
@@ -1878,7 +1902,10 @@ impl ScenarioRunOutcome for Result<(), ShakedownError> {
 ///
 /// This is the primary entry point for executing a shakedown scenario. It drives all registered
 /// resources through the lifecycle phases, then runs `scenario_fn` with the prepared `ctx`.
-/// On success it runs teardown; on failure it builds a failure timeline before teardown.
+/// After the body returns, the assert phase records that result on `event_log` — success, or
+/// the error the body returned — and then teardown runs. A body error still renders a failure
+/// timeline after teardown. Infrastructure failures before the body return as infrastructure
+/// errors and do not record an assert-phase outcome.
 ///
 /// # Panics
 ///
@@ -2698,7 +2725,9 @@ where
     )))]
     let run_result = scenario_outcome.into_shakedown_result();
 
-    // Outcome checks run in the scenario body. This phase is the timeline boundary before teardown.
+    // Outcome checks stay in the scenario body. Record that result before teardown so the
+    // timeline shows success or the scenario error. Infrastructure failures returned before
+    // the body never reach this phase.
     #[cfg(all(
         any(
             feature = "kafka",
@@ -2723,6 +2752,7 @@ where
     ))]
     shakedown_docker_phase!(docker_phase_sender, ctx, Phase::Assert);
     event_log.append_raw(EventLevel::Info, "lifecycle", "Starting assert phase");
+    record_assert_phase_outcome(event_log, &run_result);
 
     // Teardown phase
     #[cfg(all(

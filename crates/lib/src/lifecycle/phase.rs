@@ -20,7 +20,10 @@ pub enum Phase {
     Seed,
     /// Run the scenario logic
     Run,
-    /// Assert scenario outcomes
+    /// Timeline record of the scenario body's outcome, after the body and before teardown.
+    ///
+    /// User assertions stay in the scenario body. This phase writes that result (success, or
+    /// the scenario error) into the event log. It does not run a separate assertion pass.
     Assert,
     /// Teardown resources
     Teardown,

@@ -9,8 +9,9 @@
 //! and teardown, and classifies any failure as a [`crate::error::ScenarioError`] (your
 //! logic or assertions) or an [`crate::error::InfrastructureError`] (provision or readiness).
 //!
-//! Outcome checks belong in the scenario body. The assert phase is the timeline marker after
-//! that body returns and before teardown.
+//! Outcome checks belong in the scenario body. After that body returns, the assert phase
+//! records the outcome on the timeline — success, or the scenario error — and then teardown
+//! runs. Infrastructure failures that return before the body stay infrastructure failures.
 //!
 //! ## Phase sequence
 //!
@@ -18,7 +19,7 @@
 //! 2. **Readiness** — block until each resource reports healthy (no fixed sleeps)
 //! 3. **Seed** — apply project-default data, then scenario-specific overrides
 //! 4. **Run** — execute the scenario body with a [`Context`] reference
-//! 5. **Assert** — timeline boundary after the body; the body already evaluated outcomes
+//! 5. **Assert** — record the scenario body's outcome on the timeline; the body already evaluated outcomes
 //! 6. **Teardown** — stop containers and drop namespaces (always attempted)
 //!
 //! ## Event logging

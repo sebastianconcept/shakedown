@@ -1,9 +1,43 @@
 use super::*;
-use crate::error::{InfrastructureError, ResourceHandle, ScenarioId};
+use crate::error::{InfrastructureError, ResourceHandle, ScenarioId, ShakedownError};
 use crate::event::{Event, EventLevel, EventLog, EventSnapshot};
 use crate::resources::{BuiltinResource, FakeResource, KafkaBindings, Resource};
+use crate::timeline::{
+    build_failure_timeline_document, render_failure_timeline, FailureTimelineOptions,
+    TimelineEventJson,
+};
 use crate::ScenarioError;
 use async_trait::async_trait;
+
+/// Application rows from a failure-timeline document, in timeline order: `(level, message)`.
+fn timeline_application_rows(event_log: &EventLog) -> Vec<(String, String)> {
+    let document =
+        build_failure_timeline_document(event_log, &FailureTimelineOptions::new("assert-phase"));
+    document
+        .events
+        .into_iter()
+        .filter_map(|event| match event {
+            TimelineEventJson::Application { level, message, .. } => Some((level, message)),
+            TimelineEventJson::ContainerLog { .. } | TimelineEventJson::DockerEvent { .. } => None,
+        })
+        .collect()
+}
+
+fn assert_outcome_before_teardown(rendered: &str, outcome_snippet: &str) {
+    let start = rendered
+        .find("Starting assert phase")
+        .expect("assert phase start");
+    let outcome = rendered
+        .find(outcome_snippet)
+        .unwrap_or_else(|| panic!("missing assert outcome {outcome_snippet:?} in {rendered}"));
+    let teardown = rendered
+        .find("Starting teardown phase")
+        .expect("teardown phase start");
+    assert!(
+        start < outcome && outcome < teardown,
+        "assert outcome should sit between the assert start and teardown:\n{rendered}"
+    );
+}
 
 #[test]
 fn test_phase_display() {
@@ -320,6 +354,160 @@ async fn test_run_scenario_events() {
     let events: Vec<_> = event_log.events().collect();
     // Then lifecycle phases emitted at least one event tagged with the lifecycle source
     assert!(events.iter().any(|e| e.source == "lifecycle"));
+}
+
+#[tokio::test]
+async fn assert_phase_records_success_on_the_timeline_before_teardown() {
+    // Given a scenario body that returns success
+    let mut ctx = Context::new();
+    ctx.register_builtin(BuiltinResource::Fake(FakeResource::default()));
+    let mut event_log = EventLog::new();
+    // When the lifecycle runs through assert and teardown
+    let result = run_scenario(
+        &mut ctx,
+        "assert-phase-success",
+        |_ctx: &mut Context| Box::pin(async {}),
+        &mut event_log,
+    )
+    .await;
+    // Then the timeline shows success after the assert phase starts and before teardown
+    assert!(result.is_ok());
+    let rendered = render_failure_timeline(
+        &event_log,
+        &FailureTimelineOptions::new("assert-phase-success"),
+    );
+    assert_outcome_before_teardown(&rendered, "Assert phase outcome: success");
+    let rows = timeline_application_rows(&event_log);
+    assert!(rows
+        .iter()
+        .any(|(level, message)| { level == "INFO" && message == "Assert phase outcome: success" }));
+}
+
+#[tokio::test]
+async fn assert_phase_records_scenario_assertion_error_before_teardown() {
+    use crate::error::AssertionError;
+
+    // Given a scenario body that returns an assertion error
+    let mut ctx = Context::new();
+    ctx.register_builtin(BuiltinResource::Fake(FakeResource::default()));
+    let mut event_log = EventLog::new();
+    let assertion = AssertionError::Unspecified {
+        detail: "balance mismatch".to_string(),
+    };
+    let body_error = ShakedownError::Scenario(ScenarioError::Assertion(assertion));
+    // When the lifecycle finishes the body and records the assert phase
+    let error = run_scenario(
+        &mut ctx,
+        "assert-phase-assertion-error",
+        |_ctx: &mut Context| {
+            Box::pin(async {
+                Err::<(), ShakedownError>(ShakedownError::Scenario(ScenarioError::Assertion(
+                    AssertionError::Unspecified {
+                        detail: "balance mismatch".to_string(),
+                    },
+                )))
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect_err("scenario assertion");
+    // Then the returned error stays a scenario assertion, and the timeline shows it before teardown
+    let returned = error.to_string();
+    assert!(
+        matches!(error, ShakedownError::Scenario(ScenarioError::Assertion(_))),
+        "expected a scenario assertion, got {returned}"
+    );
+    assert_eq!(returned, body_error.to_string());
+    let outcome = format!("Assert phase outcome: {returned}");
+    let rendered = render_failure_timeline(
+        &event_log,
+        &FailureTimelineOptions::new("assert-phase-assertion-error")
+            .with_failure_summary(returned.clone())
+            .with_verdict("scenario_error"),
+    );
+    assert_outcome_before_teardown(&rendered, &outcome);
+    assert!(rendered.contains("balance mismatch"));
+    let rows = timeline_application_rows(&event_log);
+    assert!(rows
+        .iter()
+        .any(|(level, message)| level == "ERROR" && message == &outcome));
+}
+
+#[tokio::test]
+async fn infrastructure_failure_before_the_body_is_not_an_assert_outcome() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    // Given infrastructure whose readiness fails before the scenario body
+    struct UnreadyResource;
+
+    #[async_trait]
+    impl Resource for UnreadyResource {
+        async fn provision(
+            &mut self,
+            _scenario_id: &ScenarioId,
+        ) -> Result<Vec<ResourceHandle>, InfrastructureError> {
+            Ok(vec![ResourceHandle {
+                id: "unready".to_string(),
+                connection_string: "://fake".to_string(),
+                metadata: None,
+            }])
+        }
+
+        async fn check_ready(&self) -> Result<(), InfrastructureError> {
+            Err(InfrastructureError::Readiness {
+                resource: "test_resource".to_string(),
+                source: Box::new(std::io::Error::other("not ready")),
+            })
+        }
+
+        async fn apply_default_seed(&mut self) -> Result<(), InfrastructureError> {
+            Ok(())
+        }
+
+        async fn teardown(&mut self) -> Result<(), InfrastructureError> {
+            Ok(())
+        }
+    }
+
+    let mut ctx = Context::new();
+    ctx.register_extension(UnreadyResource);
+    let mut event_log = EventLog::new();
+    let body_ran = Arc::new(AtomicBool::new(false));
+    let body_ran_in_scenario = Arc::clone(&body_ran);
+    // When the run stops at readiness
+    let error = run_scenario(
+        &mut ctx,
+        "assert-phase-readiness-failure",
+        move |_ctx: &mut Context| {
+            let body_ran_in_scenario = Arc::clone(&body_ran_in_scenario);
+            Box::pin(async move {
+                body_ran_in_scenario.store(true, Ordering::SeqCst);
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect_err("readiness");
+    // Then the failure stays infrastructure, the body did not run, and the assert phase is absent
+    assert!(
+        matches!(error, ShakedownError::Infrastructure(_)),
+        "expected an infrastructure error, got {error}"
+    );
+    assert!(!body_ran.load(Ordering::SeqCst));
+    let rendered = render_failure_timeline(
+        &event_log,
+        &FailureTimelineOptions::new("assert-phase-readiness-failure")
+            .with_verdict("infrastructure_error"),
+    );
+    assert!(rendered.contains("Readiness failed"));
+    assert!(!rendered.contains("Assert phase outcome:"));
+    assert!(!rendered.contains("Starting assert phase"));
+    let rows = timeline_application_rows(&event_log);
+    assert!(rows
+        .iter()
+        .all(|(_, message)| !message.starts_with("Assert phase outcome:")));
 }
 
 #[tokio::test]
