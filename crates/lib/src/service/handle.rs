@@ -6,15 +6,17 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Handle to a running service container: base URL, named port URLs, Docker id, and health flag.
+use super::endpoint::ServiceEndpoint;
+
+/// Handle to a running service container: published endpoints, Docker id, and health flag.
 ///
 /// Interior mutability is limited to [`AtomicBool`] for the health signal so lifecycle code can
 /// update readiness without exposing mutation to scenario code ([`ServiceHandle`] has no public
 /// `&mut self` methods).
 pub struct ServiceHandle {
     pub(crate) name: String,
-    base_url: String,
-    named_urls: HashMap<String, String>,
+    endpoint: ServiceEndpoint,
+    named_endpoints: HashMap<String, ServiceEndpoint>,
     container_id: Option<String>,
     healthy: AtomicBool,
 }
@@ -24,8 +26,8 @@ impl fmt::Debug for ServiceHandle {
         formatter
             .debug_struct("ServiceHandle")
             .field("name", &self.name)
-            .field("base_url", &self.base_url)
-            .field("named_urls", &self.named_urls)
+            .field("endpoint", &self.endpoint)
+            .field("named_endpoints", &self.named_endpoints)
             .field("container_id", &self.container_id)
             .field("healthy", &self.is_healthy())
             .finish()
@@ -36,28 +38,45 @@ impl ServiceHandle {
     /// Constructed by the harness when a service container is running.
     pub(crate) fn new(
         name: String,
-        base_url: String,
-        named_urls: HashMap<String, String>,
+        endpoint: ServiceEndpoint,
+        named_endpoints: HashMap<String, ServiceEndpoint>,
         container_id: Option<String>,
         initially_healthy: bool,
     ) -> Self {
         Self {
             name,
-            base_url,
-            named_urls,
+            endpoint,
+            named_endpoints,
             container_id,
             healthy: AtomicBool::new(initially_healthy),
         }
     }
 
-    /// HTTP(S) base URL for the primary exposed port (scheme + host + port).
-    pub fn base_url(&self) -> &str {
-        self.base_url.as_str()
+    /// HTTP or gRPC origin for the primary exposed port (`http://127.0.0.1:{port}`).
+    ///
+    /// Absent when readiness was a TCP connect or an in-container command. Use [`Self::endpoint`]
+    /// for the host and port in that case.
+    pub fn base_url(&self) -> Option<&str> {
+        self.endpoint.http_url()
     }
 
-    /// Full URL for a logically named port from [`crate::service::ServiceUnderTest::port_named`], if present.
+    /// Published address of the primary port.
+    pub fn endpoint(&self) -> &ServiceEndpoint {
+        &self.endpoint
+    }
+
+    /// HTTP or gRPC URL for a logically named port from [`crate::service::ServiceUnderTest::port_named`].
+    ///
+    /// Absent when `port_name` was not published, or when readiness was TCP or an in-container command.
     pub fn port_url(&self, port_name: &str) -> Option<&str> {
-        self.named_urls.get(port_name).map(|url| url.as_str())
+        self.named_endpoints
+            .get(port_name)
+            .and_then(ServiceEndpoint::http_url)
+    }
+
+    /// Published address of a logically named port, when that name was exposed.
+    pub fn port_endpoint(&self, port_name: &str) -> Option<&ServiceEndpoint> {
+        self.named_endpoints.get(port_name)
     }
 
     /// Docker container id, when known (for diagnostics and correlation).
@@ -77,17 +96,26 @@ impl ServiceHandle {
     }
 }
 
-// String, HashMap, Option<String>, AtomicBool: Send + Sync.
+// String, HashMap, Option<String>, AtomicBool, ServiceEndpoint: Send + Sync.
 #[cfg(test)]
 mod tests {
+    use super::super::health::HealthCheck;
     use super::*;
 
+    fn http_endpoint(port: u16) -> ServiceEndpoint {
+        ServiceEndpoint::for_readiness(&HealthCheck::http("/"), port)
+    }
+
     fn sample_handle() -> ServiceHandle {
+        let health = HealthCheck::http("/health");
         let mut named = HashMap::new();
-        named.insert("grpc".to_string(), "http://127.0.0.1:50051".to_string());
+        named.insert(
+            "metrics".to_string(),
+            ServiceEndpoint::for_readiness(&health, 9090),
+        );
         ServiceHandle::new(
             "orders".to_string(),
-            "http://127.0.0.1:8080".to_string(),
+            ServiceEndpoint::for_readiness(&health, 8080),
             named,
             Some("abc123container".to_string()),
             true,
@@ -95,25 +123,94 @@ mod tests {
     }
 
     #[test]
-    fn base_url_returns_primary_url() {
-        // Given a handle with a primary base URL
+    fn base_url_returns_primary_http_origin() {
+        // Given a handle whose readiness was HTTP
         let handle = sample_handle();
-        // Then base_url returns it
-        assert_eq!(handle.base_url(), "http://127.0.0.1:8080");
+        // Then base_url is the loopback HTTP origin
+        assert_eq!(handle.base_url(), Some("http://127.0.0.1:8080"));
     }
 
     #[test]
-    fn port_url_returns_named_mapping() {
-        // Given named port "grpc" on the handle
+    fn port_url_returns_named_http_origin() {
+        // Given a named port on an HTTP-ready handle
         let handle = sample_handle();
-        assert_eq!(handle.port_url("grpc"), Some("http://127.0.0.1:50051"));
+        assert_eq!(handle.port_url("metrics"), Some("http://127.0.0.1:9090"));
     }
 
     #[test]
     fn port_url_missing_returns_none() {
-        // Given a handle without a "metrics" named port
+        // Given a handle without a "grpc" named port
         let handle = sample_handle();
-        assert!(handle.port_url("metrics").is_none());
+        assert!(handle.port_url("grpc").is_none());
+        assert!(handle.port_endpoint("grpc").is_none());
+    }
+
+    #[test]
+    fn tcp_readiness_omits_http_urls() {
+        // Given TCP readiness on the primary port and a named port
+        let health = HealthCheck::tcp();
+        let mut named = HashMap::new();
+        named.insert(
+            "admin".to_string(),
+            ServiceEndpoint::for_readiness(&health, 5433),
+        );
+        let handle = ServiceHandle::new(
+            "db".to_string(),
+            ServiceEndpoint::for_readiness(&health, 5432),
+            named,
+            None,
+            true,
+        );
+        // Then neither accessor presents an HTTP URL
+        assert!(handle.base_url().is_none());
+        assert!(handle.port_url("admin").is_none());
+        assert!(matches!(
+            handle.endpoint(),
+            ServiceEndpoint::HostPort(address) if address.to_string() == "127.0.0.1:5432"
+        ));
+        assert!(matches!(
+            handle.port_endpoint("admin"),
+            Some(ServiceEndpoint::HostPort(address)) if address.to_string() == "127.0.0.1:5433"
+        ));
+    }
+
+    #[test]
+    fn command_readiness_omits_http_urls() {
+        // Given command readiness
+        let handle = ServiceHandle::new(
+            "stone".to_string(),
+            ServiceEndpoint::for_readiness(&HealthCheck::command(["/bin/true"]), 50377),
+            HashMap::new(),
+            None,
+            true,
+        );
+        assert!(handle.base_url().is_none());
+        assert!(matches!(
+            handle.endpoint(),
+            ServiceEndpoint::HostPort(address) if address.to_string() == "127.0.0.1:50377"
+        ));
+    }
+
+    #[test]
+    #[cfg(feature = "grpc")]
+    fn grpc_readiness_keeps_http_origin() {
+        // Given gRPC health readiness and a named port
+        let health = HealthCheck::grpc();
+        let mut named = HashMap::new();
+        named.insert(
+            "grpc".to_string(),
+            ServiceEndpoint::for_readiness(&health, 50051),
+        );
+        let handle = ServiceHandle::new(
+            "payments".to_string(),
+            ServiceEndpoint::for_readiness(&health, 50051),
+            named,
+            None,
+            true,
+        );
+        assert_eq!(handle.base_url(), Some("http://127.0.0.1:50051"));
+        assert_eq!(handle.port_url("grpc"), Some("http://127.0.0.1:50051"));
+        assert!(matches!(handle.endpoint(), ServiceEndpoint::Grpc(_)));
     }
 
     #[test]
@@ -128,7 +225,7 @@ mod tests {
         // Given a handle with no Docker id
         let handle = ServiceHandle::new(
             "x".to_string(),
-            "http://127.0.0.1:1".to_string(),
+            http_endpoint(1),
             HashMap::new(),
             None,
             false,
@@ -141,7 +238,7 @@ mod tests {
         // Given a handle starting unhealthy
         let handle = ServiceHandle::new(
             "y".to_string(),
-            "http://127.0.0.1:2".to_string(),
+            http_endpoint(2),
             HashMap::new(),
             None,
             false,

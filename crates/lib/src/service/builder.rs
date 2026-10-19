@@ -5,8 +5,9 @@
 //!
 //! Use this to **declare** a service container your scenario depends on, then **register** the
 //! resulting [`ServiceSpec`] on [`crate::lifecycle::Context`] so the lifecycle can start it, wait for
-//! readiness, and expose a [`crate::service::ServiceHandle`] (for example via
-//! [`crate::lifecycle::Context::service_url`]).
+//! readiness, and expose a [`crate::service::ServiceHandle`]. After HTTP or gRPC readiness,
+//! [`crate::lifecycle::Context::service_url`] returns the origin. After TCP or command readiness,
+//! [`crate::service::ServiceHandle::endpoint`] returns the host and port.
 //!
 //! Minimal example (build a spec):
 //!
@@ -38,7 +39,8 @@
 //!     .unwrap();
 //!
 //! ctx.register_service(spec).unwrap();
-//! // Later (after lifecycle readiness), `ctx.service_url("orders")` becomes available.
+//! // Later (after lifecycle readiness), `ctx.service_handle("orders")` is set.
+//! // This spec uses the default TCP probe, so `service_url` stays empty and `endpoint` is host:port.
 //! # }
 //! ```
 

@@ -734,7 +734,11 @@ mod tests {
     use crate::lifecycle::Context;
     use crate::service::address::rewrite_injected_addresses_for_service_container;
     use crate::service::address::HOST_DOCKER_INTERNAL;
-    use crate::service::{ServiceHandle, ServiceUnderTest};
+    use crate::service::{HealthCheck, ServiceEndpoint, ServiceHandle, ServiceUnderTest};
+
+    fn http_endpoint(port: u16) -> ServiceEndpoint {
+        ServiceEndpoint::for_readiness(&HealthCheck::http("/"), port)
+    }
 
     fn spec_named(name: &str) -> ServiceSpec {
         ServiceUnderTest::docker("alpine:3.20")
@@ -838,7 +842,7 @@ mod tests {
                 "api",
                 ServiceHandle::new(
                     "api".to_string(),
-                    "http://127.0.0.1:1111".to_string(),
+                    http_endpoint(1111),
                     HashMap::new(),
                     None,
                     true,
@@ -850,7 +854,7 @@ mod tests {
                 "worker",
                 ServiceHandle::new(
                     "worker".to_string(),
-                    "http://127.0.0.1:2222".to_string(),
+                    http_endpoint(2222),
                     HashMap::new(),
                     None,
                     true,
@@ -875,6 +879,48 @@ mod tests {
             environment_worker.get("API_URL").map(String::as_str),
             Some(expected_upstream_container.as_str())
         );
+    }
+
+    #[test]
+    fn tcp_readiness_does_not_inject_http_url() {
+        // Given an upstream whose readiness was TCP, including a named port
+        let mut context = Context::new();
+        context.register_service(spec_named("api")).unwrap();
+        context.register_service(spec_named("worker")).unwrap();
+        let health = HealthCheck::tcp();
+        let mut named = HashMap::new();
+        named.insert(
+            "admin".to_string(),
+            ServiceEndpoint::for_readiness(&health, 5433),
+        );
+        context
+            .set_service_handle(
+                "api",
+                ServiceHandle::new(
+                    "api".to_string(),
+                    ServiceEndpoint::for_readiness(&health, 5432),
+                    named,
+                    None,
+                    true,
+                ),
+            )
+            .unwrap();
+
+        let specification_worker = ServiceUnderTest::docker("alpine:3.20")
+            .name("worker")
+            .port(80)
+            .depends_on("api")
+            .env_mapping(crate::service::EnvMapping::service_named_port(
+                "api",
+                "admin",
+                "API_ADMIN_URL",
+            ))
+            .build()
+            .unwrap_or_else(|error| panic!("spec must build: {error:?}"));
+        let environment_worker = inject_service_env(&context, &specification_worker);
+        // Then convention injection and the named-port mapping omit an HTTP URL
+        assert!(!environment_worker.contains_key("API_URL"));
+        assert!(!environment_worker.contains_key("API_ADMIN_URL"));
     }
 
     #[test]

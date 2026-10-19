@@ -2358,15 +2358,18 @@ impl Context {
         Ok(())
     }
 
-    /// HTTP base URL for a registered service after the container is healthy (`services` feature).
+    /// HTTP or gRPC origin for a registered service after the container is healthy (`services` feature).
     ///
-    /// Returns [`None`] if the name is unknown or the service has not been started yet for this run.
+    /// The string is `http://127.0.0.1:{port}`. Returns [`None`] when the name is unknown, the
+    /// service has not been started yet, or readiness was a TCP connect or an in-container command.
+    /// In that last case [`Self::service_handle`] exposes the host and port via
+    /// [`crate::service::ServiceHandle::endpoint`].
     #[cfg(feature = "services")]
     pub fn service_url(&self, name: &str) -> Option<String> {
         self.services
             .get(name)
             .and_then(|state| state.handle.as_ref())
-            .map(|handle| handle.base_url().to_string())
+            .and_then(|handle| handle.base_url().map(str::to_string))
     }
 
     /// Read-only handle for a registered service after the container is healthy (`services` feature).
