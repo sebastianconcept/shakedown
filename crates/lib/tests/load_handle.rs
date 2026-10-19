@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use shakedown::{
     run_scenario, Context, EventLog, LoadError, LoadPhase, LoadProfile, LoadRuntime, Rate,
-    RecoveryConfig,
+    RecoveryConfig, SaturationPolicy,
 };
 
 #[tokio::test]
@@ -166,6 +166,7 @@ async fn driver_stops_when_profile_recovery_timeout_elapses() {
         "load-recovery-timeout",
         move |scenario_context| {
             Box::pin(async move {
+                // Given an open-model profile with a 200ms recovery budget and work that always fails
                 let profile = LoadProfile::open_model()
                     .phase(LoadPhase::constant(
                         Duration::from_secs(4),
@@ -182,6 +183,7 @@ async fn driver_stops_when_profile_recovery_timeout_elapses() {
                     .build()
                     .expect("profile");
 
+                // When the load runs
                 let started = std::time::Instant::now();
                 let handle = scenario_context
                     .start_load("failing", profile, || async { Err::<(), &str>("down") })
@@ -189,6 +191,8 @@ async fn driver_stops_when_profile_recovery_timeout_elapses() {
                     .expect("start_load");
                 let error = handle.stop().await.expect_err("recovery budget");
                 let elapsed = started.elapsed();
+
+                // Then the driver stops with the profile timeout long before the 4s phase ends
                 assert!(
                     matches!(error, LoadError::RecoveryTimeout { timeout: got } if got == timeout),
                     "expected the profile recovery timeout, got {error}"
@@ -206,7 +210,7 @@ async fn driver_stops_when_profile_recovery_timeout_elapses() {
 }
 
 #[tokio::test]
-async fn open_model_completes_when_failures_end_before_recovery_timeout() {
+async fn open_model_phase_shorter_than_recovery_timeout_completes() {
     let mut context = Context::new();
     let mut event_log = EventLog::new();
 
@@ -215,6 +219,7 @@ async fn open_model_completes_when_failures_end_before_recovery_timeout() {
         "load-recovery-timeout-not-yet",
         |scenario_context| {
             Box::pin(async move {
+                // Given a 5s recovery budget and a phase that ends after 250ms of constant failures
                 let profile = LoadProfile::open_model()
                     .phase(LoadPhase::constant(
                         Duration::from_millis(250),
@@ -225,6 +230,8 @@ async fn open_model_completes_when_failures_end_before_recovery_timeout() {
                     .recovery(RecoveryConfig::new(Duration::from_secs(5)))
                     .build()
                     .expect("profile");
+
+                // When the load runs
                 let handle = scenario_context
                     .start_load("short-errors", profile, || async {
                         Err::<(), &str>("blip")
@@ -232,9 +239,260 @@ async fn open_model_completes_when_failures_end_before_recovery_timeout() {
                     .await
                     .expect("start_load");
                 let metrics = handle.stop().await.expect("phase ends before timeout");
+
+                // Then the run completes and the failures were still recorded
                 assert!(
                     metrics.failed_operations() > 0,
                     "open-model iterations should still be recorded"
+                );
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+}
+
+#[tokio::test]
+async fn run_without_a_recovery_budget_is_never_stopped_by_its_error_rate() {
+    let mut context = Context::new();
+    let mut event_log = EventLog::new();
+
+    run_scenario(
+        &mut context,
+        "load-no-recovery-budget",
+        |scenario_context| {
+            Box::pin(async move {
+                // Given a profile that never opted in to a recovery budget and work that always fails
+                let profile = LoadProfile::open_model()
+                    .phase(LoadPhase::constant(
+                        Duration::from_millis(600),
+                        Rate::per_second(50.0),
+                    ))
+                    .workers(8)
+                    .max_workers(8)
+                    .build()
+                    .expect("profile");
+
+                // When the load runs through its whole phase
+                let handle = scenario_context
+                    .start_load("always-failing", profile, || async {
+                        Err::<(), &str>("down")
+                    })
+                    .await
+                    .expect("start_load");
+                let result = handle.stop().await;
+
+                // Then the run completes instead of failing on error rate
+                let metrics = result.expect("no budget means no recovery timeout");
+                assert_eq!(metrics.successful_operations(), 0);
+                assert!(metrics.failed_operations() > 0);
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+}
+
+#[tokio::test]
+async fn open_model_queue_blocked_on_stuck_workers_still_honors_recovery_timeout() {
+    let mut context = Context::new();
+    let mut event_log = EventLog::new();
+    let timeout = Duration::from_millis(200);
+
+    run_scenario(
+        &mut context,
+        "load-recovery-timeout-queue-blocked",
+        move |scenario_context| {
+            Box::pin(async move {
+                // Given a single queued worker and work that fails three times, then hangs
+                let calls = Arc::new(AtomicU64::new(0));
+                let profile = LoadProfile::open_model()
+                    .phase(LoadPhase::constant(
+                        Duration::from_secs(5),
+                        Rate::per_second(50.0),
+                    ))
+                    .workers(1)
+                    .max_workers(1)
+                    .on_saturation(SaturationPolicy::Queue)
+                    .recovery(
+                        RecoveryConfig::new(timeout).with_poll_interval(Duration::from_millis(20)),
+                    )
+                    .build()
+                    .expect("profile");
+
+                // When the scheduler blocks waiting for the hung worker
+                let started = std::time::Instant::now();
+                let handle = scenario_context
+                    .start_load("queue-stuck", profile, move || {
+                        let calls = calls.clone();
+                        async move {
+                            if calls.fetch_add(1, Ordering::SeqCst) < 3 {
+                                Err("down")
+                            } else {
+                                tokio::time::sleep(Duration::from_secs(30)).await;
+                                Ok(())
+                            }
+                        }
+                    })
+                    .await
+                    .expect("start_load");
+                let error = handle.stop().await.expect_err("recovery budget");
+
+                // Then the budget still stops the run while the scheduler is waiting
+                assert!(
+                    matches!(error, LoadError::RecoveryTimeout { .. }),
+                    "{error}"
+                );
+                assert!(
+                    started.elapsed() < Duration::from_secs(3),
+                    "scheduler stayed blocked on the queue ({:?})",
+                    started.elapsed()
+                );
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+}
+
+#[tokio::test]
+async fn pausing_does_not_consume_the_recovery_budget() {
+    let mut context = Context::new();
+    let mut event_log = EventLog::new();
+
+    run_scenario(
+        &mut context,
+        "load-recovery-timeout-paused",
+        |scenario_context| {
+            Box::pin(async move {
+                // Given a 400ms budget, work that always fails, and a 1s rolling window
+                let profile = LoadProfile::open_model()
+                    .phase(LoadPhase::constant(
+                        Duration::from_secs(5),
+                        Rate::per_second(100.0),
+                    ))
+                    .workers(8)
+                    .max_workers(8)
+                    .recovery(
+                        RecoveryConfig::new(Duration::from_millis(400))
+                            .with_poll_interval(Duration::from_millis(20)),
+                    )
+                    .build()
+                    .expect("profile");
+                let started = std::time::Instant::now();
+                let handle = scenario_context
+                    .start_load("paused", profile, || async { Err::<(), &str>("down") })
+                    .await
+                    .expect("start_load");
+
+                // When the run is paused for 600ms, which is longer than the whole budget
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                handle.pause();
+                tokio::time::sleep(Duration::from_millis(600)).await;
+                handle.resume();
+                let error = handle.stop().await.expect_err("recovery budget");
+
+                // Then the pause was not charged: the budget ran out only after the remaining ~250ms
+                assert!(
+                    matches!(error, LoadError::RecoveryTimeout { .. }),
+                    "{error}"
+                );
+                assert!(
+                    started.elapsed() >= Duration::from_millis(900),
+                    "pause was charged to the budget ({:?})",
+                    started.elapsed()
+                );
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+}
+
+#[tokio::test]
+async fn closed_model_stops_when_profile_recovery_timeout_elapses() {
+    let mut context = Context::new();
+    let mut event_log = EventLog::new();
+    let timeout = Duration::from_millis(200);
+
+    run_scenario(
+        &mut context,
+        "load-closed-model-recovery-timeout",
+        move |scenario_context| {
+            Box::pin(async move {
+                // Given four virtual users for 4s with a 200ms budget and work that always fails
+                let profile = LoadProfile::open_model()
+                    .phase(LoadPhase::constant_vus(Duration::from_secs(4), 4))
+                    .recovery(
+                        RecoveryConfig::new(timeout).with_poll_interval(Duration::from_millis(20)),
+                    )
+                    .build()
+                    .expect("profile");
+
+                // When the load runs
+                let started = std::time::Instant::now();
+                let handle = scenario_context
+                    .start_load("vus-failing", profile, || async {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                        Err::<(), &str>("down")
+                    })
+                    .await
+                    .expect("start_load");
+                let error = handle.stop().await.expect_err("recovery budget");
+
+                // Then the users are stopped with the profile timeout long before 4s
+                assert!(
+                    matches!(error, LoadError::RecoveryTimeout { timeout: got } if got == timeout),
+                    "expected the profile recovery timeout, got {error}"
+                );
+                assert!(
+                    started.elapsed() < Duration::from_millis(2500),
+                    "virtual users ignored the recovery timeout ({:?})",
+                    started.elapsed()
+                );
+            })
+        },
+        &mut event_log,
+    )
+    .await
+    .expect("run_scenario");
+}
+
+fn explode() -> Result<(), &'static str> {
+    panic!("virtual user exploded")
+}
+
+#[tokio::test]
+async fn closed_model_panicking_virtual_user_fails_the_run() {
+    let mut context = Context::new();
+    let mut event_log = EventLog::new();
+
+    run_scenario(
+        &mut context,
+        "load-closed-model-panic",
+        |scenario_context| {
+            Box::pin(async move {
+                // Given virtual users whose work panics
+                let profile = LoadProfile::open_model()
+                    .phase(LoadPhase::constant_vus(Duration::from_secs(2), 2))
+                    .build()
+                    .expect("profile");
+
+                // When the load runs
+                let handle = scenario_context
+                    .start_load("vus-panicking", profile, || async { explode() })
+                    .await
+                    .expect("start_load");
+                let result = handle.stop().await;
+
+                // Then the panic is reported instead of being swallowed as a clean run
+                assert!(
+                    matches!(result, Err(LoadError::DriverFailed { .. })),
+                    "expected DriverFailed, got {result:?}"
                 );
             })
         },
@@ -255,6 +513,7 @@ async fn closed_model_shared_runtime_repeats_vu_iterations() {
         "load-closed-model-vus",
         move |scenario_context| {
             Box::pin(async move {
+                // Given four virtual users for 500ms whose work takes 15ms
                 let iterations = Arc::new(AtomicU64::new(0));
                 let profile = LoadProfile::open_model()
                     .phase(LoadPhase::constant_vus(
@@ -266,6 +525,8 @@ async fn closed_model_shared_runtime_repeats_vu_iterations() {
                     .build()
                     .expect("profile");
                 let iterations_for_work = iterations.clone();
+
+                // When the load runs to completion
                 let handle = scenario_context
                     .start_load("vus", profile, move || {
                         let iterations_for_work = iterations_for_work.clone();
@@ -278,6 +539,8 @@ async fn closed_model_shared_runtime_repeats_vu_iterations() {
                     .await
                     .expect("start_load");
                 let metrics = handle.stop().await.expect("closed model finished");
+
+                // Then every iteration was recorded and each user sent more than once
                 let recorded = metrics.successful_operations();
                 let observed = iterations.load(Ordering::SeqCst);
                 assert_eq!(recorded, observed);
@@ -308,6 +571,7 @@ async fn dedicated_runtime_closed_model_fails_before_timeline() {
         "load-closed-model-unsupported-runtime",
         |scenario_context| {
             Box::pin(async move {
+                // Given a closed-model profile that asks for a dedicated runtime
                 let iterations = Arc::new(AtomicU64::new(0));
                 let profile = LoadProfile::open_model()
                     .phase(LoadPhase::constant_vus(Duration::from_secs(2), 2))
@@ -315,7 +579,9 @@ async fn dedicated_runtime_closed_model_fails_before_timeline() {
                     .build()
                     .expect("profile");
                 let iterations_for_work = iterations.clone();
-                match scenario_context
+
+                // When the load is started
+                let result = scenario_context
                     .start_load("vus", profile, move || {
                         let iterations_for_work = iterations_for_work.clone();
                         async move {
@@ -323,16 +589,14 @@ async fn dedicated_runtime_closed_model_fails_before_timeline() {
                             Ok::<(), &str>(())
                         }
                     })
-                    .await
-                {
-                    Err(LoadError::UnsupportedRuntime) => {}
-                    Err(other) => panic!("expected UnsupportedRuntime, got {other}"),
-                    Ok(handle) => {
-                        let metrics = handle.stop().await;
-                        panic!("dedicated runtime returned a handle ({metrics:?})");
-                    }
-                }
+                    .await;
                 tokio::time::sleep(Duration::from_millis(40)).await;
+
+                // Then it is refused and no virtual user ever ran
+                assert!(
+                    matches!(result, Err(LoadError::UnsupportedRuntime)),
+                    "expected UnsupportedRuntime"
+                );
                 assert_eq!(
                     iterations.load(Ordering::SeqCst),
                     0,

@@ -182,20 +182,32 @@ fn warmup_invalid_rate_rejected() {
 }
 
 #[test]
-fn recovery_timeout_round_trips_on_the_profile() {
-    let configured = Duration::from_millis(250);
+fn recovery_budget_round_trips_on_the_profile() {
+    // Given a profile built with an explicit recovery budget
+    let configured = RecoveryConfig::new(Duration::from_millis(250)).with_error_rate_threshold(0.2);
+
+    // When the profile is built
     let profile = LoadProfile::open_model()
         .phase(Phase::constant_vus(Duration::from_millis(10), 2))
-        .recovery(RecoveryConfig::new(configured))
+        .recovery(configured.clone())
         .build()
         .expect("profile with recovery budget");
-    assert_eq!(profile.recovery().timeout, configured);
 
-    let defaulted = LoadProfile::open_model()
+    // Then the profile exposes exactly that budget
+    assert_eq!(profile.recovery(), Some(&configured));
+}
+
+#[test]
+fn recovery_budget_is_opt_in() {
+    // Given a profile built without calling `recovery`
+    // When the profile is built
+    let profile = LoadProfile::open_model()
         .phase(Phase::pause(Duration::from_millis(1)))
         .build()
         .expect("default profile");
-    assert_eq!(defaulted.recovery().timeout, Duration::from_secs(60));
+
+    // Then the driver has no budget to enforce
+    assert_eq!(profile.recovery(), None);
 }
 
 #[test]
