@@ -136,6 +136,8 @@
 // re-exports that are absent under `cargo doc`'s default feature set. Fixing every link for every
 // feature matrix is not practical; keep rustdoc warning-clean for the common doc build.
 #![allow(rustdoc::broken_intra_doc_links, rustdoc::private_intra_doc_links)]
+// `async_trait` puts a bare `#[must_use]` on the boxed future, which Clippy also treats as must-use.
+#![allow(clippy::double_must_use)]
 
 mod docker_labels;
 
