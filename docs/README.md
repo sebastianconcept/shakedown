@@ -10,7 +10,7 @@ Start here depending on what you need:
 | `#[shakedown::test]` and related macros | [crates/macros/README.md](../crates/macros/README.md) |
 | How this workspace organizes code | [code-organization-guide.md](code-organization-guide.md) |
 | API reference | [docs.rs/shakedown](https://docs.rs/shakedown) |
-| Walkthrough tutorial | [shakedown.dev/guide](https://shakedown.dev/guide) |
+| Walkthrough tutorial | This repository’s [README](../README.md). `https://shakedown.dev/guide` is a coming-soon page. |
 
 ## What lives in this repo
 
